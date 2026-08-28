@@ -1,0 +1,20 @@
+{
+  "name": "@aai/provider-compatible",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aai/ai-core": "workspace:*",
+    "@aai/provider-openai": "workspace:*",
+    "@aai/provider-xai": "workspace:*",
+    "@aai/shared-schemas": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

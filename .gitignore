@@ -1,0 +1,14 @@
+node_modules/
+.next/
+dist/
+.turbo/
+*.tsbuildinfo
+.env
+.env.local
+/data/
+*.db
+*.db-wal
+*.db-shm
+coverage/
+.DS_Store
+packages/render-engine/assets/fonts/
