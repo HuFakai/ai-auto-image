@@ -11,6 +11,8 @@ export interface RenderSlideInput {
   pageCount: number;
   /** 确定性模式下的视觉层（AI 生成图），作为背景叠加文字 */
   visualImageBase64?: string | undefined;
+  /** Brand Kit Logo（PNG 透明底，页脚展示） */
+  logoBase64?: string | undefined;
 }
 
 interface Element {
@@ -239,11 +241,37 @@ function footer(input: RenderSlideInput, pageCount: number): Element {
         alignItems: "center",
       },
       children: [
-        text("AI 图文工坊 · 知识卡片", {
-          display: "flex",
-          fontSize: Math.round(width * 0.028),
-          color: c.muted,
-        }),
+        {
+          type: "div",
+          props: {
+            style: { display: "flex", alignItems: "center" },
+            children: [
+              ...(input.logoBase64
+                ? [
+                    {
+                      type: "img",
+                      props: {
+                        src: `data:image/png;base64,${input.logoBase64}`,
+                        width: Math.round(width * 0.05),
+                        height: Math.round(width * 0.05),
+                        style: {
+                          width: Math.round(width * 0.05),
+                          height: Math.round(width * 0.05),
+                          objectFit: "contain",
+                          marginRight: Math.round(width * 0.015),
+                        },
+                      },
+                    },
+                  ]
+                : []),
+              text("AI 图文工坊 · 知识卡片", {
+                display: "flex",
+                fontSize: Math.round(width * 0.028),
+                color: c.muted,
+              }),
+            ],
+          },
+        },
         text(`${input.slide.index + 1} / ${pageCount}`, {
           display: "flex",
           fontSize: Math.round(width * 0.028),

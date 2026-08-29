@@ -1,5 +1,16 @@
 import type { CreateRunInput, RunStatus, TextRenderingMode } from "@aai/shared-schemas";
 
+/** Brand Kit 视图（客户端安全） */
+export interface BrandKitView {
+  id: string;
+  name: string;
+  themeId: string;
+  styleKeywords: string[];
+  negativeKeywords: string[];
+  logoAssetId: string | null;
+  builtIn: boolean;
+}
+
 /** 渠道视图（密钥已脱敏，客户端安全） */
 export interface ChannelView {
   id: string;
@@ -24,6 +35,7 @@ export interface RunListItem {
   topic: string;
   status: RunStatus;
   mode: TextRenderingMode;
+  reviewStatus: "pending" | "approved" | "rejected";
   createdAt: number;
   pageCount: number;
 }
@@ -37,11 +49,15 @@ export interface RunDetailPage {
   mode?: string | undefined;
   expectedCopy?: string[] | undefined;
   visualCheckPassed?: boolean | undefined;
+  /** 当前版本号（返修后 >1） */
+  revision?: number | undefined;
 }
 
 export interface RunDetailPayload {
   runId: string;
   status: RunStatus;
+  reviewStatus: "pending" | "approved" | "rejected";
+  reviewNote: string | null;
   errorSummary: string | null;
   createdAt: number;
   input: CreateRunInput;

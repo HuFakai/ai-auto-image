@@ -9,18 +9,21 @@ import {
   newAssetId,
   newAssetRelationId,
   newAttemptId,
+  newBrandKitId,
   newChannelId,
   newJobEventId,
   newJobId,
   newNodeRunId,
   newProjectId,
   newPromptVersionId,
+  newRevisionId,
   newRunId,
   newUsageId,
 } from "./ids";
 import {
   assetRelations,
   assets,
+  brandKits,
   channels,
   jobEvents,
   jobs,
@@ -29,6 +32,7 @@ import {
   promptVersions,
   providerAttempts,
   providerUsages,
+  revisions,
   workflowRuns,
 } from "./schema";
 
@@ -177,12 +181,26 @@ export class RunRepo {
       .run();
   }
 
+  /** 覆写节点输出（例如返修后同步 Storyboard 文案） */
+  setNodeOutput(id: string, outputRef: string) {
+    this.db.update(nodeRuns).set({ outputRef }).where(eq(nodeRuns.id, id)).run();
+  }
+
   failNode(id: string, category: ProviderErrorCategory | "internal", summary: string) {
     this.db
       .update(nodeRuns)
       .set({ status: "failed", finishedAt: now(), errorCategory: category, errorSummary: summary })
       .where(eq(nodeRuns.id, id))
       .run();
+  }
+
+  setReview(id: string, status: "pending" | "approved" | "rejected", note?: string) {
+    this.db
+      .update(workflowRuns)
+      .set({ reviewStatus: status, reviewNote: note ?? null, reviewedAt: now(), updatedAt: now() })
+      .where(eq(workflowRuns.id, id))
+      .run();
+    return this.require(id);
   }
 
   /** 汇总一次 Run 的费用与用量 */
@@ -294,6 +312,49 @@ export class AssetRepo {
       .all();
   }
 
+  /** 指定 Run 某页的当前资产（未被替代的最新一张，kind 为 generated/composite） */
+  latestForPage(runId: string, pageIndex: number) {
+    const rows = this.db
+      .select()
+      .from(assets)
+      .where(
+        and(
+          eq(assets.runId, runId),
+          eq(assets.pageIndex, pageIndex),
+          sql`${assets.supersededAt} IS NULL`,
+        ),
+      )
+      .orderBy(sql`${assets.createdAt} DESC`)
+      .limit(1)
+      .all();
+    return rows[0];
+  }
+
+  /** 该页历史版本数（用于新文件命名 v{n}） */
+  pageVersionCount(runId: string, pageIndex: number): number {
+    const row = this.db
+      .select({ n: sql<number>`count(*)` })
+      .from(assets)
+      .where(and(eq(assets.runId, runId), eq(assets.pageIndex, pageIndex)))
+      .get();
+    return row?.n ?? 0;
+  }
+
+  /** 整页废弃：该页所有未替代资产标记 superseded */
+  supersedePage(runId: string, pageIndex: number): void {
+    this.db
+      .update(assets)
+      .set({ supersededAt: now() })
+      .where(
+        and(
+          eq(assets.runId, runId),
+          eq(assets.pageIndex, pageIndex),
+          sql`${assets.supersededAt} IS NULL`,
+        ),
+      )
+      .run();
+  }
+
   linkRelation(assetId: string, relatedAssetId: string, relation: string) {
     this.db
       .insert(assetRelations)
@@ -388,6 +449,7 @@ export interface CreateJobInput {
   runId?: string | undefined;
   idempotencyKey?: string | undefined;
   maxAttempts?: number;
+  payloadJson?: string | undefined;
 }
 
 export class JobRepo {
@@ -421,6 +483,7 @@ export class JobRepo {
         kind: input.kind,
         runId: input.runId ?? null,
         status: "queued",
+        payloadJson: input.payloadJson ?? null,
         idempotencyKey: input.idempotencyKey ?? null,
         maxAttempts: input.maxAttempts ?? 3,
         lastProgressAt: ts,
@@ -659,5 +722,132 @@ export class ChannelRepo {
         tx.update(channels).set({ sortOrder: index + 1, updatedAt: ts }).where(eq(channels.id, id)).run();
       });
     });
+  }
+}
+
+
+/* ── Revisions（单页返修版本链）────────────────────────────────── */
+
+export class RevisionRepo {
+  constructor(private readonly db: Db) {}
+
+  create(input: {
+    runId: string;
+    pageIndex: number;
+    kind: string;
+    payloadJson?: string | undefined;
+    assetId?: string | undefined;
+  }) {
+    const id = newRevisionId();
+    this.db
+      .insert(revisions)
+      .values({
+        id,
+        runId: input.runId,
+        pageIndex: input.pageIndex,
+        kind: input.kind,
+        payloadJson: input.payloadJson ?? null,
+        assetId: input.assetId ?? null,
+        createdAt: now(),
+      })
+      .run();
+    return this.require(id);
+  }
+
+  require(id: string) {
+    const row = this.db.select().from(revisions).where(eq(revisions.id, id)).get();
+    if (!row) throw new Error(`revision not found: ${id}`);
+    return row;
+  }
+
+  listByPage(runId: string, pageIndex: number) {
+    return this.db
+      .select()
+      .from(revisions)
+      .where(and(eq(revisions.runId, runId), eq(revisions.pageIndex, pageIndex)))
+      .orderBy(sql`${revisions.createdAt} ASC`)
+      .all();
+  }
+}
+
+/* ── Brand Kits ───────────────────────────────────────────────── */
+
+export interface BrandKitRow {
+  name: string;
+  themeId: string;
+  styleKeywords: string[];
+  negativeKeywords: string[];
+  logoAssetId?: string | null;
+  builtIn?: number;
+}
+
+export class BrandKitRepo {
+  constructor(private readonly db: Db) {}
+
+  create(input: BrandKitRow) {
+    const id = newBrandKitId();
+    const ts = now();
+    this.db
+      .insert(brandKits)
+      .values({
+        id,
+        name: input.name,
+        themeId: input.themeId,
+        styleKeywordsJson: JSON.stringify(input.styleKeywords),
+        negativeKeywordsJson: JSON.stringify(input.negativeKeywords),
+        logoAssetId: input.logoAssetId ?? null,
+        builtIn: input.builtIn ?? 0,
+        createdAt: ts,
+        updatedAt: ts,
+      })
+      .run();
+    return this.require(id);
+  }
+
+  require(id: string) {
+    const row = this.db.select().from(brandKits).where(eq(brandKits.id, id)).get();
+    if (!row) throw new Error(`brand kit not found: ${id}`);
+    return row;
+  }
+
+  list() {
+    return this.db.select().from(brandKits).orderBy(sql`${brandKits.createdAt} ASC`).all();
+  }
+
+  count(): number {
+    const row = this.db.select({ n: sql<number>`count(*)` }).from(brandKits).get();
+    return row?.n ?? 0;
+  }
+
+  update(id: string, patch: Partial<BrandKitRow>) {
+    const set: Record<string, unknown> = { updatedAt: now() };
+    if (patch.name !== undefined) set.name = patch.name;
+    if (patch.themeId !== undefined) set.themeId = patch.themeId;
+    if (patch.styleKeywords !== undefined) set.styleKeywordsJson = JSON.stringify(patch.styleKeywords);
+    if (patch.negativeKeywords !== undefined) set.negativeKeywordsJson = JSON.stringify(patch.negativeKeywords);
+    if (patch.logoAssetId !== undefined) set.logoAssetId = patch.logoAssetId;
+    this.db.update(brandKits).set(set).where(eq(brandKits.id, id)).run();
+    return this.require(id);
+  }
+
+  delete(id: string): void {
+    this.db.delete(brandKits).where(eq(brandKits.id, id)).run();
+  }
+
+  /** 首次启动播种六套内置主题（幂等：仅在表为空时） */
+  seedBuiltIns(): number {
+    if (this.count() > 0) return 0;
+    const built: Array<[string, string, string[]]> = [
+      ["暗房工作室", "darkroom", ["深色背景", "琥珀色点缀", "胶片质感"]],
+      ["纸感极简", "paper_minimal", ["米白纸底", "大量留白", "细线分隔"]],
+      ["高对比营销", "high_contrast", ["纯黑背景", "高饱和强调色", "大字冲击"]],
+      ["莫兰迪生活", "morandi", ["低饱和灰调", "柔和光线", "生活场景"]],
+      ["科技深色", "tech_dark", ["深蓝科技感", "发光线条", "未来感"]],
+      ["图书纸张", "book_paper", ["暖纸质感", "书卷气", "柔和阴影"]],
+    ];
+    for (const [name, themeId, keywords] of built) {
+      this.create({ name, themeId, styleKeywords: keywords, negativeKeywords: [], builtIn: 1 });
+    }
+    return built.length;
   }
 }

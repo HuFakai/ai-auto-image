@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "echo \"web: no unit tests (covered by packages)\" && exit 0"
+    "test": "vitest run"
   },
   "dependencies": {
     "@aai/ai-core": "workspace:*",
@@ -23,7 +23,8 @@
     "next": "^15.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "sharp": "^0.34.0"
+    "sharp": "^0.34.0",
+    "zod": "^4.1.5"
   },
   "devDependencies": {
     "@aai/config": "workspace:*",
@@ -34,6 +35,7 @@
     "eslint": "^9.30.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0",
-    "typescript-eslint": "^8.35.0"
+    "typescript-eslint": "^8.35.0",
+    "vitest": "^3.2.0"
   }
 }

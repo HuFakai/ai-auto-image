@@ -32,6 +32,9 @@ export const workflowRuns = sqliteTable(
     inputJson: text("input_json").notNull(),
     snapshotJson: text("snapshot_json"),
     errorSummary: text("error_summary"),
+    reviewStatus: text("review_status").notNull().default("pending"),
+    reviewNote: text("review_note"),
+    reviewedAt: integer("reviewed_at"),
     createdAt: createdAt(),
     updatedAt: integer("updated_at").notNull(),
     startedAt: integer("started_at"),
@@ -101,6 +104,7 @@ export const assets = sqliteTable(
     bytes: integer("bytes").notNull().default(0),
     checksum: text("checksum"),
     metadataJson: text("metadata_json"),
+    supersededAt: integer("superseded_at"),
     createdAt: createdAt(),
   },
   (t) => [index("idx_assets_run").on(t.runId)],
@@ -174,6 +178,7 @@ export const jobs = sqliteTable(
       onDelete: "cascade",
     }),
     status: text("status").notNull().default("queued"),
+    payloadJson: text("payload_json"),
     idempotencyKey: text("idempotency_key"),
     attempts: integer("attempts").notNull().default(0),
     recoveries: integer("recoveries").notNull().default(0),
@@ -234,7 +239,39 @@ export const jobEvents = sqliteTable(
   (t) => [index("idx_job_events_job").on(t.jobId)],
 );
 
+/** 单页返修版本链：保留每次返修的输入与产物 */
+export const revisions = sqliteTable(
+  "revisions",
+  {
+    id: text("id").primaryKey(),
+    runId: text("run_id")
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: "cascade" }),
+    pageIndex: integer("page_index").notNull(),
+    kind: text("kind").notNull(),
+    payloadJson: text("payload_json"),
+    assetId: text("asset_id").references(() => assets.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("idx_revisions_run_page").on(t.runId, t.pageIndex)],
+);
+
+/** 品牌手册：主题、风格关键词与 Logo */
+export const brandKits = sqliteTable("brand_kits", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  themeId: text("theme_id").notNull().default("darkroom"),
+  styleKeywordsJson: text("style_keywords_json").notNull().default("[]"),
+  negativeKeywordsJson: text("negative_keywords_json").notNull().default("[]"),
+  logoAssetId: text("logo_asset_id"),
+  builtIn: integer("built_in").notNull().default(0),
+  createdAt: createdAt(),
+  updatedAt: integer("updated_at").notNull(),
+});
+
 export type Channel = typeof channels.$inferSelect;
+export type BrandKit = typeof brandKits.$inferSelect;
+export type Revision = typeof revisions.$inferSelect;
 
 export const workflowRunsRelations = relations(workflowRuns, ({ many }) => ({
   nodeRuns: many(nodeRuns),

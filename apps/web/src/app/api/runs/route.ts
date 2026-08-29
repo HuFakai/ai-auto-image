@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { BrandKitConfig, ThemeId } from "@aai/shared-schemas";
 import { CreateRunInputSchema } from "@aai/shared-schemas";
 import { getRuntime } from "@/server/runtime";
 import { listRunItems } from "@/server/run-views";
@@ -7,17 +8,34 @@ import type { RunListItem } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  let body: unknown;
+  let body: Record<string, unknown>;
   try {
-    body = await request.json();
+    body = (await request.json()) as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  const parsed = CreateRunInputSchema.safeParse(body);
+  // Brand Kit：按 id 解析配置快照（创建时冻结进 run input）
+  const brandKitId = typeof body.brandKitId === "string" ? body.brandKitId : undefined;
+  let brandKit: BrandKitConfig | undefined;
+  if (brandKitId) {
+    try {
+      const kit = getRuntime().brandKitRepo.require(brandKitId);
+      brandKit = {
+        themeId: kit.themeId as ThemeId,
+        styleKeywords: JSON.parse(kit.styleKeywordsJson) as string[],
+        negativeKeywords: JSON.parse(kit.negativeKeywordsJson) as string[],
+        logoAssetId: kit.logoAssetId ?? undefined,
+      };
+    } catch {
+      return NextResponse.json({ error: "brand kit not found" }, { status: 400 });
+    }
+  }
+
+  const parsed = CreateRunInputSchema.safeParse({ ...body, ...(brandKit ? { brandKit } : {}) });
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "invalid input", issues: parsed.error.issues.slice(0, 5) },
+      { error: "invalid input", issues: parsed.error.issues.slice(0, 6) },
       { status: 400 },
     );
   }
@@ -30,7 +48,6 @@ export async function POST(request: Request) {
   const { job } = runtime.jobRepo.createOrReuse({
     kind: "knowledge_card_run",
     runId: run.id,
-    // 幂等键：同一 Run 的生成操作天然幂等
     idempotencyKey: `knowledge_card:${run.id}`,
     maxAttempts: 3,
   });

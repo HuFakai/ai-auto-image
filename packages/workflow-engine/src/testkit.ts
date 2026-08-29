@@ -9,6 +9,7 @@ import {
   ProjectRepo,
   PromptRepo,
   ProviderRepo,
+  RevisionRepo,
   RunRepo,
   openDatabase,
   type OpenDatabase,
@@ -17,11 +18,14 @@ import { createMockProvider, type MockProviderOptions } from "@aai/provider-mock
 import { CreateRunInputSchema, type CreateRunInput } from "@aai/shared-schemas";
 import { JobRunner } from "./job-runner";
 import { registerKnowledgeCardPipeline, type WorkflowDeps } from "./pipeline/knowledge-cards";
+import { registerPageRegenPipeline, type PageRegenDeps } from "./pipeline/page-regen";
 
 /** 评测与集成测试共用的流水线装置：内存 SQLite + Mock Provider + 临时目录 */
 export interface Harness {
   db: OpenDatabase;
   deps: WorkflowDeps;
+  pageRegenDeps: PageRegenDeps;
+  revisionRepo: RevisionRepo;
   jobRepo: JobRepo;
   runRepo: RunRepo;
   projectRepo: ProjectRepo;
@@ -61,9 +65,26 @@ export function createHarness(options: { mock?: MockProviderOptions } = {}): Har
     templateVersion: "darkroom-knowledge@1",
   };
 
+  const revisionRepo = new RevisionRepo(db.db);
+  const pageRegenDeps: PageRegenDeps = {
+    runRepo: deps.runRepo,
+    jobRepo: deps.jobRepo,
+    assetRepo: deps.assetRepo,
+    providerRepo: deps.providerRepo,
+    revisionRepo,
+    assetStore: deps.assetStore,
+    imageRoutes: deps.imageRoutes,
+    imageApiSemaphore: deps.imageApiSemaphore,
+    postprocessMax: deps.postprocessMax,
+    assetsDir: assetsRoot,
+    visualQuality: mock.bundle.visualQuality,
+  };
+
   return {
     db,
     deps,
+    pageRegenDeps,
+    revisionRepo,
     jobRepo: deps.jobRepo,
     runRepo: deps.runRepo,
     projectRepo: new ProjectRepo(db.db),
@@ -83,6 +104,7 @@ export function disposeHarness(harness: Harness): void {
 export function startEvalRunner(harness: Harness): JobRunner {
   const runner = new JobRunner(harness.jobRepo, { pollIntervalMs: 10, holder: "eval-runner" });
   registerKnowledgeCardPipeline(runner, harness.deps);
+  registerPageRegenPipeline(runner, harness.pageRegenDeps);
   runner.start();
   return runner;
 }

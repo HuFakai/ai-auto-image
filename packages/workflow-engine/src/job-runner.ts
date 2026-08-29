@@ -146,6 +146,16 @@ export class JobRunner {
     handler: JobHandler,
     controller: AbortController,
   ): Promise<void> {
+    // 心跳续租是 Runner 的职责：慢调用（分钟级推理）期间租约绝不意外过期，
+    // 否则其他 runner 实例会把任务误判为孤儿并重复执行
+    const heartbeat = setInterval(() => {
+      try {
+        this.jobRepo.renewLease(jobId, this.holder, this.leaseMs);
+      } catch {
+        /* 下一轮心跳重试 */
+      }
+    }, Math.max(5_000, Math.floor(this.leaseMs / 3)));
+
     try {
       await handler({
         jobId,
@@ -164,6 +174,8 @@ export class JobRunner {
       this.jobRepo.updateStatus(jobId, retry ? "retry_waiting" : "failed", { lastError: message.slice(0, 500) });
       this.jobRepo.appendEvent(jobId, retry ? "retry_scheduled" : "failed", message.slice(0, 500));
       logger.error("job failed", { jobId, retry, error: message.slice(0, 500) });
+    } finally {
+      clearInterval(heartbeat);
     }
   }
 }

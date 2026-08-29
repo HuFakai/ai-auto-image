@@ -1,14 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Semaphore, type VisualQualityModel } from "@aai/ai-core";
+import { Semaphore, type TextModel, type VisualQualityModel } from "@aai/ai-core";
 import {
   AssetRepo,
   AssetStore,
+  BrandKitRepo,
   ChannelRepo,
   JobRepo,
   ProjectRepo,
   PromptRepo,
   ProviderRepo,
+  RevisionRepo,
   RunRepo,
   openDatabase,
   type OpenDatabase,
@@ -16,6 +18,7 @@ import {
 import {
   JobRunner,
   registerKnowledgeCardPipeline,
+  registerPageRegenPipeline,
   type ImageRoute,
   type TextRoute,
 } from "@aai/workflow-engine";
@@ -93,11 +96,15 @@ export interface Runtime {
   providerRepo: ProviderRepo;
   channelRepo: ChannelRepo;
   channelService: ChannelService;
+  brandKitRepo: BrandKitRepo;
+  revisionRepo: RevisionRepo;
   assetStore: AssetStore;
   imageApiSemaphore: Semaphore;
   runner: JobRunner;
   /** 重新从数据库装配渠道路由（渠道增删改、启停、排序后调用） */
   refreshChannels(): void;
+  /** 导出文案等附加能力使用的首选文本模型（未配置时 null） */
+  preferredTextModel(): TextModel | null;
   /** 计算某次请求的有效并发（min(requested, serverMax, providerMax)） */
   effectiveConcurrency(requested: number): number;
 }
@@ -120,6 +127,13 @@ export function getRuntime(): Runtime {
 
   const db = openDatabase({ sqlitePath, migrationsFolder: resolveMigrationsDir() });
   const channelService = new ChannelService(new ChannelRepo(db.db), dataDir);
+  const brandKitRepo = new BrandKitRepo(db.db);
+  const seededKits = brandKitRepo.seedBuiltIns();
+  if (seededKits > 0) {
+    console.log(
+      JSON.stringify({ ts: new Date().toISOString(), level: "info", msg: `seeded ${seededKits} built-in brand kits` }),
+    );
+  }
   // 渠道表为空且环境变量有配置时自动导入一次（之后以设置页管理为准）
   const imported = autoImportFromEnv(channelService);
   if (imported > 0) {
@@ -156,6 +170,8 @@ export function getRuntime(): Runtime {
     providerRepo: new ProviderRepo(db.db),
     channelRepo: new ChannelRepo(db.db),
     channelService,
+    brandKitRepo,
+    revisionRepo: new RevisionRepo(db.db),
     assetStore: new AssetStore(assetsDir),
     imageApiSemaphore: new Semaphore(serverMaxConcurrency),
     runner: new JobRunner(new JobRepo(db.db), {
@@ -173,6 +189,9 @@ export function getRuntime(): Runtime {
           ...(providerMax.length > 0 ? [Math.min(...providerMax)] : []),
         ),
       );
+    },
+    preferredTextModel(): TextModel | null {
+      return pipelineDeps.textRoutes[0]?.text ?? null;
     },
     refreshChannels(): void {
       const assembled = channelService.assembleRoutes();
@@ -222,6 +241,30 @@ export function getRuntime(): Runtime {
     assetsDir,
     exportsDir,
     templateVersion: "darkroom-knowledge@1",
+  });
+
+  registerPageRegenPipeline(runtime.runner, {
+    runRepo: runtime.runRepo,
+    jobRepo: runtime.jobRepo,
+    assetRepo: runtime.assetRepo,
+    providerRepo: runtime.providerRepo,
+    revisionRepo: runtime.revisionRepo,
+    assetStore: runtime.assetStore,
+    get imageRoutes() {
+      return pipelineDeps.imageRoutes;
+    },
+    set imageRoutes(routes) {
+      pipelineDeps.imageRoutes = routes;
+    },
+    imageApiSemaphore: runtime.imageApiSemaphore,
+    postprocessMax,
+    assetsDir,
+    get visualQuality() {
+      return pipelineDeps.visualQuality;
+    },
+    set visualQuality(model) {
+      pipelineDeps.visualQuality = model;
+    },
   });
 
   runtime.refreshChannels();

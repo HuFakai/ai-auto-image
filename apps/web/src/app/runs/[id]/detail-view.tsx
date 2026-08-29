@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { RunDetailPayload, RunDetailPage } from "@/lib/types";
+import type { RunDetailPage, RunDetailPayload } from "@/lib/types";
 
 const nodeLabels: Record<string, string> = {
   "parse-input": "解析输入",
@@ -41,6 +41,8 @@ function runStamp(status: string): { text: string; className: string } {
 export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
   const [detail, setDetail] = useState(initial);
   const [cancelling, setCancelling] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [editingPage, setEditingPage] = useState<number | null>(null);
 
   const active = detail.status === "running" || detail.status === "queued";
 
@@ -54,9 +56,13 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
   }, [initial.runId]);
 
   useEffect(() => {
-    const timer = setInterval(refresh, active ? 3000 : 15000);
+    if (active || editingPage !== null) {
+      const timer = setInterval(refresh, 3000);
+      return () => clearInterval(timer);
+    }
+    const timer = setInterval(refresh, 15000);
     return () => clearInterval(timer);
-  }, [active, refresh]);
+  }, [active, editingPage, refresh]);
 
   async function cancel() {
     if (cancelling) return;
@@ -66,9 +72,27 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
     setCancelling(false);
   }
 
+  function exportZip() {
+    if (exporting) return;
+    setExporting(true);
+    // 下载由浏览器处理；按钮短暂禁用防重复
+    window.location.assign(`/api/runs/${initial.runId}/export`);
+    setTimeout(() => setExporting(false), 2500);
+  }
+
+  async function review(status: "approved" | "rejected") {
+    await fetch(`/api/runs/${initial.runId}/review`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    await refresh();
+  }
+
   const readyCount = detail.pages.filter((page) => page.status === "ready").length;
   const failedCount = detail.pages.filter((page) => page.status === "failed").length;
   const stamp = runStamp(detail.status);
+  const isDeterministic = detail.input.textRenderingMode === "deterministic";
 
   return (
     <div className="space-y-12 pt-10">
@@ -91,21 +115,48 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         </h1>
         <p className="mt-3 font-mono text-xs text-ink-soft">
           {detail.input.aspectRatio} · {detail.input.platform} ·{" "}
-          {detail.input.textRenderingMode === "native" ? "原生中文" : "确定性排版"}
+          {isDeterministic ? "确定性排版" : "原生中文"}
           {detail.concurrency
             ? ` · 并发 ${detail.concurrency.effective}（请求 ${detail.concurrency.requested} / 上限 ${detail.concurrency.serverMax}）`
             : ""}
           {active ? ` · ${readyCount}/${detail.pages.length || "?"}` : ""}
         </p>
-        {active && (
-          <button
-            className="btn-ghost mt-4 px-4 py-1.5 font-mono text-xs"
-            onClick={() => void cancel()}
-            disabled={cancelling}
-          >
-            {cancelling ? "作废中…" : "作废本次运行"}
-          </button>
-        )}
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {active ? (
+            <button
+              className="btn-ghost px-4 py-1.5 font-mono text-xs"
+              onClick={() => void cancel()}
+              disabled={cancelling}
+            >
+              {cancelling ? "作废中…" : "作废本次运行"}
+            </button>
+          ) : detail.status === "succeeded" ? (
+            <>
+              <button className="btn-ink px-5 py-2 font-mono text-xs tracking-[0.15em]" onClick={exportZip} disabled={exporting}>
+                {exporting ? "装订中…" : "导出 ZIP（图片 + 发布文案）"}
+              </button>
+              {detail.reviewStatus !== "approved" && (
+                <button className="btn-ghost px-4 py-2 font-mono text-xs hover:!border-seal hover:!text-seal" onClick={() => void review("approved")}>
+                  评审通过
+                </button>
+              )}
+              {detail.reviewStatus !== "rejected" && (
+                <button
+                  className="btn-ghost px-4 py-2 font-mono text-xs"
+                  onClick={() => void review("rejected")}
+                >
+                  评审驳回
+                </button>
+              )}
+              {detail.reviewStatus !== "pending" && (
+                <span className="font-mono text-[11px] text-ink-faint">
+                  当前评审：{detail.reviewStatus === "approved" ? "已通过" : "已驳回"}
+                  {detail.reviewNote ? ` · ${detail.reviewNote}` : ""}
+                </span>
+              )}
+            </>
+          ) : null}
+        </div>
       </section>
 
       {/* 工序目录 */}
@@ -115,15 +166,12 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         </div>
         <div className="grid grid-cols-2 gap-x-8 gap-y-0 sm:grid-cols-3">
           {nodeOrder
-            .filter((name) => name !== "render-slides" || detail.input.textRenderingMode === "deterministic")
+            .filter((name) => name !== "render-slides" || isDeterministic)
             .map((name, index) => {
               const node = detail.nodes.find((n) => n.nodeName === name);
               const status = node?.status ?? "pending";
               return (
-                <div
-                  key={name}
-                  className="flex items-baseline justify-between border-b border-line py-2.5"
-                >
+                <div key={name} className="flex items-baseline justify-between border-b border-line py-2.5">
                   <span className="text-sm">
                     <span className="mr-2 font-mono text-[11px] text-ink-faint">
                       {String(index + 1).padStart(2, "0")}
@@ -158,17 +206,29 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         </p>
       )}
 
-      {/* 页面画廊：相纸 */}
+      {/* 页面画廊 */}
       <section className="rise" style={{ animationDelay: "120ms" }}>
         <div className="rule-double mb-5 flex items-baseline justify-between pt-2">
           <h2 className="font-display text-lg font-bold">页面</h2>
           <span className="kicker">
             {readyCount} 已成{failedCount > 0 ? ` · ${failedCount} 失败` : ""}
+            {detail.pages.some((p) => (p.revision ?? 1) > 1) ? " · 含返修版本" : ""}
           </span>
         </div>
         <div className="grid grid-cols-1 gap-7 sm:grid-cols-2 lg:grid-cols-3">
           {detail.pages.map((page, index) => (
-            <PageFrame key={page.index} page={page} no={index + 1} />
+            <PageFrame
+              key={page.index}
+              page={page}
+              no={index + 1}
+              isDeterministic={isDeterministic}
+              editing={editingPage === page.index}
+              onToggleEdit={() => setEditingPage(editingPage === page.index ? null : page.index)}
+              onDone={async () => {
+                setEditingPage(null);
+                await refresh();
+              }}
+            />
           ))}
           {detail.pages.length === 0 && detail.status !== "failed" && (
             <p className="col-span-full border border-dashed border-line-dark px-6 py-12 text-center text-sm text-ink-faint">
@@ -186,11 +246,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           <Metric label="COST (USD)" value={`$${detail.totals.costUsd.toFixed(4)}`} />
           <Metric
             label="JOB"
-            value={
-              detail.job
-                ? `${detail.job.status} · 试 ${detail.job.attempts} · 复 ${detail.job.recoveries}`
-                : "—"
-            }
+            value={detail.job ? `${detail.job.status} · 试 ${detail.job.attempts} · 复 ${detail.job.recoveries}` : "—"}
           />
         </div>
       </section>
@@ -207,26 +263,45 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function PageFrame({ page, no }: { page: RunDetailPage; no: number }) {
+function PageFrame({
+  page,
+  no,
+  isDeterministic,
+  editing,
+  onToggleEdit,
+  onDone,
+}: {
+  page: RunDetailPage;
+  no: number;
+  isDeterministic: boolean;
+  editing: boolean;
+  onToggleEdit: () => void;
+  onDone: () => Promise<void>;
+}) {
   if (page.status === "ready" && page.assetId) {
+    const revised = (page.revision ?? 1) > 1;
     return (
-      <figure className="photo-frame frame-ready p-2.5 pb-0">
-        <img
-          src={`/api/assets/${page.assetId}`}
-          alt={`第 ${no} 页：${page.headline}`}
-          className="w-full border border-line/60"
-        />
+      <figure className="photo-frame p-2.5 pb-0">
+        <div className={revised ? "" : "frame-ready"}>
+          <img
+            src={`/api/assets/${page.assetId}`}
+            alt={`第 ${no} 页：${page.headline}`}
+            className="w-full border border-line/60"
+          />
+        </div>
         <figcaption className="flex items-center justify-between px-1 py-2.5">
           <span className="font-mono text-[10px] text-ink-faint">
             图{String(no).padStart(2, "0")} · {page.role}
+            {revised ? ` · 第${page.revision}版` : ""}
           </span>
-          <span className="truncate pl-2 text-xs text-ink-soft">{page.headline}</span>
-          {page.mode === "native" && page.visualCheckPassed === false && (
-            <span className="font-mono text-[10px] text-seal" title="文字审查未通过：可单页重试或切换确定性渲染">
-              字⚠
-            </span>
-          )}
+          <span className="truncate px-2 text-xs text-ink-soft">{page.headline}</span>
+          <button className="btn-ghost shrink-0 px-2 py-0.5 font-mono text-[10px]" onClick={onToggleEdit}>
+            {editing ? "收起" : "返修"}
+          </button>
         </figcaption>
+        {editing && (
+          <RegenPanel page={page} no={no} isDeterministic={isDeterministic} onDone={onDone} />
+        )}
       </figure>
     );
   }
@@ -248,6 +323,120 @@ function PageFrame({ page, no }: { page: RunDetailPage; no: number }) {
       </span>
       <p className="truncate px-4 text-xs text-ink-soft">{page.headline}</p>
       <span className="font-mono text-[10px] tracking-[0.3em] text-seal/70">制中…</span>
+    </div>
+  );
+}
+
+/** 返修面板：改文案 → deterministic 免费重排 / native 或强改画面时重新出图（提示费用） */
+function RegenPanel({
+  page,
+  no,
+  isDeterministic,
+  onDone,
+}: {
+  page: RunDetailPage;
+  no: number;
+  isDeterministic: boolean;
+  onDone: () => Promise<void>;
+}) {
+  const [headline, setHeadline] = useState(page.headline);
+  const [bodyText, setBodyText] = useState((page.expectedCopy ?? []).slice(1).join("\n"));
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const copyChanged = headline !== page.headline || bodyText !== (page.expectedCopy ?? []).slice(1).join("\n");
+
+  async function rerender() {
+    if (busy) return;
+    setBusy("rerender");
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/runs/${pageAssetScope}/pages/${page.index}/rerender`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ headline, body: bodyText.split("\n").map((l) => l.trim()).filter(Boolean) }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      await onDone();
+      setMessage("已重新排版。");
+    } catch (caught) {
+      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function regenerate() {
+    if (busy) return;
+    setBusy("regen");
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/runs/${pageAssetScope}/pages/${page.index}/regenerate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          headline,
+          body: bodyText.split("\n").map((l) => l.trim()).filter(Boolean),
+        }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      setMessage("返修任务已入队，生成完成后自动刷新（会产生一次图片调用费用）。");
+      await onDone();
+    } catch (caught) {
+      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // 从当前 URL 取 runId（详情页路径 /runs/:id）
+  const pageAssetScope = typeof window !== "undefined" ? window.location.pathname.split("/")[2] ?? "" : "";
+
+  return (
+    <div className="border-t border-line bg-paper-deep/40 p-3">
+      <span className="field-label">第 {no} 页返修</span>
+      <input
+        className="field-input mt-1 !text-sm"
+        value={headline}
+        onChange={(event) => setHeadline(event.target.value)}
+        placeholder="标题"
+      />
+      <textarea
+        className="field-input mt-2 min-h-[60px] resize-y font-mono !text-[11px]"
+        value={bodyText}
+        onChange={(event) => setBodyText(event.target.value)}
+        placeholder="正文（每行一条）"
+      />
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        {isDeterministic && (
+          <button
+            className="btn-ghost px-3 py-1.5 font-mono text-[11px]"
+            onClick={() => void rerender()}
+            disabled={Boolean(busy) || !copyChanged}
+            title="只改文字重新排版：不调用模型、零费用"
+          >
+            {busy === "rerender" ? "排版中…" : "重新排版（免费）"}
+          </button>
+        )}
+        <button
+          className="btn-ink px-3 py-1.5 font-mono text-[11px]"
+          onClick={() => void regenerate()}
+          disabled={Boolean(busy)}
+          title={isDeterministic ? "重新生成视觉层并排版：一次图片调用" : "按新文案重新出图：一次图片调用"}
+        >
+          {busy === "regen" ? "返修中…" : isDeterministic ? "重出画面并排版（收费）" : "重新生成本页（收费）"}
+        </button>
+        {!isDeterministic && copyChanged && (
+          <span className="font-mono text-[10px] text-seal">改文案需重新出图</span>
+        )}
+      </div>
+      {message && <p className="mt-2 font-mono text-[10px] text-ink-soft">{message}</p>}
     </div>
   );
 }

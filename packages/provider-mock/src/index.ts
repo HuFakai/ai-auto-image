@@ -234,6 +234,14 @@ export function createMockProvider(options: MockProviderOptions = {}): MockProvi
             context.platform ?? "xiaohongshu",
           )) as unknown as T;
       }
+      if (request.schemaName === "PlatformCopy") {
+        request.onUsage?.(mockUsage);
+        return {
+          title: context.topic.slice(0, 20),
+          body: `关于「${context.topic}」的要点都在这套图里了，看完记得收藏。\n评论区聊聊你的想法。`,
+          tags: ["#干货分享", "#知识科普", "#收藏备用", "#一图读懂"],
+        } as unknown as T;
+      }
       // 未知 Schema：走共享结构化管道，把请求转成 JSON 校验失败 → 可诊断错误
       return generateStructured({
         schemaName: request.schemaName,

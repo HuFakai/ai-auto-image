@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { TextRenderingModeSchema } from "@aai/shared-schemas";
-import type { RunListItem, RunsListPayload } from "@/lib/types";
+import type { BrandKitView, RunListItem, RunsListPayload } from "@/lib/types";
 
 interface Props {
   initial: RunsListPayload;
+  brandKits: BrandKitView[];
 }
 
 /** 编辑部状态章：状态 → 章文与色 */
@@ -26,14 +27,22 @@ export function statusStamp(status: string): { text: string; className: string }
   }
 }
 
-export function Workbench({ initial }: Props) {
+const reviewLabel: Record<string, string> = { pending: "待审", approved: "过审", rejected: "驳回" };
+
+export function Workbench({ initial, brandKits }: Props) {
   const [data, setData] = useState<RunsListPayload>(initial);
   const [topic, setTopic] = useState("");
   const [aspectRatio, setAspectRatio] = useState("3:4");
   const [mode, setMode] = useState<string>("native");
   const [concurrency, setConcurrency] = useState<number>(initial.defaultConcurrency);
+  const [sourceText, setSourceText] = useState("");
+  const [brandKitId, setBrandKitId] = useState("");
+  const [urlImporting, setUrlImporting] = useState(false);
+  const [url, setUrl] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reviewFilter, setReviewFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
 
   useEffect(() => {
     const active = data.runs.some((run) => run.status === "running" || run.status === "queued");
@@ -51,6 +60,29 @@ export function Workbench({ initial }: Props) {
     return () => clearInterval(timer);
   }, [data.runs]);
 
+  async function importUrl() {
+    if (!url.trim() || urlImporting) return;
+    setUrlImporting(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const response = await fetch("/api/fetch-url", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: url.trim() }),
+      });
+      const result = (await response.json()) as { title?: string; text?: string; error?: string };
+      if (!response.ok || !result.text) throw new Error(result.error ?? `HTTP ${response.status}`);
+      setSourceText(`${result.title ? `【${result.title}】\n` : ""}${result.text}`.slice(0, 20000));
+      setNotice(`已导入「${result.title || url}」正文，可编辑后生成。`);
+    } catch (caught) {
+      // 实验能力：失败降级为手动粘贴正文
+      setError(`URL 抓取失败（${caught instanceof Error ? caught.message : caught}），可直接粘贴正文。`);
+    } finally {
+      setUrlImporting(false);
+    }
+  }
+
   async function submit() {
     if (!topic.trim() || submitting) return;
     setSubmitting(true);
@@ -64,6 +96,8 @@ export function Workbench({ initial }: Props) {
           aspectRatio,
           textRenderingMode: TextRenderingModeSchema.parse(mode),
           requestedImageConcurrency: concurrency,
+          ...(sourceText.trim() ? { sourceText: sourceText.trim().slice(0, 20000) } : {}),
+          ...(brandKitId ? { brandKitId } : {}),
         }),
       });
       if (!response.ok) {
@@ -77,6 +111,9 @@ export function Workbench({ initial }: Props) {
       setSubmitting(false);
     }
   }
+
+  const filteredRuns =
+    reviewFilter === "all" ? data.runs : data.runs.filter((run) => run.reviewStatus === reviewFilter);
 
   return (
     <div className="space-y-16">
@@ -92,7 +129,7 @@ export function Workbench({ initial }: Props) {
           可发布的图文<span className="text-seal">。</span>
         </h1>
         <p className="mt-4 max-w-lg text-sm leading-relaxed text-ink-soft">
-          输入主题，生成结构化文案与整页图片；中文逐字可查，全程可追溯、可重试、可恢复。
+          输入主题或长文，生成结构化文案与整页图片；中文逐字可查，全程可追溯、可返修、可导出。
         </p>
       </section>
 
@@ -126,8 +163,9 @@ export function Workbench({ initial }: Props) {
           </button>
         </div>
         {error && <p className="mt-3 font-mono text-xs text-seal">⚠ {error}</p>}
+        {notice && <p className="mt-3 font-mono text-xs text-ink-soft">✓ {notice}</p>}
 
-        <div className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-3">
+        <div className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-4">
           <div>
             <span className="field-label">比例 · 平台</span>
             <select className="field-input mt-1" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}>
@@ -158,6 +196,43 @@ export function Workbench({ initial }: Props) {
               ))}
             </select>
           </div>
+          <div>
+            <span className="field-label">品牌手册</span>
+            <select className="field-input mt-1" value={brandKitId} onChange={(event) => setBrandKitId(event.target.value)}>
+              <option value="">不使用</option>
+              {brandKits.map((kit) => (
+                <option key={kit.id} value={kit.id}>
+                  {kit.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* 参考资料：长文 / URL 导入（密度拆页） */}
+        <div className="mt-8">
+          <div className="flex items-baseline justify-between">
+            <span className="field-label">参考资料（可选 · 粘贴长文将按要点密度拆为 6–10 页）</span>
+            <span className="font-mono text-[10px] text-ink-faint">{sourceText.length}/20000</span>
+          </div>
+          <textarea
+            className="field-input mt-1 min-h-[72px] resize-y font-mono !text-[12px] leading-relaxed"
+            placeholder="粘贴文章 / Markdown / 资料正文；或从 URL 导入"
+            value={sourceText}
+            maxLength={20000}
+            onChange={(event) => setSourceText(event.target.value)}
+          />
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              className="field-input !py-1.5 font-mono !text-xs"
+              placeholder="https://example.com/article（实验能力）"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+            />
+            <button className="btn-ghost shrink-0 px-3 py-1.5 font-mono text-xs" onClick={() => void importUrl()} disabled={urlImporting || !url.trim()}>
+              {urlImporting ? "抓取中…" : "从 URL 导入"}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -165,15 +240,27 @@ export function Workbench({ initial }: Props) {
       <section className="rise" style={{ animationDelay: "160ms" }}>
         <div className="rule-double mb-2 flex items-baseline justify-between pt-2">
           <h2 className="font-display text-lg font-bold">No.贰 · 最近运行</h2>
-          <span className="kicker">{data.runs.length > 0 ? `${data.runs.length} 篇` : "空"}</span>
+          <div className="flex items-center gap-1">
+            {(["all", "pending", "approved", "rejected"] as const).map((value) => (
+              <button
+                key={value}
+                className={`px-2.5 py-1 font-mono text-[11px] transition-colors ${
+                  reviewFilter === value ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
+                }`}
+                onClick={() => setReviewFilter(value)}
+              >
+                {value === "all" ? "全部" : reviewLabel[value]}
+              </button>
+            ))}
+          </div>
         </div>
-        {data.runs.length === 0 ? (
+        {filteredRuns.length === 0 ? (
           <p className="border border-dashed border-line-dark px-6 py-12 text-center text-sm text-ink-faint">
-            目录还是空的 —— 写下第一个主题。
+            {data.runs.length === 0 ? "目录还是空的 —— 写下第一个主题。" : "该评审状态下暂无运行。"}
           </p>
         ) : (
           <ul>
-            {data.runs.map((run, index) => (
+            {filteredRuns.map((run, index) => (
               <RunRow key={run.runId} run={run} index={index} />
             ))}
           </ul>
@@ -201,6 +288,19 @@ function RunRow({ run, index }: { run: RunListItem; index: number }) {
           {String(index + 1).padStart(2, "0")}
         </span>
         <span className="font-display flex-1 truncate text-base font-semibold">{run.topic}</span>
+        {run.status === "succeeded" && (
+          <span
+            className={`font-mono text-[10px] ${
+              run.reviewStatus === "approved"
+                ? "text-seal"
+                : run.reviewStatus === "rejected"
+                  ? "text-ink-faint line-through"
+                  : "text-ink-faint"
+            }`}
+          >
+            {reviewLabel[run.reviewStatus]}
+          </span>
+        )}
         <span className="hidden font-mono text-[11px] text-ink-soft md:inline">
           {run.pageCount > 0 ? `${run.pageCount} 页` : "—"} · {run.mode === "native" ? "原生" : "确定性"}
         </span>

@@ -81,7 +81,7 @@ pnpm dev
 pnpm dev             # 开发服务器（Next.js + 进程内 Job Runner）
 pnpm build           # 全仓构建（含 Next.js standalone 产物）
 pnpm typecheck       # 全仓类型检查
-pnpm test            # 全仓测试（vitest，59 项：单测 + 集成）
+pnpm test            # 全仓测试（vitest，65 项：单测 + 集成）
 pnpm lint            # ESLint（仓库根统一执行）
 
 pnpm fonts           # 下载中文字体（Noto Sans SC，OFL）
@@ -109,9 +109,15 @@ apps/web/data/
   └─ exports/         导出清单（{runId}/manifest.json，含预期文案与用量）
 ```
 
-重启安全：应用重启后 Job Runner 从 `jobs` 表恢复未完成任务，已成功页面不会重新生成。
+重启安全：应用重启后 Job Runner 从 `jobs` 表恢复未完成任务，已成功页面不会重新生成
+（Runner 对运行中任务自动心跳续租，慢推理调用不会被误判为孤儿）。
 **运行中取消**：详情页「作废本次运行」即时中断进行中的模型调用（signal 贯穿到 HTTP 层，
 取消不触发重试，已成功页面保留）。
+**单页返修**：详情页每页可改标题/正文——native 模式重新出图（提示费用），
+deterministic 模式「重新排版」零费用；旧版本资产保留（Revision 版本链），返修后回到待审。
+**导出 ZIP**：详情页「导出 ZIP」产出按序图片 + LLM 生成的发布文案（失败降级模板）+ manifest + 发布清单。
+**长文/URL**：创建表单支持粘贴参考资料（按要点密度拆为 6–10 页）与 URL 导入（实验能力，失败降级粘贴）。
+**评审**：运行完成后可标记通过/驳回，工作台按评审状态筛选。
 
 ## 6. 生产部署
 
@@ -192,6 +198,6 @@ pnpm test    # 58 项：Schema 校验、错误归一、路由回退、并发信�
 ## 10. 当前边界（阶段 0）
 
 - 单机单容器 + SQLite + 进程内 Runner；PostgreSQL / Redis / 独立 Worker 到阶段 3（见 [ADR-0005](./adr/0005-migration-to-postgres-redis.md)）。
-- 仅知识卡片 Recipe；编辑器、Brand Kit、平台导出在阶段 1。
+- 仅知识卡片 Recipe；商品带货/文章拆解等独立 Recipe 在后续迭代（密度拆页与上传能力已就绪）。
 - 原生模式文字审查需 `TEXT_VISION=1`（视觉模型）；当前渠道的 deepseek-v4-flash 不支持图片输入，审查自动跳过并记录。
 - 无自动发布；导出为 ZIP/manifest 由阶段 1 交付。

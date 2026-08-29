@@ -18,7 +18,8 @@
     "@aai/render-engine": "workspace:*",
     "@aai/shared-schemas": "workspace:*",
     "@aai/storage": "workspace:*",
-    "zod": "^4.1.5"
+    "zod": "^4.1.5",
+    "jszip": "^3.10.0"
   },
   "devDependencies": {
     "@aai/config": "workspace:*",

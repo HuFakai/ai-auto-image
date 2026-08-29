@@ -31,6 +31,7 @@ export function listRunItems(runtime: Runtime, limit: number): RunListItem[] {
       topic: input.topic,
       status: run.status as RunListItem["status"],
       mode: input.textRenderingMode as RunListItem["mode"],
+      reviewStatus: run.reviewStatus as RunListItem["reviewStatus"],
       createdAt: run.createdAt,
       pageCount,
     };
@@ -62,59 +63,43 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
     }
   }
 
+  // 页面状态以「每页当前资产」为准（返修后取最新版本，旧版本计入 Revision 链）
   const pageNodes = nodes.filter((n) => n.nodeName === "generate-images");
   const pages: RunDetailPayload["pages"] = (storyboard?.slides ?? []).map((slide) => {
-    const node = pageNodes.find((n) => {
-      try {
-        return (JSON.parse(n.outputRef ?? "{}") as { pageIndex?: number }).pageIndex === slide.index;
-      } catch {
-        return false;
-      }
-    });
-    if (!node) {
-      return { index: slide.index, role: slide.role, headline: slide.headline, status: "pending" as const };
-    }
-    if (node.status === "failed") {
+    const current = runtime.assetRepo.latestForPage(runId, slide.index);
+    if (current) {
+      const metadata = current.metadataJson ? (JSON.parse(current.metadataJson) as Record<string, unknown>) : {};
       return {
         index: slide.index,
         role: slide.role,
         headline: slide.headline,
-        status: "failed" as const,
+        status: "ready" as const,
+        assetId: current.id,
+        mode: typeof metadata.mode === "string" ? metadata.mode : undefined,
+        expectedCopy: Array.isArray(metadata.expectedCopy) ? (metadata.expectedCopy as string[]) : undefined,
+        visualCheckPassed:
+          typeof metadata.visualCheckPassed === "boolean" ? metadata.visualCheckPassed : undefined,
+        revision: typeof metadata.revision === "number" ? metadata.revision : undefined,
       };
     }
-    const output = JSON.parse(node.outputRef ?? "{}") as { assetId?: string };
-    const asset = output.assetId ? runtime.assetRepo.listByRun(runId).find((a) => a.id === output.assetId) : undefined;
-    const metadata = asset?.metadataJson ? (JSON.parse(asset.metadataJson) as Record<string, unknown>) : {};
+    // 尚无当前资产：看是否有失败的页面节点（可重试）
+    const failedNode = pageNodes.find((n) => {
+      try {
+        return (
+          n.status === "failed" &&
+          (JSON.parse(n.outputRef ?? "{}") as { pageIndex?: number }).pageIndex === slide.index
+        );
+      } catch {
+        return false;
+      }
+    });
     return {
       index: slide.index,
       role: slide.role,
       headline: slide.headline,
-      status: "ready" as const,
-      assetId: output.assetId,
-      mode: typeof metadata.mode === "string" ? metadata.mode : undefined,
-      expectedCopy: Array.isArray(metadata.expectedCopy) ? (metadata.expectedCopy as string[]) : undefined,
-      visualCheckPassed: typeof metadata.visualCheckPassed === "boolean" ? metadata.visualCheckPassed : undefined,
+      status: failedNode ? ("failed" as const) : ("pending" as const),
     };
   });
-  // Storyboard 尚未生成时，已存在的页面节点也要展示
-  if (!storyboard) {
-    for (const node of pageNodes) {
-      try {
-        const output = JSON.parse(node.outputRef ?? "{}") as { pageIndex?: number };
-        if (output.pageIndex === undefined) continue;
-        if (pages.some((p) => p.index === output.pageIndex)) continue;
-        pages.push({
-          index: output.pageIndex,
-          role: "content",
-          headline: "（生成中）",
-          status: node.status === "failed" ? "failed" : "pending",
-        });
-      } catch {
-        /* ignore */
-      }
-    }
-    pages.sort((a, b) => a.index - b.index);
-  }
 
   const job = runtime.jobRepo.list(200).find((j) => j.runId === runId);
   const totals = runtime.runRepo.runTotals(runId);
@@ -122,6 +107,8 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
   return {
     runId,
     status: run.status as RunDetailPayload["status"],
+    reviewStatus: run.reviewStatus as RunDetailPayload["reviewStatus"],
+    reviewNote: run.reviewNote,
     errorSummary: run.errorSummary,
     createdAt: run.createdAt,
     input,

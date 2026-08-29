@@ -28,7 +28,7 @@ import type {
   RunRepo,
   AssetStore,
 } from "@aai/storage";
-import { knowledgeCardTheme, renderSlideDeterministic } from "@aai/render-engine";
+import { renderSlideDeterministic, themeById } from "@aai/render-engine";
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import { buildBriefPrompt, buildSlidePrompt, buildStoryboardPrompt } from "../prompts";
@@ -359,6 +359,18 @@ async function generatePage(
   }
 }
 
+/** 读取 Brand Kit Logo（缺失或读取失败时返回 undefined，不阻塞渲染） */
+function readLogoBase64(deps: WorkflowDeps, input: CreateRunInput): string | undefined {
+  const logoAssetId = input.brandKit?.logoAssetId;
+  if (!logoAssetId) return undefined;
+  try {
+    const asset = deps.assetRepo.require(logoAssetId);
+    return fs.readFileSync(deps.assetStore.resolve(asset.filePath)).toString("base64");
+  } catch {
+    return undefined;
+  }
+}
+
 async function renderAllSlides(
   deps: WorkflowDeps,
   runId: string,
@@ -380,13 +392,15 @@ async function renderAllSlides(
         (JSON.parse(pageNode.outputRef ?? "{}") as { assetId?: string }).assetId!,
       );
       const visualBase64 = fs.readFileSync(deps.assetStore.resolve(visualAsset.filePath)).toString("base64");
+      const logoBase64 = readLogoBase64(deps, input);
 
       const buffer = await renderSlideDeterministic({
-        theme: knowledgeCardTheme,
+        theme: themeById(input.brandKit?.themeId),
         aspectRatio: input.aspectRatio,
         slide,
         pageCount,
         visualImageBase64: visualBase64,
+        logoBase64,
       });
       const saved = await deps.assetStore.saveBuffer(
         buffer,

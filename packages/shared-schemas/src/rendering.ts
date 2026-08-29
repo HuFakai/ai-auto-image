@@ -1,5 +1,8 @@
 import { z } from "zod";
 import { AspectRatioSchema, PlatformSchema } from "./content";
+import { BrandKitConfigSchema } from "./brand-kit";
+
+export * from "./brand-kit";
 
 /**
  * 双文字渲染模式（docs/02 §9.1）：
@@ -44,5 +47,10 @@ export const CreateRunInputSchema = z.object({
   aspectRatio: AspectRatioSchema.default("3:4"),
   textRenderingMode: TextRenderingModeSchema.default("native"),
   requestedImageConcurrency: z.number().int().min(1).max(16).default(1),
+  /** 粘贴的参考资料正文（URL 抓取结果或用户粘贴），驱动密度拆页 */
+  sourceText: z.string().max(20000).optional(),
+  sourceUrl: z.string().max(500).optional(),
+  /** Brand Kit 配置快照（创建时由服务端从 brand_kits 表解析冻结） */
+  brandKit: BrandKitConfigSchema.optional(),
 });
 export type CreateRunInput = z.infer<typeof CreateRunInputSchema>;

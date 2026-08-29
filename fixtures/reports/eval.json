@@ -1,5 +1,5 @@
 {
-  "at": "2026-08-29T08:20:51.201Z",
+  "at": "2026-08-29T10:22:31.458Z",
   "provider": "mock",
   "fontsAvailable": true,
   "cases": [
@@ -12,7 +12,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 259
+      "durationMs": 711
     },
     {
       "topic": "《置身事内》：为什么地方政府像公司",
@@ -23,7 +23,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 766
+      "durationMs": 958
     },
     {
       "topic": "保温杯怎么选：四个关键参数",
@@ -34,7 +34,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 289
+      "durationMs": 285
     },
     {
       "topic": "什么是复利",
@@ -45,7 +45,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 207
+      "durationMs": 209
     },
     {
       "topic": "睡眠的三个常见误区",
@@ -56,7 +56,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 465
+      "durationMs": 523
     },
     {
       "topic": "咖啡因是如何起作用的",
@@ -67,7 +67,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 237
+      "durationMs": 185
     }
   ],
   "metrics": {
@@ -76,7 +76,7 @@
     "runCompletionRate": 1,
     "totalRuns": 6,
     "totalPages": 24,
-    "avgRunDurationMs": 371
+    "avgRunDurationMs": 479
   },
   "thresholds": {
     "structuredParseSuccessRate": 0.99,
