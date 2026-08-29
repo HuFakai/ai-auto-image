@@ -219,6 +219,12 @@ async function executeKnowledgeCardRun(
       deps.runRepo.updateStatus(runId, "failed", { errorSummary: summary });
       throw new Error(summary);
     }
+    if (input.requireApproval) {
+      // 审批门：挂起等待人工确认（确认后由 review API 置 succeeded，导出才放行）
+      deps.runRepo.updateStatus(runId, "awaiting_approval");
+      logger.info("run awaiting final approval", { runId, pages: pageCount });
+      return;
+    }
     deps.runRepo.updateStatus(runId, "succeeded");
     logger.info("knowledge card run completed", {
       runId: runId,

@@ -388,6 +388,11 @@ async function executeComicRun(
     deps.runRepo.updateStatus(runId, "failed", { errorSummary: summary });
     throw new Error(summary);
   }
+  if (input.requireApproval) {
+    deps.runRepo.updateStatus(runId, "awaiting_approval");
+    logger.info("comic run awaiting final approval", { runId, pages: pageCount });
+    return;
+  }
   deps.runRepo.updateStatus(runId, "succeeded");
   logger.info("comic run completed", { runId, pages: pageCount });
 }

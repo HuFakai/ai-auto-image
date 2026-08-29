@@ -17,7 +17,8 @@
     "verify:openai": "tsx scripts/verify-openai.mts",
     "verify:live": "tsx scripts/verify-live.mts",
     "verify:xai": "tsx scripts/verify-xai.mts",
-    "eval": "tsx scripts/eval.mts"
+    "eval": "tsx scripts/eval.mts",
+    "pg:export": "tsx scripts/pg-export.mts"
   },
   "devDependencies": {
     "@aai/ai-core": "workspace:*",

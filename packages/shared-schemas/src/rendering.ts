@@ -59,5 +59,7 @@ export const CreateRunInputSchema = z.object({
   brandKit: BrandKitConfigSchema.optional(),
   /** 创建时提交的 Brand Kit id（运行详情展示用） */
   brandKitId: z.string().optional(),
+  /** 审批门：完成后进入 awaiting_approval，人工确认后才算终稿（可导出） */
+  requireApproval: z.boolean().default(false),
 });
 export type CreateRunInput = z.infer<typeof CreateRunInputSchema>;

@@ -35,14 +35,15 @@ export const NodeRunStatusSchema = z.enum([
 ]);
 export type NodeRunStatus = z.infer<typeof NodeRunStatusSchema>;
 
-/** 一次工作流执行（WorkflowRun）的顶层状态 */
+/** 一次工作流执行（WorkflowRun）的顶层状态；awaiting_approval = 终稿待人工确认（审批门） */
 export const RunStatusSchema = z.enum([
   "queued",
   "running",
+  "awaiting_approval",
   "succeeded",
   "failed",
-  "cancelled",
-]);
+  "cancelled"],
+);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
 /** Job 类型：阶段 0 只有一条 Spike 流水线 */

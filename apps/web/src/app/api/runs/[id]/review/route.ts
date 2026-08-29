@@ -24,11 +24,22 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   }
   const runtime = getRuntime();
   try {
-    const run = runtime.runRepo.setReview(id, parsed.data.status, parsed.data.note);
+    const run = runtime.runRepo.require(id);
+    // 审批门：awaiting_approval 的运行由「评审通过」放行（→ succeeded，导出放行）；
+    // 驳回则终止（→ cancelled，保留资产可追溯）
+    if (run.status === "awaiting_approval") {
+      if (parsed.data.status === "approved") {
+        runtime.runRepo.updateStatus(id, "succeeded");
+      } else if (parsed.data.status === "rejected") {
+        runtime.runRepo.updateStatus(id, "cancelled", { errorSummary: "审批驳回" });
+      }
+    }
+    const updated = runtime.runRepo.setReview(id, parsed.data.status, parsed.data.note);
     return NextResponse.json({
       runId: id,
-      reviewStatus: run.reviewStatus,
-      reviewNote: run.reviewNote,
+      runStatus: updated.status,
+      reviewStatus: updated.reviewStatus,
+      reviewNote: updated.reviewNote,
     });
   } catch {
     return NextResponse.json({ error: "run not found" }, { status: 404 });

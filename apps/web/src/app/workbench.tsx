@@ -45,6 +45,7 @@ export function Workbench({ initial, brandKits }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [requireApproval, setRequireApproval] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
 
   useEffect(() => {
@@ -105,6 +106,7 @@ export function Workbench({ initial, brandKits }: Props) {
             ? { sourceText: sourceText.trim().slice(0, 20000) }
             : {}),
           ...(brandKitId ? { brandKitId } : {}),
+          requireApproval,
         }),
       });
       if (!response.ok) {
@@ -283,6 +285,16 @@ export function Workbench({ initial, brandKits }: Props) {
                     />
                   </div>
                 )}
+
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={requireApproval}
+                    onChange={(event) => setRequireApproval(event.target.checked)}
+                    className="accent-[#b5382d]"
+                  />
+                  完成后需人工确认终稿（审批门：确认前不可导出）
+                </label>
 
                 {recipe !== "comic_story" && (
                   <div>

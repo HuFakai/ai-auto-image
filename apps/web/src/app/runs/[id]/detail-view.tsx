@@ -5,6 +5,8 @@ import type { RunDetailPage, RunDetailPayload } from "@/lib/types";
 
 function runStamp(status: string): { text: string; className: string } {
   switch (status) {
+    case "awaiting_approval":
+      return { text: "待批", className: "stamp text-amber" };
     case "succeeded":
       return { text: "已讫", className: "stamp text-seal" };
     case "running":
@@ -111,6 +113,20 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
               disabled={cancelling}
             >
               {cancelling ? "作废中…" : "作废本次运行"}
+            </button>
+          ) : detail.status === "awaiting_approval" ? (
+            <button
+              className="btn-ink px-5 py-2 font-mono text-xs tracking-[0.15em]"
+              onClick={async () => {
+                await fetch(`/api/runs/${initial.runId}/review`, {
+                  method: "PATCH",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ status: "approved" }),
+                });
+                await refresh();
+              }}
+            >
+              确认终稿（放行导出）
             </button>
           ) : detail.status === "succeeded" ? (
             <>

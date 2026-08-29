@@ -14,3 +14,5 @@ coverage/
 packages/render-engine/assets/fonts/
 **/data/
 *.part
+
+pg-dump/
