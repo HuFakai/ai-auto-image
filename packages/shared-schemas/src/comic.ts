@@ -1,8 +1,34 @@
 import { z } from "zod";
 
-/** 内容 Recipe：阶段 2 新增科普漫画 */
-export const RecipeSchema = z.enum(["knowledge_cards", "comic_story"]);
+/** 内容 Recipe：阶段 2 科普漫画；阶段 3 新增 7 种内容类型（复用两条管线骨架） */
+export const RecipeSchema = z.enum([
+  "knowledge_cards",
+  "comic_story",
+  "quote_cards",
+  "checklist_cards",
+  "comparison_cards",
+  "product_showcase",
+  "book_recommendations",
+  "article_digest",
+  "strip_comic",
+]);
 export type Recipe = z.infer<typeof RecipeSchema>;
+
+/** 产品种草（product_showcase）可选输入字段：产品资料（全部可选，缺省时 prompt 分支给出合理指令） */
+export const ProductInfoSchema = z.object({
+  name: z.string().max(200).optional(),
+  sellingPoints: z.array(z.string().max(200)).max(12).optional(),
+  audience: z.string().max(400).optional(),
+  priceNote: z.string().max(200).optional(),
+});
+export type ProductInfo = z.infer<typeof ProductInfoSchema>;
+
+/** 图书推荐（book_recommendations）可选输入字段：书目信息（全部可选） */
+export const BookInfoSchema = z.object({
+  title: z.string().max(300).optional(),
+  author: z.string().max(200).optional(),
+});
+export type BookInfo = z.infer<typeof BookInfoSchema>;
 
 /** 角色锚点（Character Bible 精简版）：跨页一致性的唯一事实来源 */
 export const CharacterAnchorSchema = z.object({
@@ -36,10 +62,10 @@ export const ComicPageSchema = z.object({
 });
 export type ComicPage = z.infer<typeof ComicPageSchema>;
 
-/** 漫画分镜（generate-comic-storyboard 节点输出） */
+/** 漫画分镜（generate-comic-storyboard 节点输出）。页数下限 1：四格漫画 strip_comic 允许 1–2 页 */
 export const ComicStoryboardSchema = z.object({
   title: z.string().min(1),
   cast: z.array(CharacterAnchorSchema).min(1).max(3),
-  pages: z.array(ComicPageSchema).min(3).max(8),
+  pages: z.array(ComicPageSchema).min(1).max(8),
 });
 export type ComicStoryboard = z.infer<typeof ComicStoryboardSchema>;

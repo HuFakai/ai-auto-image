@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { Recipe } from "@aai/shared-schemas";
 import type { RunDetailPage, RunDetailPayload } from "@/lib/types";
+import { RECIPE_LABELS } from "@/lib/types";
 
 function runStamp(status: string): { text: string; className: string } {
   switch (status) {
@@ -202,7 +204,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           <span className="kicker">COLOPHON · 全参数可追溯</span>
         </div>
         <div className="grid grid-cols-2 gap-x-8 gap-y-0 sm:grid-cols-3">
-          <InfoRow label="内容类型" value={detail.generation.recipe === "comic_story" ? "科普漫画" : "知识卡片"} />
+          <InfoRow label="内容类型" value={RECIPE_LABELS[detail.generation.recipe as Recipe] ?? detail.generation.recipe} />
           <InfoRow label="文字模式" value={detail.generation.textRenderingMode === "native" ? "原生中文（模型出图）" : "确定性排版（程序合成）"} />
           <InfoRow label="比例 · 平台" value={`${detail.generation.aspectRatio} · ${detail.generation.platform}`} />
           <InfoRow

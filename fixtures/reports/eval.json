@@ -1,5 +1,5 @@
 {
-  "at": "2026-08-29T10:22:31.458Z",
+  "at": "2026-08-29T19:40:29.686Z",
   "provider": "mock",
   "fontsAvailable": true,
   "cases": [
@@ -12,7 +12,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 711
+      "durationMs": 360
     },
     {
       "topic": "《置身事内》：为什么地方政府像公司",
@@ -23,7 +23,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 958
+      "durationMs": 777
     },
     {
       "topic": "保温杯怎么选：四个关键参数",
@@ -34,7 +34,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 285
+      "durationMs": 346
     },
     {
       "topic": "什么是复利",
@@ -45,7 +45,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 209
+      "durationMs": 404
     },
     {
       "topic": "睡眠的三个常见误区",
@@ -56,7 +56,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 523
+      "durationMs": 670
     },
     {
       "topic": "咖啡因是如何起作用的",
@@ -67,16 +67,38 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 185
+      "durationMs": 295
+    },
+    {
+      "topic": "保持专注的三句话",
+      "category": "金句卡",
+      "mode": "native",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 378
+    },
+    {
+      "topic": "搬家必做的五件事",
+      "category": "清单卡",
+      "mode": "deterministic",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 619
     }
   ],
   "metrics": {
     "structuredParseSuccessRate": 1,
     "pageRenderSuccessRate": 1,
     "runCompletionRate": 1,
-    "totalRuns": 6,
-    "totalPages": 24,
-    "avgRunDurationMs": 479
+    "totalRuns": 8,
+    "totalPages": 32,
+    "avgRunDurationMs": 481
   },
   "thresholds": {
     "structuredParseSuccessRate": 0.99,

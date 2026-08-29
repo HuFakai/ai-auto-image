@@ -135,7 +135,7 @@ export async function createRunWith(
   const project = await harness.projectRepo.create({ title: input.topic });
   const parsed = CreateRunInputSchema.parse(input);
   const run = await harness.runRepo.create({ projectId: project.id, inputJson: JSON.stringify(parsed) });
-  const kind = parsed.recipe === "comic_story" ? "comic_story_run" : "knowledge_card_run";
+  const kind = parsed.recipe === "comic_story" || parsed.recipe === "strip_comic" ? "comic_story_run" : "knowledge_card_run";
   const { job } = await harness.jobRepo.createOrReuse({ kind, runId: run.id });
   return { runId: run.id, jobId: job.id };
 }

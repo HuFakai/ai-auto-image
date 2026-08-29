@@ -1,4 +1,17 @@
-import type { CreateRunInput, RunStatus, TextRenderingMode } from "@aai/shared-schemas";
+import type { CreateRunInput, Recipe, RunStatus, TextRenderingMode } from "@aai/shared-schemas";
+
+/** Recipe 用户可读名（创作条类型选择与详情页共用） */
+export const RECIPE_LABELS: Record<Recipe, string> = {
+  knowledge_cards: "知识卡片",
+  comic_story: "科普漫画",
+  quote_cards: "金句卡",
+  checklist_cards: "清单卡",
+  comparison_cards: "对比卡",
+  product_showcase: "产品种草",
+  book_recommendations: "图书推荐",
+  article_digest: "长文拆解",
+  strip_comic: "四格漫画",
+};
 
 /** Brand Kit 视图（客户端安全） */
 export interface BrandKitView {

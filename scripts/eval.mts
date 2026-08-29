@@ -13,7 +13,7 @@ import {
   startEvalRunner,
   waitUntil,
 } from "@aai/workflow-engine";
-import type { TextRenderingMode } from "@aai/shared-schemas";
+import type { Recipe, TextRenderingMode } from "@aai/shared-schemas";
 import { loadDotEnv } from "./lib/env.js";
 
 loadDotEnv();
@@ -22,6 +22,7 @@ interface EvalCase {
   topic: string;
   mode: TextRenderingMode;
   category: string;
+  recipe?: Recipe;
 }
 
 const CASES: EvalCase[] = [
@@ -31,6 +32,8 @@ const CASES: EvalCase[] = [
   { topic: "什么是复利", mode: "native", category: "概念解释" },
   { topic: "睡眠的三个常见误区", mode: "deterministic", category: "生活科普" },
   { topic: "咖啡因是如何起作用的", mode: "native", category: "机制科普" },
+  { topic: "保持专注的三句话", mode: "native", category: "金句卡", recipe: "quote_cards" },
+  { topic: "搬家必做的五件事", mode: "deterministic", category: "清单卡", recipe: "checklist_cards" },
 ];
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -55,6 +58,7 @@ async function runCase(evaluationCase: EvalCase): Promise<CaseResult> {
     const { runId, jobId } = await createRunWith(harness, {
       topic: evaluationCase.topic,
       textRenderingMode: evaluationCase.mode,
+      ...(evaluationCase.recipe ? { recipe: evaluationCase.recipe } : {}),
     });
 
     await waitUntil(async () => {

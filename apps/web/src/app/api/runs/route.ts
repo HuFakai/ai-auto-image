@@ -45,6 +45,14 @@ export async function POST(request: Request) {
   }
   const input = parsed.data;
 
+  // 长文拆解（article_digest）必须提供参考资料正文：拆解是提炼原文，无原文无从拆解
+  if (input.recipe === "article_digest" && !input.sourceText?.trim()) {
+    return NextResponse.json(
+      { error: "article_digest 需要参考资料正文（sourceText）才能拆解长文" },
+      { status: 400 },
+    );
+  }
+
   const runtime = await getRuntime();
   const effective = runtime.effectiveConcurrency(input.requestedImageConcurrency);
   const project = await runtime.projectRepo.create({ title: input.topic.slice(0, 60), userId: user.id });
@@ -53,7 +61,11 @@ export async function POST(request: Request) {
     inputJson: JSON.stringify(input),
     userId: user.id,
   });
-  const jobKind = input.recipe === "comic_story" ? "comic_story_run" : "knowledge_card_run";
+  // 四格漫画与科普漫画共用 comic 管线；其余内容类型走知识卡片管线
+  const jobKind =
+    input.recipe === "comic_story" || input.recipe === "strip_comic"
+      ? "comic_story_run"
+      : "knowledge_card_run";
   const { job } = await runtime.jobRepo.createOrReuse({
     kind: jobKind,
     runId: run.id,

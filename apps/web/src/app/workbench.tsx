@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { TextRenderingModeSchema } from "@aai/shared-schemas";
+import type { Recipe } from "@aai/shared-schemas";
+import { RECIPE_LABELS } from "@/lib/types";
 import type { BrandKitView, RunListItem, RunsListPayload } from "@/lib/types";
 
 interface Props {
@@ -29,6 +31,19 @@ export function statusStamp(status: string): { text: string; className: string }
 
 const reviewLabel: Record<string, string> = { pending: "待审", approved: "过审", rejected: "驳回" };
 
+/** 主题输入框占位文案（按内容类型给出示例） */
+const TOPIC_PLACEHOLDERS: Record<Recipe, string> = {
+  knowledge_cards: "主题，例如：三分钟看懂量子纠缠",
+  comic_story: "漫画主题，例如：为什么会晕车",
+  quote_cards: "主题，例如：保持专注的三句话",
+  checklist_cards: "主题，例如：新手露营清单",
+  comparison_cards: "对比主题，例如：骑自行车还是坐地铁通勤",
+  product_showcase: "产品主题，例如：这款便携咖啡机",
+  book_recommendations: "图书主题，例如：《置身事内》为什么值得读",
+  article_digest: "长文主题，例如：复利思维入门",
+  strip_comic: "漫画主题，例如：没带伞的一天",
+};
+
 export function Workbench({ initial, brandKits }: Props) {
   const [data, setData] = useState<RunsListPayload>(initial);
   const [topic, setTopic] = useState("");
@@ -37,8 +52,15 @@ export function Workbench({ initial, brandKits }: Props) {
   const [concurrency, setConcurrency] = useState<number>(initial.defaultConcurrency);
   const [sourceText, setSourceText] = useState("");
   const [brandKitId, setBrandKitId] = useState("");
-  const [recipe, setRecipe] = useState<"knowledge_cards" | "comic_story">("knowledge_cards");
+  const [recipe, setRecipe] = useState<Recipe>("knowledge_cards");
   const [castDescription, setCastDescription] = useState("");
+  const [comparisonTarget, setComparisonTarget] = useState("");
+  const [productName, setProductName] = useState("");
+  const [productSellingPoints, setProductSellingPoints] = useState("");
+  const [productAudience, setProductAudience] = useState("");
+  const [productPriceNote, setProductPriceNote] = useState("");
+  const [bookTitle, setBookTitle] = useState("");
+  const [bookAuthor, setBookAuthor] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   const [url, setUrl] = useState("");
   const [urlImporting, setUrlImporting] = useState(false);
@@ -47,6 +69,8 @@ export function Workbench({ initial, brandKits }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [requireApproval, setRequireApproval] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+
+  const isComicRecipe = recipe === "comic_story" || recipe === "strip_comic";
 
   useEffect(() => {
     const active = data.runs.some((run) => run.status === "running" || run.status === "queued");
@@ -87,8 +111,25 @@ export function Workbench({ initial, brandKits }: Props) {
 
   async function submit() {
     if (!topic.trim() || submitting) return;
+    if (recipe === "article_digest" && !sourceText.trim()) {
+      setError("长文拆解需要提供参考资料正文（sourceText）才能拆解。");
+      setMoreOpen(true);
+      return;
+    }
     setSubmitting(true);
     setError(null);
+    const productInfo = {
+      ...(productName.trim() ? { name: productName.trim().slice(0, 200) } : {}),
+      ...(productSellingPoints.trim()
+        ? { sellingPoints: productSellingPoints.split(/[,，]/).map((s) => s.trim()).filter(Boolean).slice(0, 12) }
+        : {}),
+      ...(productAudience.trim() ? { audience: productAudience.trim().slice(0, 400) } : {}),
+      ...(productPriceNote.trim() ? { priceNote: productPriceNote.trim().slice(0, 200) } : {}),
+    };
+    const bookInfo = {
+      ...(bookTitle.trim() ? { title: bookTitle.trim().slice(0, 300) } : {}),
+      ...(bookAuthor.trim() ? { author: bookAuthor.trim().slice(0, 200) } : {}),
+    };
     try {
       const response = await fetch("/api/runs", {
         method: "POST",
@@ -102,7 +143,12 @@ export function Workbench({ initial, brandKits }: Props) {
           ...(recipe === "comic_story" && castDescription.trim()
             ? { castDescription: castDescription.trim().slice(0, 2000) }
             : {}),
-          ...(recipe !== "comic_story" && sourceText.trim()
+          ...(recipe === "comparison_cards" && comparisonTarget.trim()
+            ? { comparisonTarget: comparisonTarget.trim().slice(0, 400) }
+            : {}),
+          ...(recipe === "product_showcase" && Object.keys(productInfo).length > 0 ? { productInfo } : {}),
+          ...(recipe === "book_recommendations" && Object.keys(bookInfo).length > 0 ? { bookInfo } : {}),
+          ...(!isComicRecipe && sourceText.trim()
             ? { sourceText: sourceText.trim().slice(0, 20000) }
             : {}),
           ...(brandKitId ? { brandKitId } : {}),
@@ -178,9 +224,7 @@ export function Workbench({ initial, brandKits }: Props) {
               <input
                 id="topic"
                 className="field-input !border-b-0 font-display !text-lg"
-                placeholder={
-                  recipe === "comic_story" ? "漫画主题，例如：为什么会晕车" : "主题，例如：三分钟看懂量子纠缠"
-                }
+                placeholder={TOPIC_PLACEHOLDERS[recipe]}
                 value={topic}
                 maxLength={120}
                 onChange={(event) => setTopic(event.target.value)}
@@ -212,10 +256,13 @@ export function Workbench({ initial, brandKits }: Props) {
                     <select
                       className="field-input mt-1 !py-1.5 !text-[13px]"
                       value={recipe}
-                      onChange={(event) => setRecipe(event.target.value as "knowledge_cards" | "comic_story")}
+                      onChange={(event) => setRecipe(event.target.value as Recipe)}
                     >
-                      <option value="knowledge_cards">知识卡片</option>
-                      <option value="comic_story">科普漫画</option>
+                      {(Object.keys(RECIPE_LABELS) as Recipe[]).map((value) => (
+                        <option key={value} value={value}>
+                          {RECIPE_LABELS[value]}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div>
@@ -286,6 +333,89 @@ export function Workbench({ initial, brandKits }: Props) {
                   </div>
                 )}
 
+                {recipe === "comparison_cards" && (
+                  <div>
+                    <span className="field-label">对比对象 B（可选 · 留空则由模型从主题语境确定）</span>
+                    <input
+                      className="field-input mt-1 font-mono !text-[12px]"
+                      placeholder="例如：骑自行车（A） vs 坐地铁（B）中的「坐地铁」"
+                      value={comparisonTarget}
+                      maxLength={400}
+                      onChange={(event) => setComparisonTarget(event.target.value)}
+                    />
+                  </div>
+                )}
+
+                {recipe === "product_showcase" && (
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-2">
+                    <div>
+                      <span className="field-label">产品名称（可选）</span>
+                      <input
+                        className="field-input mt-1 font-mono !text-[12px]"
+                        placeholder="例如：摩卡壶"
+                        value={productName}
+                        maxLength={200}
+                        onChange={(event) => setProductName(event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <span className="field-label">目标人群（可选）</span>
+                      <input
+                        className="field-input mt-1 font-mono !text-[12px]"
+                        placeholder="例如：租房白领"
+                        value={productAudience}
+                        maxLength={400}
+                        onChange={(event) => setProductAudience(event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <span className="field-label">价格说明（可选）</span>
+                      <input
+                        className="field-input mt-1 font-mono !text-[12px]"
+                        placeholder="例如：200 元档，双十一有优惠"
+                        value={productPriceNote}
+                        maxLength={200}
+                        onChange={(event) => setProductPriceNote(event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <span className="field-label">卖点（可选 · 逗号分隔）</span>
+                      <input
+                        className="field-input mt-1 font-mono !text-[12px]"
+                        placeholder="例如：小巧、出杯快、好清洗"
+                        value={productSellingPoints}
+                        maxLength={500}
+                        onChange={(event) => setProductSellingPoints(event.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {recipe === "book_recommendations" && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <span className="field-label">书名（可选）</span>
+                      <input
+                        className="field-input mt-1 font-mono !text-[12px]"
+                        placeholder="例如：置身事内"
+                        value={bookTitle}
+                        maxLength={300}
+                        onChange={(event) => setBookTitle(event.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <span className="field-label">作者（可选）</span>
+                      <input
+                        className="field-input mt-1 font-mono !text-[12px]"
+                        placeholder="例如：兰小欢"
+                        value={bookAuthor}
+                        maxLength={200}
+                        onChange={(event) => setBookAuthor(event.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 <label className="flex cursor-pointer items-center gap-2 text-sm">
                   <input
                     type="checkbox"
@@ -296,10 +426,16 @@ export function Workbench({ initial, brandKits }: Props) {
                   完成后需人工确认终稿（审批门：确认前不可导出）
                 </label>
 
-                {recipe !== "comic_story" && (
+                {!isComicRecipe && (
                   <div>
                     <div className="flex items-center justify-between">
-                      <span className="field-label">参考资料（可选 · 长文按要点密度拆为 6–10 页）</span>
+                      <span className="field-label">
+                        {recipe === "article_digest"
+                          ? "参考资料（必填 · 长文拆解需要原文）"
+                          : recipe === "product_showcase"
+                            ? "产品资料正文（可选 · 有则作为产品资料唯一事实来源）"
+                            : "参考资料（可选 · 长文按要点密度拆为 6–10 页）"}
+                      </span>
                       <span className="font-mono text-[10px] text-ink-faint">{sourceText.length}/20000</span>
                     </div>
                     <textarea

@@ -20,7 +20,7 @@ import type { ImageRoute, TextRoute } from "./knowledge-cards";
 import { renderComicSlide, themeById } from "@aai/render-engine";
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
-import { buildStyleHint } from "../prompts";
+import { buildComicStoryboardPrompt, buildStyleHint } from "../prompts";
 
 export const COMIC_RUN_KIND = "comic_story_run";
 
@@ -115,7 +115,9 @@ export function buildComicPagePrompt(input: CreateRunInput, storyboard: ComicSto
     castText ? `出场角色（必须严格保持以下外貌与服装，跨页完全一致）：\n${castText}` : "出场角色：无",
     `画面内容：${page.visualPrompt}`,
     ...buildStyleHint(input),
-    "风格：单页多格科普漫画，清晰勾线，适合手机阅读。",
+    input.recipe === "strip_comic"
+      ? "风格：四格漫画，单页四格、节奏起承转合，清晰勾线，适合手机阅读。"
+      : "风格：单页多格科普漫画，清晰勾线，适合手机阅读。",
     "要求：画面中绝对不要出现任何文字、对白、旁白、音效字或水印（对白由程序以气泡渲染）；保持与其他页完全相同的角色形象与画风。",
   ].join("\n");
 }
@@ -159,7 +161,7 @@ async function executeComicRun(
     const node = await deps.runRepo.createNodeRun(runId, "parse-input");
     await deps.runRepo.startNode(node.id);
     await deps.runRepo.succeedNode(node.id, {
-      outputRef: JSON.stringify({ recipe: "comic_story", aspectRatio: input.aspectRatio, mode: input.textRenderingMode }),
+      outputRef: JSON.stringify({ recipe: input.recipe, aspectRatio: input.aspectRatio, mode: input.textRenderingMode }),
     });
   }
 
@@ -167,7 +169,7 @@ async function executeComicRun(
   await deps.runRepo.setSnapshot(
     runId,
     JSON.stringify({
-      recipe: "comic_story",
+      recipe: input.recipe,
       textRenderingMode: input.textRenderingMode,
       routes: [...deps.textRoutes, ...deps.imageRoutes].map((route) => ({
         id: route.config.id,
@@ -269,25 +271,15 @@ async function executeComicRun(
       runId,
       "generate-comic-storyboard",
       "ComicStoryboard",
-      [
-        `主题：${input.topic}`,
-        "核心结论：" + brief.coreMessage,
-        "角色锚点（分镜必须使用这些角色，不得新增有对白的角色）：",
-        castText,
-        "任务：生成 3–6 页科普漫画分镜。",
-        "要求：每页一个场景（scene）与画面描述（visualPrompt）；出场角色（cast）标注本页出现的角色名；每页 1–3 条对白（dialogues，speaker 必须是角色名，type=speech）或一条旁白（type=narration）；最后一页传递核心结论。",
-        input.sourceText ? `参考资料：\n<<<资料>>>\n${input.sourceText.slice(0, 6000)}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n"),
+      buildComicStoryboardPrompt(input, brief, castText),
       ) as { value: ComicStoryboard; nodeId: string }
     );
     storyboard = result.value;
-    // 归一化页码 + 一致性检查
+    // 归一化页码 + 一致性检查（strip_comic 允许 1–2 页四格）
     storyboard.pages.forEach((page, index) => {
       page.index = index;
     });
-    checks = runComicConsistencyChecks(storyboard);
+    checks = runComicConsistencyChecks(storyboard, input.recipe === "strip_comic" ? [1, 2] : [3, 8]);
     await deps.runRepo.setNodeOutput(result.nodeId, JSON.stringify({ value: storyboard, checks }));
     const failed = checks.filter((c) => c.status === "fail");
     if (failed.length > 0) {
