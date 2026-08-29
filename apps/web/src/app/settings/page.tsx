@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/server/auth";
 import { getRuntime } from "@/server/runtime";
+import { toBrandKitView } from "@/server/brand-kit-views";
 import { SettingsView } from "./settings-view";
 
 export const dynamic = "force-dynamic";
@@ -16,15 +17,7 @@ export default async function SettingsPage() {
         providerMode: runtime.config.providerMode,
         providerLabel: runtime.config.providerLabel,
       }}
-      initialKits={(await runtime.brandKitRepo.list()).map((kit) => ({
-        id: kit.id,
-        name: kit.name,
-        themeId: kit.themeId,
-        styleKeywords: JSON.parse(kit.styleKeywordsJson) as string[],
-        negativeKeywords: JSON.parse(kit.negativeKeywordsJson) as string[],
-        logoAssetId: kit.logoAssetId,
-        builtIn: kit.builtIn === 1,
-      }))}
+      initialKits={(await runtime.brandKitRepo.list()).map(toBrandKitView)}
     />
   );
 }

@@ -17,28 +17,46 @@ const FONT_FILES: Array<{ file: string; weight: 400 | 700 }> = [
   { file: "NotoSansSC-Bold.otf", weight: 700 },
 ];
 
+/** 标题衬线字体（Brand Kit titleFont=serif 时切换；`pnpm fonts` 一并下载） */
+const SERIF_FONT_FILES: Array<{ file: string; weight: 400 | 700 }> = [
+  { file: "NotoSerifSC-Regular.otf", weight: 400 },
+  { file: "NotoSerifSC-Bold.otf", weight: 700 },
+];
+
 export function fontsDir(): string {
   return FONTS_DIR;
 }
 
 export function fontsPresent(): boolean {
-  return FONT_FILES.every((entry) => fs.existsSync(path.join(FONTS_DIR, entry.file)));
+  return [...FONT_FILES, ...SERIF_FONT_FILES].every((entry) =>
+    fs.existsSync(path.join(FONTS_DIR, entry.file)),
+  );
+}
+
+function loadFiles(
+  files: Array<{ file: string; weight: 400 | 700 }>,
+  family: string,
+): LoadedFont[] {
+  return files.map((entry) => ({
+    name: family,
+    data: fs.readFileSync(path.join(FONTS_DIR, entry.file)),
+    weight: entry.weight,
+    style: "normal" as const,
+  }));
 }
 
 /**
- * 加载中文字体（Noto Sans SC，OFL 许可）。
+ * 加载中文字体（Noto Sans SC + Noto Serif SC，OFL 许可）。
  * 字体不进 Git，运行 `pnpm fonts` 下载；缺失时给出明确指引而不是神秘报错。
  */
 export function loadCardFonts(): LoadedFont[] {
   if (!fontsPresent()) {
     throw new Error(
-      `Chinese fonts not found in ${FONTS_DIR}. Run "pnpm fonts" to download Noto Sans SC (OFL).`,
+      `Chinese fonts not found in ${FONTS_DIR}. Run "pnpm fonts" to download Noto Sans SC + Noto Serif SC (OFL).`,
     );
   }
-  return FONT_FILES.map((entry) => ({
-    name: "Noto Sans SC",
-    data: fs.readFileSync(path.join(FONTS_DIR, entry.file)),
-    weight: entry.weight,
-    style: "normal" as const,
-  }));
+  return [
+    ...loadFiles(FONT_FILES, "Noto Sans SC"),
+    ...loadFiles(SERIF_FONT_FILES, "Noto Serif SC"),
+  ];
 }

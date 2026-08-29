@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { toAiError, withModelFallbacks, type VisualQualityModel } from "@aai/ai-core";
-import type { CreateRunInput, Storyboard, StoryboardSlide } from "@aai/shared-schemas";
+import type { CreateRunInput, GeneratedImage, Storyboard, StoryboardSlide } from "@aai/shared-schemas";
 import type { AssetRepo, JobRepo, ProviderRepo, RevisionRepo, RunRepo, AssetStore } from "@aai/storage";
-import { renderSlideDeterministic, themeById } from "@aai/render-engine";
+import { applyBrandOverlays, hasBrandOverlays, renderSlideDeterministic, themeById } from "@aai/render-engine";
 import type { ImageRoute } from "./knowledge-cards";
 import { buildSlidePrompt } from "../prompts";
 import { logger } from "../logger";
@@ -143,6 +143,7 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
           slide,
           pageCount: storyboard.slides.length,
           visualImageBase64: visualBase64,
+          brand: input.brandKit,
         });
         await finishRegen(deps, ctx, {
           runId: ctx.runId,
@@ -159,7 +160,11 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       /* native：模型出完整图，直接作为新版本 */
       await syncStoryboardSlide(deps, ctx.runId, payload.pageIndex, slide);
       const relPath = path.join("runs", ctx.runId, "pages", `page-${payload.pageIndex}-v${version}.png`);
-      const saved = await deps.assetStore.saveGeneratedImage(image, relPath);
+      let imageToSave: GeneratedImage = image;
+      if (hasBrandOverlays(input.brandKit)) {
+        imageToSave = await overlayGeneratedImage(image, input.brandKit);
+      }
+      const saved = await deps.assetStore.saveGeneratedImage(imageToSave, relPath);
       await deps.assetRepo.supersedePage(ctx.runId, payload.pageIndex);
       const asset = await deps.assetRepo.create({
         runId: ctx.runId,
@@ -195,6 +200,25 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       throw error;
     }
   });
+}
+
+/**
+ * 对原生直出图叠加 Brand Kit 水印/签名（「只对 generated 直出图叠加」规则）。
+ * 仅 base64 直出可叠加；URL 直出不下载，跳过叠加并原样返回。
+ */
+async function overlayGeneratedImage(
+  image: GeneratedImage,
+  brand: CreateRunInput["brandKit"],
+): Promise<GeneratedImage> {
+  const b64 = image.base64 ?? null;
+  if (!b64) return image;
+  const raw = Buffer.from(b64.replace(/^data:[^,]+,/, ""), "base64");
+  try {
+    const overlaid = await applyBrandOverlays(raw, brand);
+    return { ...image, base64: overlaid.toString("base64") };
+  } catch {
+    return image;
+  }
 }
 
 async function finishRegen(

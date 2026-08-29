@@ -15,6 +15,13 @@
       "when": 1788029535368,
       "tag": "0001_perfect_boomerang",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788033130814,
+      "tag": "0002_conscious_maddog",
+      "breakpoints": true
     }
   ]
 }

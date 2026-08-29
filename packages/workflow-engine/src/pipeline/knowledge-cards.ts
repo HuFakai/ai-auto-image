@@ -7,6 +7,7 @@ import {
   effectiveImageConcurrency,
   type ContentBrief,
   type CreateRunInput,
+  type GeneratedImage,
   type ModelUsage,
   type ProviderRouteConfig,
   type Storyboard,
@@ -28,7 +29,7 @@ import type {
   RunRepo,
   AssetStore,
 } from "@aai/storage";
-import { renderSlideDeterministic, themeById } from "@aai/render-engine";
+import { applyBrandOverlays, hasBrandOverlays, renderSlideDeterministic, themeById } from "@aai/render-engine";
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import { buildBriefPrompt, buildSlidePrompt, buildStoryboardPrompt } from "../prompts";
@@ -298,6 +299,12 @@ async function generatePage(
 
     const image = result[0]!;
 
+    /* 原生直出图叠加 Brand Kit 水印/签名；deterministic 模式渲染函数内部已叠，不重复 */
+    let imageToSave: GeneratedImage = image;
+    if (mode !== "deterministic" && hasBrandOverlays(input.brandKit)) {
+      imageToSave = await overlayGeneratedImage(image, input.brandKit);
+    }
+
     /* 原生模式文字审查：记录结果，不自动重试（不静默增加费用） */
     let metadata: Record<string, unknown> = { mode, expectedCopy: plan.expectedCopy };
     if (mode === "native" && deps.visualQuality && plan.expectedCopy.length > 0) {
@@ -326,7 +333,7 @@ async function generatePage(
     }
 
     const relPath = path.join("runs", runId, "pages", `page-${slide.index}.png`);
-    const saved = await deps.assetStore.saveGeneratedImage(image, relPath);
+    const saved = await deps.assetStore.saveGeneratedImage(imageToSave, relPath);
     const asset = await deps.assetRepo.create({
       runId,
       nodeRunId: node.id,
@@ -381,6 +388,27 @@ async function readLogoBase64(deps: WorkflowDeps, input: CreateRunInput): Promis
   }
 }
 
+/**
+ * 对原生直出图叠加 Brand Kit 水印/签名（deterministic 的 composite 由渲染函数叠加，
+ * 这里只处理直出图，遵守「只对 generated 直出图叠加」的规则）。
+ * 仅 base64 直出可叠加；URL 直出不下载，跳过叠加并原样返回。
+ */
+async function overlayGeneratedImage(
+  image: GeneratedImage,
+  brand: CreateRunInput["brandKit"],
+): Promise<GeneratedImage> {
+  const b64 = image.base64 ?? null;
+  if (!b64) return image;
+  const raw = Buffer.from(b64.replace(/^data:[^,]+,/, ""), "base64");
+  try {
+    const overlaid = await applyBrandOverlays(raw, brand);
+    return { ...image, base64: overlaid.toString("base64") };
+  } catch (error) {
+    logger.warn("brand overlay skipped", { error: String(error).slice(0, 200) });
+    return image;
+  }
+}
+
 async function renderAllSlides(
   deps: WorkflowDeps,
   runId: string,
@@ -409,6 +437,7 @@ async function renderAllSlides(
         pageCount,
         visualImageBase64: visualBase64,
         logoBase64,
+        brand: input.brandKit,
       });
       const saved = await deps.assetStore.saveBuffer(
         buffer,

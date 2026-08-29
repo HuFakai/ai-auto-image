@@ -1,7 +1,8 @@
 import sharp from "sharp";
-import { CANVAS_SIZES, type AspectRatio, type ComicDialogue } from "@aai/shared-schemas";
+import { CANVAS_SIZES, type AspectRatio, type BrandKitConfig, type ComicDialogue } from "@aai/shared-schemas";
 import { loadCardFonts, type LoadedFont } from "./fonts";
-import type { CardTheme } from "./themes";
+import { applyPaletteOverrides, type CardTheme } from "./themes";
+import { applyBrandOverlays } from "./brand-overlays";
 
 export interface RenderComicSlideInput {
   theme: CardTheme;
@@ -14,6 +15,16 @@ export interface RenderComicSlideInput {
   dialogues: ComicDialogue[];
   /** 对白文字颜色跟随主题 */
   logoBase64?: string | undefined;
+  /**
+   * Brand Kit 配置：paletteJson 覆盖主题色；footerSignature/watermarkText 在合成后叠加。
+   * 缺省时输出与旧版一致。
+   */
+  brand?: Partial<BrandKitConfig> | undefined;
+  /**
+   * 画面本身已带水印/签名（原生模式 generated 直出已叠）时置 true，避免重复叠加；
+   * 此时 palette 覆盖仍生效。
+   */
+  skipBrandOverlays?: boolean | undefined;
 }
 
 interface Element {
@@ -51,7 +62,8 @@ function estimateLines(text: string, fontSize: number, maxWidth: number): number
  * 布局为确定性纯函数；文字全部由程序渲染，可编辑。
  */
 export function buildComicOverlayTree(input: RenderComicSlideInput): Element {
-  const { theme, dialogues } = input;
+  const { dialogues } = input;
+  const theme = applyPaletteOverrides(input.theme, input.brand?.paletteJson);
   const { width, height } = CANVAS_SIZES[input.aspectRatio];
   const c = theme.colors;
   const padding = Math.round(width * 0.06);
@@ -223,5 +235,9 @@ export async function renderComicSlide(input: RenderComicSlideInput): Promise<Bu
     .resize(width, height, { fit: "cover", position: "center" })
     .png()
     .toBuffer();
-  return sharp(panel).composite([{ input: overlayPng }]).png().toBuffer();
+  const composite = await sharp(panel).composite([{ input: overlayPng }]).png().toBuffer();
+  if (input.brand && !input.skipBrandOverlays) {
+    return applyBrandOverlays(composite, input.brand);
+  }
+  return composite;
 }

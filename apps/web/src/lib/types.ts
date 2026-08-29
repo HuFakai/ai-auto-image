@@ -22,6 +22,15 @@ export interface BrandKitView {
   negativeKeywords: string[];
   logoAssetId: string | null;
   builtIn: boolean;
+  brandName: string | null;
+  slogan: string | null;
+  footerSignature: string | null;
+  watermarkText: string | null;
+  watermarkPosition: string;
+  watermarkOpacity: number;
+  titleFont: string;
+  paletteJson: { primary?: string; accent?: string; background?: string; ink?: string } | undefined;
+  coverLayout: string;
 }
 
 /** 渠道视图（密钥已脱敏，客户端安全） */

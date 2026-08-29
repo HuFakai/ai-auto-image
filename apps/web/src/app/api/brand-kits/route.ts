@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import type { BrandKit } from "@aai/storage";
-import type { BrandKitView } from "@/lib/types";
-import { THEME_IDS, ThemeIdSchema } from "@aai/shared-schemas";
+import { ThemeIdSchema } from "@aai/shared-schemas";
+import { toBrandKitView } from "@/server/brand-kit-views";
 import { getRuntime } from "@/server/runtime";
 import { requireAdmin, requireApiUser } from "@/server/auth";
 
@@ -14,25 +13,29 @@ const KitSchema = z.object({
   styleKeywords: z.array(z.string().max(40)).max(10).default([]),
   negativeKeywords: z.array(z.string().max(40)).max(10).default([]),
   logoAssetId: z.string().optional(),
+  brandName: z.string().max(60).optional(),
+  slogan: z.string().max(120).optional(),
+  footerSignature: z.string().max(80).optional(),
+  watermarkText: z.string().max(40).optional(),
+  watermarkPosition: z.enum(["corner", "center"]).default("corner"),
+  watermarkOpacity: z.number().min(0).max(1).default(0.18),
+  titleFont: z.enum(["default", "serif", "sans"]).default("default"),
+  paletteJson: z
+    .object({
+      primary: z.string().optional(),
+      accent: z.string().optional(),
+      background: z.string().optional(),
+      ink: z.string().optional(),
+    })
+    .optional(),
+  coverLayout: z.enum(["default", "big-center", "split"]).default("default"),
 });
-
-function view(row: BrandKit): BrandKitView {
-  return {
-    id: row.id,
-    name: row.name,
-    themeId: THEME_IDS.includes(row.themeId as never) ? row.themeId : "darkroom",
-    styleKeywords: JSON.parse(row.styleKeywordsJson) as string[],
-    negativeKeywords: JSON.parse(row.negativeKeywordsJson) as string[],
-    logoAssetId: row.logoAssetId,
-    builtIn: row.builtIn === 1,
-  };
-}
 
 export async function GET() {
   const user = await requireApiUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const runtime = await getRuntime();
-  return NextResponse.json({ kits: (await runtime.brandKitRepo.list()).map(view) });
+  return NextResponse.json({ kits: (await runtime.brandKitRepo.list()).map(toBrandKitView) });
 }
 
 export async function POST(request: Request) {
@@ -55,6 +58,15 @@ export async function POST(request: Request) {
     styleKeywords: parsed.data.styleKeywords,
     negativeKeywords: parsed.data.negativeKeywords,
     logoAssetId: parsed.data.logoAssetId ?? null,
+    brandName: parsed.data.brandName ?? null,
+    slogan: parsed.data.slogan ?? null,
+    footerSignature: parsed.data.footerSignature ?? null,
+    watermarkText: parsed.data.watermarkText ?? null,
+    watermarkPosition: parsed.data.watermarkPosition,
+    watermarkOpacity: parsed.data.watermarkOpacity,
+    titleFont: parsed.data.titleFont,
+    paletteJson: parsed.data.paletteJson,
+    coverLayout: parsed.data.coverLayout,
   });
-  return NextResponse.json({ kit: view(kit) }, { status: 201 });
+  return NextResponse.json({ kit: toBrandKitView(kit) }, { status: 201 });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { BrandKitView, ChannelView } from "@/lib/types";
 
 interface ChannelsPayload {
@@ -511,21 +511,109 @@ function KitForm({
   onSaved: () => Promise<void>;
 }) {
   const isNew = editing === "new";
-  const [name, setName] = useState(isNew ? "" : (editing as BrandKitView).name);
-  const [themeId, setThemeId] = useState(isNew ? "darkroom" : (editing as BrandKitView).themeId);
+  const base = editing === "new" ? null : (editing as BrandKitView);
+  const [name, setName] = useState(base?.name ?? "");
+  const [themeId, setThemeId] = useState(base?.themeId ?? "darkroom");
   const [styleKeywords, setStyleKeywords] = useState(
-    isNew ? "" : (editing as BrandKitView).styleKeywords.join("、"),
+    base ? base.styleKeywords.join("、") : "",
   );
   const [negativeKeywords, setNegativeKeywords] = useState(
-    isNew ? "" : (editing as BrandKitView).negativeKeywords.join("、"),
+    base ? base.negativeKeywords.join("、") : "",
   );
-  const [logoAssetId, setLogoAssetId] = useState<string | null>(
-    isNew ? null : (editing as BrandKitView).logoAssetId,
+  const [logoAssetId, setLogoAssetId] = useState<string | null>(base?.logoAssetId ?? null);
+  const [brandName, setBrandName] = useState(base?.brandName ?? "");
+  const [slogan, setSlogan] = useState(base?.slogan ?? "");
+  const [footerSignature, setFooterSignature] = useState(base?.footerSignature ?? "");
+  const [watermarkText, setWatermarkText] = useState(base?.watermarkText ?? "");
+  const [watermarkPosition, setWatermarkPosition] = useState<"corner" | "center">(
+    base?.watermarkPosition === "center" ? "center" : "corner",
+  );
+  const [watermarkOpacity, setWatermarkOpacity] = useState(
+    base?.watermarkOpacity ?? 0.18,
+  );
+  const [titleFont, setTitleFont] = useState<"default" | "serif" | "sans">(
+    base?.titleFont === "serif" || base?.titleFont === "sans" ? base.titleFont : "default",
+  );
+  const [palette, setPalette] = useState<{ primary?: string; accent?: string; background?: string; ink?: string }>(
+    base?.paletteJson ?? {},
+  );
+  const [coverLayout, setCoverLayout] = useState<"default" | "big-center" | "split">(
+    base?.coverLayout === "big-center" || base?.coverLayout === "split" ? base.coverLayout : "default",
   );
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewLive, setPreviewLive] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const swatch = THEME_SWATCH[themeId] ?? THEME_SWATCH.darkroom!;
+
+  const splitKeywords = (value: string) =>
+    value
+      .split(/[、,，\n]/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .slice(0, 10);
+
+  /** 组装完整 Kit 配置（预览与保存共用；空字段不提交，服务端按默认处理） */
+  const kitPayload = () => {
+    const paletteEntries = Object.entries(palette).filter((entry) => entry[1]?.trim());
+    return {
+      name,
+      themeId,
+      styleKeywords: splitKeywords(styleKeywords),
+      negativeKeywords: splitKeywords(negativeKeywords),
+      ...(logoAssetId ? { logoAssetId } : {}),
+      ...(brandName.trim() ? { brandName: brandName.trim() } : {}),
+      ...(slogan.trim() ? { slogan: slogan.trim() } : {}),
+      ...(footerSignature.trim() ? { footerSignature: footerSignature.trim() } : {}),
+      ...(watermarkText.trim() ? { watermarkText: watermarkText.trim() } : {}),
+      watermarkPosition,
+      watermarkOpacity,
+      titleFont,
+      coverLayout,
+      ...(paletteEntries.length > 0
+        ? { paletteJson: Object.fromEntries(paletteEntries) }
+        : {}),
+    };
+  };
+
+  async function runPreview() {
+    setPreviewBusy(true);
+    setPreviewError(null);
+    try {
+      const response = await fetch("/api/brand-kits/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(kitPayload()),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return url;
+      });
+    } catch (caught) {
+      setPreviewError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setPreviewBusy(false);
+    }
+  }
+
+  // 实时预览（可选）：点击预览样张后开启；配置变化 1s 防抖自动刷新，避免过频调用
+  const paletteKey = JSON.stringify(palette);
+  useEffect(() => {
+    if (!previewLive) return;
+    const timer = setTimeout(() => {
+      void runPreview();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [name, themeId, brandName, slogan, footerSignature, watermarkText, watermarkPosition, watermarkOpacity, titleFont, coverLayout, paletteKey, previewLive]);
 
   async function uploadLogo(file: File) {
     setUploading(true);
@@ -548,19 +636,7 @@ function KitForm({
     if (saving) return;
     setSaving(true);
     setError(null);
-    const split = (value: string) =>
-      value
-        .split(/[、,，\n]/)
-        .map((item) => item.trim())
-        .filter(Boolean)
-        .slice(0, 10);
-    const payload = {
-      name,
-      themeId,
-      styleKeywords: split(styleKeywords),
-      negativeKeywords: split(negativeKeywords),
-      ...(logoAssetId ? { logoAssetId } : {}),
-    };
+    const payload = kitPayload();
     try {
       const response = isNew
         ? await fetch("/api/brand-kits", {
@@ -692,6 +768,187 @@ function KitForm({
               )}
             </div>
           </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <span className="field-label">品牌名（页脚/水印候选文案）</span>
+              <input
+                className="field-input mt-1"
+                placeholder="如 山雨品牌"
+                value={brandName}
+                onChange={(event) => setBrandName(event.target.value)}
+              />
+            </div>
+            <div>
+              <span className="field-label">Slogan</span>
+              <input
+                className="field-input mt-1"
+                placeholder="让知识有光"
+                value={slogan}
+                onChange={(event) => setSlogan(event.target.value)}
+              />
+            </div>
+          </div>
+
+          <div>
+            <span className="field-label">页脚签名（底部居中，如 @账号名）</span>
+            <input
+              className="field-input mt-1"
+              placeholder="@shan_yu"
+              value={footerSignature}
+              onChange={(event) => setFooterSignature(event.target.value)}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <span className="field-label">水印文字</span>
+              <input
+                className="field-input mt-1"
+                placeholder="如 山雨品牌"
+                value={watermarkText}
+                onChange={(event) => setWatermarkText(event.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className="field-label">水印位置</span>
+                <select
+                  className="field-input mt-1"
+                  value={watermarkPosition}
+                  onChange={(event) => setWatermarkPosition(event.target.value as "corner" | "center")}
+                >
+                  <option value="corner">右下角斜置</option>
+                  <option value="center">居中大字</option>
+                </select>
+              </div>
+              <div>
+                <span className="field-label">透明度 {watermarkOpacity.toFixed(2)}</span>
+                <input
+                  className="field-input mt-1 font-mono !text-[13px]"
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={watermarkOpacity}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    setWatermarkOpacity(Number.isFinite(value) ? value : 0.18);
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <span className="field-label">标题字体</span>
+              <select
+                className="field-input mt-1"
+                value={titleFont}
+                onChange={(event) => setTitleFont(event.target.value as "default" | "serif" | "sans")}
+              >
+                <option value="default">默认（随主题）</option>
+                <option value="serif">衬线（Serif）</option>
+                <option value="sans">无衬线（Sans）</option>
+              </select>
+            </div>
+            <div>
+              <span className="field-label">封面布局</span>
+              <select
+                className="field-input mt-1"
+                value={coverLayout}
+                onChange={(event) => setCoverLayout(event.target.value as "default" | "big-center" | "split")}
+              >
+                <option value="default">默认</option>
+                <option value="big-center">标题居中放大</option>
+                <option value="split">标题上 1/3 + 分割线</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <span className="field-label">色板覆盖（留空则用主题默认色）</span>
+            <div className="mt-1 grid grid-cols-2 gap-x-4 gap-y-2">
+              {(
+                [
+                  ["primary", "主色（强调）", palette.primary ?? ""],
+                  ["accent", "辅助色（次要文字）", palette.accent ?? ""],
+                  ["background", "背景", palette.background ?? ""],
+                  ["ink", "正文色", palette.ink ?? ""],
+                ] as const
+              ).map(([key, label, value]) => (
+                <div key={key} className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    className="h-8 w-9 shrink-0 cursor-pointer border border-line bg-transparent p-0.5"
+                    value={value || "#000000"}
+                    onChange={(event) => setPalette((prev) => ({ ...prev, [key]: event.target.value }))}
+                    title={label}
+                  />
+                  <input
+                    className="field-input !mt-0 font-mono !text-[12px]"
+                    placeholder={label}
+                    value={value}
+                    onChange={(event) => setPalette((prev) => ({ ...prev, [key]: event.target.value }))}
+                  />
+                  <button
+                    className="btn-ghost shrink-0 px-1.5 py-1 font-mono text-[10px]"
+                    onClick={() => setPalette((prev) => {
+                      const next = { ...prev };
+                      delete next[key];
+                      return next;
+                    })}
+                    title="清除（用主题默认色）"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="btn-ghost px-3 py-1.5 font-mono text-[11px]"
+              onClick={() => {
+                setPreviewLive(true);
+                void runPreview();
+              }}
+              disabled={previewBusy}
+            >
+              {previewBusy ? "预览中…" : "预览样张"}
+            </button>
+            <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-ink-soft">
+              <input
+                type="checkbox"
+                checked={previewLive}
+                onChange={(event) => {
+                  setPreviewLive(event.target.checked);
+                  if (event.target.checked) void runPreview();
+                }}
+                className="accent-[#b5382d]"
+              />
+              实时预览（改动 1s 后自动刷新）
+            </label>
+            {previewLive && (
+              <span className="font-mono text-[10px] text-ink-faint">
+                零模型费用 · 3:4 样张
+              </span>
+            )}
+          </div>
+          {previewUrl && (
+            <div className="flex justify-center">
+              <img
+                src={previewUrl}
+                alt="品牌样张预览"
+                className="max-h-[360px] w-auto border border-line shadow-sm"
+              />
+            </div>
+          )}
+          {previewError && (
+            <p className="font-mono text-[11px] text-seal">⚠ 预览失败：{previewError}</p>
+          )}
 
           {error && <p className="font-mono text-xs text-seal">⚠ {error}</p>}
 

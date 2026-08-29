@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import type { BrandKitConfig, ThemeId } from "@aai/shared-schemas";
+import type { BrandKitConfig } from "@aai/shared-schemas";
 import { CreateRunInputSchema } from "@aai/shared-schemas";
+import { brandKitConfigFromRow } from "@/server/brand-kit-views";
 import { getRuntime } from "@/server/runtime";
 import { listRunItems } from "@/server/run-views";
 import { requireApiUser } from "@/server/auth";
@@ -19,18 +20,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  // Brand Kit：按 id 解析配置快照（创建时冻结进 run input）
+  // Brand Kit：按 id 解析配置快照（创建时冻结进 run input，含水印/签名/色板/布局等新字段）
   const brandKitId = typeof body.brandKitId === "string" ? body.brandKitId : undefined;
   let brandKit: BrandKitConfig | undefined;
   if (brandKitId) {
     try {
       const kit = await (await getRuntime()).brandKitRepo.require(brandKitId);
-      brandKit = {
-        themeId: kit.themeId as ThemeId,
-        styleKeywords: JSON.parse(kit.styleKeywordsJson) as string[],
-        negativeKeywords: JSON.parse(kit.negativeKeywordsJson) as string[],
-        logoAssetId: kit.logoAssetId ?? undefined,
-      };
+      brandKit = brandKitConfigFromRow(kit);
     } catch {
       return NextResponse.json({ error: "brand kit not found" }, { status: 400 });
     }

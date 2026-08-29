@@ -12,6 +12,22 @@ const PatchSchema = z.object({
   styleKeywords: z.array(z.string().max(40)).max(10).optional(),
   negativeKeywords: z.array(z.string().max(40)).max(10).optional(),
   logoAssetId: z.string().optional(),
+  brandName: z.string().max(60).optional(),
+  slogan: z.string().max(120).optional(),
+  footerSignature: z.string().max(80).optional(),
+  watermarkText: z.string().max(40).optional(),
+  watermarkPosition: z.enum(["corner", "center"]).optional(),
+  watermarkOpacity: z.number().min(0).max(1).optional(),
+  titleFont: z.enum(["default", "serif", "sans"]).optional(),
+  paletteJson: z
+    .object({
+      primary: z.string().optional(),
+      accent: z.string().optional(),
+      background: z.string().optional(),
+      ink: z.string().optional(),
+    })
+    .optional(),
+  coverLayout: z.enum(["default", "big-center", "split"]).optional(),
 });
 
 export async function PATCH(request: Request, ctx: { params: Promise<{ id: string }> }) {

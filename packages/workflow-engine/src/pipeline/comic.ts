@@ -7,6 +7,7 @@ import {
   type CharacterAnchor,
   type ComicStoryboard,
   type CreateRunInput,
+  type GeneratedImage,
   type ModelUsage,
 } from "@aai/shared-schemas";
 import {
@@ -17,7 +18,7 @@ import {
 import type { Semaphore } from "@aai/ai-core";
 import type { AssetRepo, JobRepo, ProviderRepo, RevisionRepo, RunRepo, AssetStore } from "@aai/storage";
 import type { ImageRoute, TextRoute } from "./knowledge-cards";
-import { renderComicSlide, themeById } from "@aai/render-engine";
+import { applyBrandOverlays, hasBrandOverlays, renderComicSlide, themeById } from "@aai/render-engine";
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import { buildComicStoryboardPrompt, buildStyleHint } from "../prompts";
@@ -331,6 +332,9 @@ async function executeComicRun(
           pageIndex: page.index,
           pageCount,
           dialogues: page.dialogues,
+          brand: input.brandKit,
+          // 原生模式 generated 直出已叠水印/签名，composite 不再重复叠加（只对直出图叠加的规则）
+          skipBrandOverlays: input.textRenderingMode !== "deterministic",
         });
         const saved = await deps.assetStore.saveBuffer(
           buffer,
@@ -457,8 +461,13 @@ async function generateComicPage(
     });
 
     const image = result[0]!;
+    /* 原生直出图叠加 Brand Kit 水印/签名；deterministic 由 renderComicSlide 内部叠加，不重复 */
+    let imageToSave: GeneratedImage = image;
+    if (input.textRenderingMode !== "deterministic" && hasBrandOverlays(input.brandKit)) {
+      imageToSave = await overlayGeneratedImage(image, input.brandKit);
+    }
     const saved = await deps.assetStore.saveGeneratedImage(
-      image,
+      imageToSave,
       path.join("runs", runId, "pages", `page-${pageIndex}.png`),
     );
     const asset = await deps.assetRepo.create({
@@ -493,6 +502,27 @@ async function generateComicPage(
 }
 
 /* ── 共享工具 ─────────────────────────────────────────────────── */
+
+/**
+ * 对原生直出图叠加 Brand Kit 水印/签名（「只对 generated 直出图叠加」规则；
+ * composite 由渲染函数内部叠加，这里不再处理）。
+ * 仅 base64 直出可叠加；URL 直出不下载，跳过叠加并原样返回。
+ */
+async function overlayGeneratedImage(
+  image: GeneratedImage,
+  brand: CreateRunInput["brandKit"],
+): Promise<GeneratedImage> {
+  const b64 = image.base64 ?? null;
+  if (!b64) return image;
+  const raw = Buffer.from(b64.replace(/^data:[^,]+,/, ""), "base64");
+  try {
+    const overlaid = await applyBrandOverlays(raw, brand);
+    return { ...image, base64: overlaid.toString("base64") };
+  } catch (error) {
+    logger.warn("brand overlay skipped", { error: String(error).slice(0, 200) });
+    return image;
+  }
+}
 
 async function throwIfAborted(deps: ComicPipelineDeps, runId: string, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {

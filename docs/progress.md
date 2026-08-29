@@ -75,9 +75,10 @@
 
 ### 阶段 3（2026-08-30 方向调整）
 - [x] **PostgreSQL 切换完成**：schema 全量改 pg 方言（15 表，含预留 users/sessions）；测试用进程内 PGlite、生产用 postgres.js（`DATABASE_URL`）；Repository 层 async 化；`pnpm db:migrate` 已在甲骨文服务器 PG（134.185.113.0/ai_image）建库，`pg:export → pg:import` 数据导入演练通过（渠道 + Brand Kit 已带上服务器）
-- [ ] 用户登录注册（账号密码，预留微信小程序扫码）— 下一批
-- [ ] 服务器部署上线（1Panel + Docker + HTTPS）— 登录后
-- [ ] 内容类型扩展 + Brand Kit 增强（见 docs/05-next-development-plan.md 批次 4/5）
+- [x] 用户登录注册（账号密码 + 邀请码注册 + 资源隔离 + 微信扫码预留）
+- [x] 内容类型扩展（金句卡/清单卡/对比卡/产品种草/图书推荐/长文拆解/四格漫画，共 9 类型）
+- [x] Brand Kit 品牌（水印/签名/字体/色板/封面模板/零费用预览样张）
+- [ ] 服务器部署上线（物料与手册就绪：docs/deployment.md，待服务器执行构建与反代）
 - [ ] Redis/BullMQ 独立 Worker（可选，服务器已有 Redis；单机自用暂缓）
 - [x] ~~React Flow 画布 / MCP Server / 开放 API 鉴权~~（2026-08-30 决策移除，见 05 文档「不做清单」）
 

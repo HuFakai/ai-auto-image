@@ -272,7 +272,7 @@ export const revisions = pgTable(
   (t) => [index("idx_revisions_run_page").on(t.runId, t.pageIndex)],
 );
 
-/** 品牌手册：主题、风格关键词与 Logo */
+/** 品牌手册：主题、风格关键词、Logo、水印/签名/字体/色板/封面模板 */
 export const brandKits = pgTable("brand_kits", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -281,6 +281,24 @@ export const brandKits = pgTable("brand_kits", {
   negativeKeywordsJson: text("negative_keywords_json").notNull().default("[]"),
   logoAssetId: text("logo_asset_id"),
   builtIn: integer("built_in").notNull().default(0),
+  /** 品牌名（可与手册名不同，用于页脚/水印展示） */
+  brandName: text("brand_name"),
+  /** 品牌 Slogan（预览样张与页脚候选文案） */
+  slogan: text("slogan"),
+  /** 页脚签名，如 @账号名 */
+  footerSignature: text("footer_signature"),
+  /** 水印文字 */
+  watermarkText: text("watermark_text"),
+  /** 水印位置：corner（右下角斜置） | center（居中大字） */
+  watermarkPosition: text("watermark_position").notNull().default("corner"),
+  /** 水印透明度 0–1 */
+  watermarkOpacity: real("watermark_opacity").notNull().default(0.18),
+  /** 标题字体：default | serif | sans */
+  titleFont: text("title_font").notNull().default("default"),
+  /** 色板覆盖 JSON：{primary?, accent?, background?, ink?} 全可选 */
+  paletteJson: text("palette_json"),
+  /** 封面布局：default | big-center | split */
+  coverLayout: text("cover_layout").notNull().default("default"),
   createdAt: createdAt(),
   updatedAt: epochColumn("updated_at").notNull(),
 });

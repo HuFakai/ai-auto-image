@@ -1,8 +1,9 @@
 import satori from "satori";
 import sharp from "sharp";
-import { CANVAS_SIZES, type AspectRatio, type StoryboardSlide } from "@aai/shared-schemas";
+import { CANVAS_SIZES, type AspectRatio, type BrandKitConfig, type StoryboardSlide } from "@aai/shared-schemas";
 import { loadCardFonts, type LoadedFont } from "./fonts";
-import type { CardTheme } from "./theme";
+import { applyPaletteOverrides, type CardTheme } from "./theme";
+import { applyBrandOverlays } from "./brand-overlays";
 
 export interface RenderSlideInput {
   theme: CardTheme;
@@ -13,6 +14,12 @@ export interface RenderSlideInput {
   visualImageBase64?: string | undefined;
   /** Brand Kit Logo（PNG 透明底，页脚展示） */
   logoBase64?: string | undefined;
+  /**
+   * Brand Kit 配置：paletteJson 覆盖主题色、coverLayout 切换封面布局、
+   * titleFont 切换封面标题字体、footerSignature/watermarkText 渲染后叠加。
+   * 缺省时输出与旧版完全一致。
+   */
+  brand?: Partial<BrandKitConfig> | undefined;
 }
 
 interface Element {
@@ -59,23 +66,44 @@ function text(text: string, style: Record<string, unknown>): Element {
   return { type: "div", props: { style, children: text } };
 }
 
+/** titleFont → Satori 字体族；default 跟随主题（无衬线） */
+function titleFontFamily(titleFont: string | undefined, fallback: string): string {
+  if (titleFont === "serif") return "Noto Serif SC";
+  if (titleFont === "sans") return "Noto Sans SC";
+  return fallback;
+}
+
 /**
  * 构建卡片布局树：纯函数，相同输入得到相同树（无随机、无时间），
  * 配合固定字体与 Satori，相同 RenderSnapshot 输出字节级一致的图片。
+ * brand 缺省（或仅填充默认值）时生成的树与旧版逐字节一致。
  */
 export function buildSlideTree(input: RenderSlideInput): Element {
-  const { theme, slide, pageCount } = input;
+  const { slide, pageCount } = input;
+  const theme = applyPaletteOverrides(input.theme, input.brand?.paletteJson);
   const { width, height } = CANVAS_SIZES[input.aspectRatio];
   const c = theme.colors;
   const padding = Math.round(width * 0.08);
   const contentWidth = width - padding * 2;
   const isCover = slide.role === "cover";
+  const coverLayout = isCover ? input.brand?.coverLayout ?? "default" : "default";
+  // 仅显式设置 serif/sans 时切换标题字体；default/未设置不写 fontFamily，输出与旧版一致
+  const useTitleFont = input.brand?.titleFont === "serif" || input.brand?.titleFont === "sans";
+  const titleFamily = titleFontFamily(input.brand?.titleFont, theme.fontFamily);
+  const titleFamilyStyle = useTitleFont ? { fontFamily: titleFamily } : {};
 
   const bodyLines = slide.body.filter((line) => line.trim().length > 0);
+  const titleStart = isCover
+    ? coverLayout === "big-center"
+      ? Math.round(width * 0.135)
+      : coverLayout === "split"
+        ? Math.round(width * 0.1)
+        : Math.round(width * 0.115)
+    : Math.round(width * 0.082);
   const titleSize = fitFontSize(
     [slide.headline],
     contentWidth,
-    isCover ? Math.round(width * 0.115) : Math.round(width * 0.082),
+    titleStart,
     40,
   );
   const bodySize = bodyLines.length
@@ -85,27 +113,97 @@ export function buildSlideTree(input: RenderSlideInput): Element {
   const children: Element[] = [];
 
   if (isCover) {
-    children.push(
-      text(slide.headline, {
-        display: "flex",
-        marginTop: height * 0.16,
-        fontSize: titleSize,
-        fontWeight: 700,
-        color: c.ink,
-        lineHeight: 1.25,
-        letterSpacing: "0.02em",
-      }),
-    );
-    if (bodyLines.length > 0) {
+    if (coverLayout === "big-center") {
+      // 标题绝对居中放大
       children.push(
-        text(bodyLines[0]!, {
+        text(slide.headline, {
           display: "flex",
-          marginTop: height * 0.03,
-          fontSize: Math.max(30, Math.round(width * 0.042)),
-          color: c.accent,
+          marginTop: height * 0.42,
+          fontSize: titleSize,
           fontWeight: 700,
+          color: c.ink,
+          lineHeight: 1.2,
+          letterSpacing: "0.02em",
+          textAlign: "center",
+          justifyContent: "center",
+          ...titleFamilyStyle,
         }),
       );
+      if (bodyLines.length > 0) {
+        children.push(
+          text(bodyLines[0]!, {
+            display: "flex",
+            justifyContent: "center",
+            marginTop: height * 0.035,
+            fontSize: Math.max(30, Math.round(width * 0.046)),
+            color: c.accent,
+            fontWeight: 700,
+            ...titleFamilyStyle,
+          }),
+        );
+      }
+    } else if (coverLayout === "split") {
+      // 标题上 1/3 + 分割线
+      children.push(
+        text(slide.headline, {
+          display: "flex",
+          marginTop: height * 0.2,
+          fontSize: titleSize,
+          fontWeight: 700,
+          color: c.ink,
+          lineHeight: 1.3,
+          letterSpacing: "0.02em",
+          ...titleFamilyStyle,
+        }),
+      );
+      children.push({
+        type: "div",
+        props: {
+          style: {
+            display: "flex",
+            width: Math.round(width * 0.18),
+            height: Math.round(width * 0.006),
+            marginTop: height * 0.045,
+            backgroundColor: c.accent,
+          },
+        },
+      });
+      if (bodyLines.length > 0) {
+        children.push(
+          text(bodyLines[0]!, {
+            display: "flex",
+            marginTop: height * 0.035,
+            fontSize: Math.max(30, Math.round(width * 0.04)),
+            color: c.accent,
+            fontWeight: 700,
+          }),
+        );
+      }
+    } else {
+      children.push(
+        text(slide.headline, {
+          display: "flex",
+          marginTop: height * 0.16,
+          fontSize: titleSize,
+          fontWeight: 700,
+          color: c.ink,
+          lineHeight: 1.25,
+          letterSpacing: "0.02em",
+          ...titleFamilyStyle,
+        }),
+      );
+      if (bodyLines.length > 0) {
+        children.push(
+          text(bodyLines[0]!, {
+            display: "flex",
+            marginTop: height * 0.03,
+            fontSize: Math.max(30, Math.round(width * 0.042)),
+            color: c.accent,
+            fontWeight: 700,
+            ...titleFamilyStyle,
+          }),
+        );
+      }
     }
   } else {
     children.push(
@@ -292,5 +390,10 @@ export async function renderSlideDeterministic(input: RenderSlideInput): Promise
     height,
     fonts: fonts(),
   });
-  return sharp(Buffer.from(svg)).png().toBuffer();
+  const png = await sharp(Buffer.from(svg)).png().toBuffer();
+  if (input.brand) {
+    // Brand Kit 水印/签名：无配置时原样返回（逐字节一致）
+    return applyBrandOverlays(png, input.brand);
+  }
+  return png;
 }

@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   JOB_TERMINAL_STATUSES,
   type JobStatus,
+  type PaletteOverrides,
   type ProviderErrorCategory,
 } from "@aai/shared-schemas";
 import type { Db, DbClient } from "./database";
@@ -841,6 +842,17 @@ export interface BrandKitRow {
   negativeKeywords: string[];
   logoAssetId?: string | null;
   builtIn?: number;
+  /** 品牌名（可与手册名不同） */
+  brandName?: string | null;
+  slogan?: string | null;
+  footerSignature?: string | null;
+  watermarkText?: string | null;
+  watermarkPosition?: string;
+  watermarkOpacity?: number;
+  titleFont?: string;
+  /** 色板覆盖（对象形式；落库序列化为 JSON 文本） */
+  paletteJson?: PaletteOverrides | null;
+  coverLayout?: string;
 }
 
 export class BrandKitRepo {
@@ -862,6 +874,15 @@ export class BrandKitRepo {
         negativeKeywordsJson: JSON.stringify(input.negativeKeywords),
         logoAssetId: input.logoAssetId ?? null,
         builtIn: input.builtIn ?? 0,
+        brandName: input.brandName ?? null,
+        slogan: input.slogan ?? null,
+        footerSignature: input.footerSignature ?? null,
+        watermarkText: input.watermarkText ?? null,
+        watermarkPosition: input.watermarkPosition ?? "corner",
+        watermarkOpacity: input.watermarkOpacity ?? 0.18,
+        titleFont: input.titleFont ?? "default",
+        paletteJson: input.paletteJson ? JSON.stringify(input.paletteJson) : null,
+        coverLayout: input.coverLayout ?? "default",
         createdAt: ts,
         updatedAt: ts,
       });
@@ -892,6 +913,17 @@ export class BrandKitRepo {
     if (patch.styleKeywords !== undefined) set.styleKeywordsJson = JSON.stringify(patch.styleKeywords);
     if (patch.negativeKeywords !== undefined) set.negativeKeywordsJson = JSON.stringify(patch.negativeKeywords);
     if (patch.logoAssetId !== undefined) set.logoAssetId = patch.logoAssetId;
+    if (patch.brandName !== undefined) set.brandName = patch.brandName;
+    if (patch.slogan !== undefined) set.slogan = patch.slogan;
+    if (patch.footerSignature !== undefined) set.footerSignature = patch.footerSignature;
+    if (patch.watermarkText !== undefined) set.watermarkText = patch.watermarkText;
+    if (patch.watermarkPosition !== undefined) set.watermarkPosition = patch.watermarkPosition;
+    if (patch.watermarkOpacity !== undefined) set.watermarkOpacity = patch.watermarkOpacity;
+    if (patch.titleFont !== undefined) set.titleFont = patch.titleFont;
+    if (patch.paletteJson !== undefined) {
+      set.paletteJson = patch.paletteJson ? JSON.stringify(patch.paletteJson) : null;
+    }
+    if (patch.coverLayout !== undefined) set.coverLayout = patch.coverLayout;
     await this.client.update(brandKits).set(set).where(eq(brandKits.id, id));
     return this.require(id);
   }

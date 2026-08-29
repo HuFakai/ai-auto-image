@@ -1,3 +1,5 @@
+import type { PaletteOverrides } from "@aai/shared-schemas";
+
 /** 知识卡片主题：六套内置预设（Brand Kit themeId 与 THEME_IDS 对应） */
 export interface CardTheme {
   name: string;
@@ -116,4 +118,28 @@ export const knowledgeCardTheme: CardTheme = CARD_THEMES.darkroom!;
 export function themeById(themeId: string | undefined): CardTheme {
   if (themeId && CARD_THEMES[themeId]) return CARD_THEMES[themeId]!;
   return CARD_THEMES.darkroom!;
+}
+
+/**
+ * 应用 Brand Kit 色板覆盖（全部可选；未命中任何键时原样返回）。
+ * 映射：primary→accent（主品牌色，用于强调），accent→muted（次要文字），background→background，ink→ink。
+ * 纯函数：不修改传入主题。
+ */
+export function applyPaletteOverrides(
+  theme: CardTheme,
+  palette: PaletteOverrides | undefined,
+): CardTheme {
+  if (!palette) return theme;
+  const colors = { ...theme.colors };
+  if (palette.background) colors.background = palette.background;
+  if (palette.ink) colors.ink = palette.ink;
+  if (palette.primary) colors.accent = palette.primary;
+  if (palette.accent) colors.muted = palette.accent;
+  if (colors.background === theme.colors.background
+    && colors.ink === theme.colors.ink
+    && colors.accent === theme.colors.accent
+    && colors.muted === theme.colors.muted) {
+    return theme;
+  }
+  return { ...theme, colors };
 }
