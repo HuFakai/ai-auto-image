@@ -6,21 +6,19 @@ import { loadDotEnv } from "./lib/env";
 loadDotEnv();
 
 const root = path.resolve(import.meta.dirname ?? process.cwd(), "..");
-const dataDir = process.env.DATA_DIR ?? path.join(root, "data");
-const sqlitePath = process.env.SQLITE_PATH ?? path.join(dataDir, "db", "app.db");
 const migrationsDir =
   process.env.SQLITE_MIGRATIONS_DIR ?? path.join(root, "packages", "storage", "drizzle");
 
-const db = openDatabase({ sqlitePath, migrationsFolder: migrationsDir });
+const db = await openDatabase({ url: process.env.DATABASE_URL, migrationsFolder: migrationsDir });
 const projectRepo = new ProjectRepo(db.db);
 const promptRepo = new PromptRepo(db.db);
 
-const project = projectRepo.create({ title: "种子项目：三分钟看懂量子纠缠" });
-const briefPrompt = promptRepo.ensureVersion(
+const project = await projectRepo.create({ title: "种子项目：三分钟看懂量子纠缠" });
+const briefPrompt = await promptRepo.ensureVersion(
   "generate-brief",
   ["主题：{topic}", "目标平台：{platform}", "任务：为这套图文生成 Content Brief。"].join("\n"),
 );
-const storyboardPrompt = promptRepo.ensureVersion(
+const storyboardPrompt = await promptRepo.ensureVersion(
   "generate-storyboard",
   [
     "主题：{topic}",
@@ -31,4 +29,4 @@ const storyboardPrompt = promptRepo.ensureVersion(
 
 console.log(`seeded project=${project.id}`);
 console.log(`prompt versions: ${briefPrompt.id} (v${briefPrompt.version}), ${storyboardPrompt.id} (v${storyboardPrompt.version})`);
-db.close();
+await db.close();

@@ -11,10 +11,10 @@ export const dynamic = "force-dynamic";
 /** 导出 ZIP：按序图片 + 发布文案 + manifest + 发布清单；结果缓存到 /data/exports */
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const runtime = getRuntime();
+  const runtime = await getRuntime();
   let run;
   try {
-    run = runtime.runRepo.require(id);
+    run = await runtime.runRepo.require(id);
   } catch {
     return NextResponse.json({ error: "run not found" }, { status: 404 });
   }
@@ -25,9 +25,9 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   const input = JSON.parse(run.inputJson) as CreateRunInput;
 
   // Storyboard（标题与页序）
-  const storyboardNode = runtime
-    .runRepo.listNodeRuns(id)
-    .find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded");
+  const storyboardNode = (await runtime.runRepo.listNodeRuns(id)).find(
+    (n) => n.nodeName === "generate-storyboard" && n.status === "succeeded",
+  );
   if (!storyboardNode?.outputRef) {
     return NextResponse.json({ error: "storyboard missing" }, { status: 409 });
   }
@@ -40,7 +40,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   // 页面当前版本资产（未被替代），按页序排列
   const pageFiles: ExportPageFile[] = [];
   for (const slide of parsedStoryboard.data.slides) {
-    const asset = runtime.assetRepo.latestForPage(id, slide.index);
+    const asset = await runtime.assetRepo.latestForPage(id, slide.index);
     if (!asset) continue;
     const fullPath = runtime.assetStore.resolve(asset.filePath);
     if (!fs.existsSync(fullPath)) continue;
@@ -77,7 +77,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
       if (!textModel) throw new Error("no text model");
       copy = await generatePlatformCopy(textModel, input, pageFiles);
     } catch {
-      const briefNode = runtime.runRepo.listNodeRuns(id).find((n) => n.nodeName === "generate-brief");
+      const briefNode = (await runtime.runRepo.listNodeRuns(id)).find((n) => n.nodeName === "generate-brief");
       const coreMessage = briefNode?.outputRef
         ? (JSON.parse(briefNode.outputRef) as { value?: { coreMessage?: string } }).value?.coreMessage
         : undefined;

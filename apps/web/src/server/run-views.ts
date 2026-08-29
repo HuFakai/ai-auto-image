@@ -14,10 +14,12 @@ interface NodeRow {
 }
 
 /** 从持久化状态推导运行列表（供 SSR 与 GET /api/runs 复用） */
-export function listRunItems(runtime: Runtime, limit: number): RunListItem[] {
-  return runtime.runRepo.list(limit).map((run) => {
+export async function listRunItems(runtime: Runtime, limit: number): Promise<RunListItem[]> {
+  const runs = await runtime.runRepo.list(limit);
+  const items: RunListItem[] = [];
+  for (const run of runs) {
     const input = JSON.parse(run.inputJson) as { topic: string; textRenderingMode: string };
-    const nodes = runtime.runRepo.listNodeRuns(run.id) as unknown as NodeRow[];
+    const nodes = (await runtime.runRepo.listNodeRuns(run.id)) as unknown as NodeRow[];
     // 知识卡片 / 科普漫画两种分镜节点
     const storyboardNode =
       nodes.find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded") ??
@@ -33,8 +35,8 @@ export function listRunItems(runtime: Runtime, limit: number): RunListItem[] {
       }
     }
     // 封面：第一页当前资产
-    const cover = runtime.assetRepo.latestForPage(run.id, 0);
-    return {
+    const cover = await runtime.assetRepo.latestForPage(run.id, 0);
+    items.push({
       runId: run.id,
       topic: input.topic,
       status: run.status as RunListItem["status"],
@@ -43,20 +45,21 @@ export function listRunItems(runtime: Runtime, limit: number): RunListItem[] {
       createdAt: run.createdAt,
       pageCount,
       coverAssetId: cover?.id ?? undefined,
-    };
-  });
+    });
+  }
+  return items;
 }
 
 /** 组装运行详情（供 SSR 与 GET /api/runs/:id 复用） */
-export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayload | null {
+export async function buildRunDetail(runtime: Runtime, runId: string): Promise<RunDetailPayload | null> {
   let run;
   try {
-    run = runtime.runRepo.require(runId);
+    run = await runtime.runRepo.require(runId);
   } catch {
     return null;
   }
   const input = JSON.parse(run.inputJson) as RunDetailPayload["input"] & { brandKitId?: string };
-  const nodes = runtime.runRepo.listNodeRuns(runId) as unknown as NodeRow[];
+  const nodes = (await runtime.runRepo.listNodeRuns(runId)) as unknown as NodeRow[];
   const snapshot = run.snapshotJson
     ? (JSON.parse(run.snapshotJson) as {
         concurrency?: RunDetailPayload["concurrency"];
@@ -87,87 +90,97 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
   // 页面状态以「每页当前资产」为准（返修后取最新版本，旧版本计入 Revision 链）
   const pageNodes = nodes.filter((n) => n.nodeName === "generate-images");
   const comicSlides = comicStoryboard?.pages ?? [];
-  const pages: RunDetailPayload["pages"] = (
-    storyboard?.slides ?? comicSlides.map((comicPage) => ({
+  const pages: RunDetailPayload["pages"] = await Promise.all(
+    (storyboard?.slides ?? comicSlides.map((comicPage) => ({
       index: comicPage.index,
       role: "comic" as const,
       headline: comicPage.scene.slice(0, 24),
       body: comicPage.dialogues.map((d) => `${d.speaker}：${d.text}`),
       visualIntent: comicPage.visualPrompt,
       layoutHint: "",
-    }))
-  ).map((slide) => {
-    const current = runtime.assetRepo.latestForPage(runId, slide.index);
-    if (current) {
-      const metadata = current.metadataJson ? (JSON.parse(current.metadataJson) as Record<string, unknown>) : {};
-      // 页面模型优先读资产 metadata（回退链：合成节点 → 同页出图节点）
-      const pageModelFromMeta =
-        typeof metadata.model === "string" && metadata.model
-          ? metadata.model
-          : (() => {
-              const generatedAsset = runtime
-                .assetRepo.listByRun(runId)
-                .filter((a) => a.pageIndex === slide.index && a.kind === "generated")
-                .sort((a, b) => b.createdAt - a.createdAt)[0];
-              const genMeta = generatedAsset?.metadataJson
-                ? (JSON.parse(generatedAsset.metadataJson) as Record<string, unknown>)
-                : {};
-              if (typeof genMeta.model === "string" && genMeta.model) return genMeta.model;
-              const genNode = generatedAsset?.nodeRunId
-                ? nodes.find((n) => n.id === generatedAsset.nodeRunId)
-                : undefined;
-              return genNode?.model ?? undefined;
-            })();
+    }))).map(async (slide) => {
+      const current = await runtime.assetRepo.latestForPage(runId, slide.index);
+      if (current) {
+        const metadata = current.metadataJson ? (JSON.parse(current.metadataJson) as Record<string, unknown>) : {};
+        // 页面模型优先读资产 metadata（回退链：合成节点 → 同页出图节点）
+        let pageModelFromMeta: string | undefined;
+        if (typeof metadata.model === "string" && metadata.model) {
+          pageModelFromMeta = metadata.model;
+        } else {
+          const assets = await runtime.assetRepo.listByRun(runId);
+          const generatedAsset = assets
+            .filter((a) => a.pageIndex === slide.index && a.kind === "generated")
+            .sort((a, b) => b.createdAt - a.createdAt)[0];
+          const genMeta = generatedAsset?.metadataJson
+            ? (JSON.parse(generatedAsset.metadataJson) as Record<string, unknown>)
+            : {};
+          if (typeof genMeta.model === "string" && genMeta.model) {
+            pageModelFromMeta = genMeta.model;
+          } else {
+            const genNode = generatedAsset?.nodeRunId
+              ? nodes.find((n) => n.id === generatedAsset.nodeRunId)
+              : undefined;
+            pageModelFromMeta = genNode?.model ?? undefined;
+          }
+        }
+        return {
+          index: slide.index,
+          role: slide.role,
+          headline: slide.headline,
+          status: "ready" as const,
+          assetId: current.id,
+          mode: typeof metadata.mode === "string" ? metadata.mode : undefined,
+          expectedCopy: Array.isArray(metadata.expectedCopy) ? (metadata.expectedCopy as string[]) : undefined,
+          visualCheckPassed:
+            typeof metadata.visualCheckPassed === "boolean" ? metadata.visualCheckPassed : undefined,
+          revision: typeof metadata.revision === "number" ? metadata.revision : undefined,
+          model: pageModelFromMeta,
+        };
+      }
+      // 尚无当前资产：看是否有失败的页面节点（可重试）
+      const failedNode = pageNodes.find((n) => {
+        try {
+          return (
+            n.status === "failed" &&
+            (JSON.parse(n.outputRef ?? "{}") as { pageIndex?: number }).pageIndex === slide.index
+          );
+        } catch {
+          return false;
+        }
+      });
       return {
         index: slide.index,
         role: slide.role,
         headline: slide.headline,
-        status: "ready" as const,
-        assetId: current.id,
-        mode: typeof metadata.mode === "string" ? metadata.mode : undefined,
-        expectedCopy: Array.isArray(metadata.expectedCopy) ? (metadata.expectedCopy as string[]) : undefined,
-        visualCheckPassed:
-          typeof metadata.visualCheckPassed === "boolean" ? metadata.visualCheckPassed : undefined,
-        revision: typeof metadata.revision === "number" ? metadata.revision : undefined,
-        model: pageModelFromMeta,
+        status: failedNode ? ("failed" as const) : ("pending" as const),
       };
-    }
-    // 尚无当前资产：看是否有失败的页面节点（可重试）
-    const failedNode = pageNodes.find((n) => {
-      try {
-        return (
-          n.status === "failed" &&
-          (JSON.parse(n.outputRef ?? "{}") as { pageIndex?: number }).pageIndex === slide.index
-        );
-      } catch {
-        return false;
-      }
-    });
-    return {
-      index: slide.index,
-      role: slide.role,
-      headline: slide.headline,
-      status: failedNode ? ("failed" as const) : ("pending" as const),
-    };
-  });
+    }),
+  );
 
-  const job = runtime.jobRepo.list(200).find((j) => j.runId === runId);
-  const totals = runtime.runRepo.runTotals(runId);
+  const job = (await runtime.jobRepo.list(200)).find((j) => j.runId === runId);
+  const totals = await runtime.runRepo.runTotals(runId);
 
   // 生成信息：输入 + 冻结快照 + 漫画定妆图
-  const brandKitMeta = input.brandKit
-    ? {
-        name: input.brandKitId ? (runtime.brandKitRepo.list().find((k) => k.id === input.brandKitId)?.name ?? "已删除") : "自定义",
-        themeId: input.brandKit.themeId,
-        styleKeywords: input.brandKit.styleKeywords,
-      }
-    : null;
+  let brandKitMeta: RunDetailPayload["generation"]["brandKit"] = null;
+  if (input.brandKit) {
+    let name = "自定义";
+    if (input.brandKitId) {
+      const kits = await runtime.brandKitRepo.list();
+      name = kits.find((k) => k.id === input.brandKitId)?.name ?? "已删除";
+    }
+    brandKitMeta = {
+      name,
+      themeId: input.brandKit.themeId,
+      styleKeywords: input.brandKit.styleKeywords,
+    };
+  }
   const characterRefNode = nodes.find(
     (n) => n.nodeName === "generate-character-ref" && n.status === "succeeded",
   );
   const characterRefAssetId = characterRefNode?.outputRef
     ? (JSON.parse(characterRefNode.outputRef) as { assetId?: string }).assetId ?? null
     : null;
+  const usedModels = await runtime.providerRepo.listUsedModels(runId);
 
   return {
     runId,
@@ -191,9 +204,9 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
       platform: input.platform,
       brandKit: brandKitMeta,
       // 生成信息-模型：以实际调用为准（含回退与重试），快照仅兜底
-      ...(runtime.providerRepo.listUsedModels(runId).length > 0
+      ...(usedModels.length > 0
         ? {
-            routes: runtime.providerRepo.listUsedModels(runId).map((m) => ({
+            routes: usedModels.map((m) => ({
               id: m.routeId,
               kind: "used",
               model: m.model,
@@ -219,9 +232,12 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
 }
 
 /** 读取资产文件（供资产下载路由复用） */
-export function readAssetFile(runtime: Runtime, assetId: string): { body: fs.ReadStream; mimeType: string } | null {
+export async function readAssetFile(
+  runtime: Runtime,
+  assetId: string,
+): Promise<{ body: fs.ReadStream; mimeType: string } | null> {
   try {
-    const asset = runtime.assetRepo.require(assetId);
+    const asset = await runtime.assetRepo.require(assetId);
     const fullPath = runtime.assetStore.resolve(asset.filePath);
     if (!fs.existsSync(fullPath)) return null;
     return { body: fs.createReadStream(fullPath), mimeType: asset.mimeType };

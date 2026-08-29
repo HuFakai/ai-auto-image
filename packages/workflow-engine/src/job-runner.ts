@@ -69,9 +69,9 @@ export class JobRunner {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
-    this.recoverOrphans();
+    void this.recoverOrphans();
     this.timer = setInterval(() => void this.tick(), this.pollIntervalMs);
-    this.watchdogTimer = setInterval(() => this.runWatchdog(), this.watchdogIntervalMs);
+    this.watchdogTimer = setInterval(() => void this.runWatchdog(), this.watchdogIntervalMs);
     logger.info("job runner started", { holder: this.holder, maxConcurrent: this.maxConcurrent });
   }
 
@@ -90,29 +90,29 @@ export class JobRunner {
   }
 
   /** 阶段 0 单实例：启动时把遗留 running 释放回队列，claim 时计入 recoveries */
-  recoverOrphans(): number {
-    const orphans = this.jobRepo.listByStatus(["running"]);
+  async recoverOrphans(): Promise<number> {
+    const orphans = await this.jobRepo.listByStatus(["running"]);
     let count = 0;
     for (const job of orphans) {
-      this.jobRepo.updateStatus(job.id, "queued");
-      this.jobRepo.appendEvent(job.id, "orphan_recovered", "released stale running lease on boot");
+      await this.jobRepo.updateStatus(job.id, "queued");
+      await this.jobRepo.appendEvent(job.id, "orphan_recovered", "released stale running lease on boot");
       count += 1;
     }
     if (count > 0) logger.info("recovered orphan jobs", { count });
     return count;
   }
 
-  cancel(jobId: string): boolean {
+  async cancel(jobId: string): Promise<boolean> {
     const entry = this.running.get(jobId);
-    const job = this.jobRepo.updateStatus(jobId, "cancelled");
-    this.jobRepo.appendEvent(jobId, "cancelled", "by user");
+    const job = await this.jobRepo.updateStatus(jobId, "cancelled");
+    await this.jobRepo.appendEvent(jobId, "cancelled", "by user");
     if (entry) entry.controller.abort();
     return job.status === "cancelled";
   }
 
-  private runWatchdog(): void {
+  private async runWatchdog(): Promise<void> {
     try {
-      const stalled = this.jobRepo.failStalled(this.stallTimeoutMs);
+      const stalled = await this.jobRepo.failStalled(this.stallTimeoutMs);
       for (const job of stalled) {
         const entry = this.running.get(job.id);
         entry?.controller.abort();
@@ -125,11 +125,11 @@ export class JobRunner {
 
   private async tick(): Promise<void> {
     if (this.running.size >= this.maxConcurrent) return;
-    const job = this.jobRepo.claimNext(this.holder, this.leaseMs);
+    const job = await this.jobRepo.claimNext(this.holder, this.leaseMs);
     if (!job) return;
     const handler = this.handlers.get(job.kind);
     if (!handler) {
-      this.jobRepo.updateStatus(job.id, "failed", { lastError: `no handler for kind ${job.kind}` });
+      await this.jobRepo.updateStatus(job.id, "failed", { lastError: `no handler for kind ${job.kind}` });
       return;
     }
 
@@ -149,11 +149,9 @@ export class JobRunner {
     // 心跳续租是 Runner 的职责：慢调用（分钟级推理）期间租约绝不意外过期，
     // 否则其他 runner 实例会把任务误判为孤儿并重复执行
     const heartbeat = setInterval(() => {
-      try {
-        this.jobRepo.renewLease(jobId, this.holder, this.leaseMs);
-      } catch {
+      this.jobRepo.renewLease(jobId, this.holder, this.leaseMs).catch(() => {
         /* 下一轮心跳重试 */
-      }
+      });
     }, Math.max(5_000, Math.floor(this.leaseMs / 3)));
 
     try {
@@ -161,18 +159,22 @@ export class JobRunner {
         jobId,
         runId,
         signal: controller.signal,
-        onProgress: () => this.jobRepo.renewLease(jobId, this.holder, this.leaseMs),
+        onProgress: () => {
+          this.jobRepo.renewLease(jobId, this.holder, this.leaseMs).catch(() => {
+            /* 心跳失败不阻塞生成，租约仍有余量 */
+          });
+        },
       });
-      this.jobRepo.updateStatus(jobId, "succeeded");
-      this.jobRepo.appendEvent(jobId, "succeeded");
+      await this.jobRepo.updateStatus(jobId, "succeeded");
+      await this.jobRepo.appendEvent(jobId, "succeeded");
     } catch (error) {
-      const job = this.jobRepo.require(jobId);
+      const job = await this.jobRepo.require(jobId);
       const message = error instanceof Error ? error.message : String(error);
       // 用户取消：终态已在 cancel() 中写入，这里不覆盖
       if (controller.signal.aborted && job.status === "cancelled") return;
       const retry = job.attempts < job.maxAttempts;
-      this.jobRepo.updateStatus(jobId, retry ? "retry_waiting" : "failed", { lastError: message.slice(0, 500) });
-      this.jobRepo.appendEvent(jobId, retry ? "retry_scheduled" : "failed", message.slice(0, 500));
+      await this.jobRepo.updateStatus(jobId, retry ? "retry_waiting" : "failed", { lastError: message.slice(0, 500) });
+      await this.jobRepo.appendEvent(jobId, retry ? "retry_scheduled" : "failed", message.slice(0, 500));
       logger.error("job failed", { jobId, retry, error: message.slice(0, 500) });
     } finally {
       clearInterval(heartbeat);

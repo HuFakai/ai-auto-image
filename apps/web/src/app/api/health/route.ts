@@ -5,13 +5,13 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const runtime = getRuntime();
+    const runtime = await getRuntime();
     // 触发一次真实 DB 读取验证连接
-    runtime.jobRepo.list(1);
+    await runtime.jobRepo.list(1);
     return NextResponse.json({
       ok: true,
       provider: runtime.config.providerLabel,
-      sqlitePath: runtime.config.sqlitePath,
+      database: process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).host : "pglite(内存)",
       concurrency: {
         default: runtime.config.defaultConcurrency,
         serverMax: runtime.config.serverMaxConcurrency,

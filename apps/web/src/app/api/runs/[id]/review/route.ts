@@ -22,19 +22,19 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid input" }, { status: 400 });
   }
-  const runtime = getRuntime();
+  const runtime = await getRuntime();
   try {
-    const run = runtime.runRepo.require(id);
+    const run = await runtime.runRepo.require(id);
     // 审批门：awaiting_approval 的运行由「评审通过」放行（→ succeeded，导出放行）；
     // 驳回则终止（→ cancelled，保留资产可追溯）
     if (run.status === "awaiting_approval") {
       if (parsed.data.status === "approved") {
-        runtime.runRepo.updateStatus(id, "succeeded");
+        await runtime.runRepo.updateStatus(id, "succeeded");
       } else if (parsed.data.status === "rejected") {
-        runtime.runRepo.updateStatus(id, "cancelled", { errorSummary: "审批驳回" });
+        await runtime.runRepo.updateStatus(id, "cancelled", { errorSummary: "审批驳回" });
       }
     }
-    const updated = runtime.runRepo.setReview(id, parsed.data.status, parsed.data.note);
+    const updated = await runtime.runRepo.setReview(id, parsed.data.status, parsed.data.note);
     return NextResponse.json({
       runId: id,
       runStatus: updated.status,

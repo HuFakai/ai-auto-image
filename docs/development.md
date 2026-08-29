@@ -31,7 +31,7 @@ pnpm db:seed
 
 # 5. 启动开发服务器（Next.js + 进程内 Job Runner）
 pnpm dev
-#    打开 http://localhost:3000
+#    打开 http://localhost:1235
 ```
 
 启动后即可在 Studio 页面输入主题生成成套图文：

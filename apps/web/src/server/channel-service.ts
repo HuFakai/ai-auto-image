@@ -69,16 +69,16 @@ export class ChannelService {
     this.encryptionKey = getEncryptionKey(dataDir);
   }
 
-  list(): ChannelView[] {
-    return this.repo.list().map(toView);
+  async list(): Promise<ChannelView[]> {
+    return (await this.repo.list()).map(toView);
   }
 
-  get(id: string): ChannelView {
-    return toView(this.repo.require(id));
+  async get(id: string): Promise<ChannelView> {
+    return toView(await this.repo.require(id));
   }
 
-  create(input: ChannelInput): ChannelView {
-    const row = this.repo.create({
+  async create(input: ChannelInput): Promise<ChannelView> {
+    const row = await this.repo.create({
       name: input.name,
       type: input.type,
       baseUrl: input.baseUrl.replace(/\/+$/, ""),
@@ -96,7 +96,7 @@ export class ChannelService {
     return toView(row);
   }
 
-  update(id: string, patch: ChannelPatch): ChannelView {
+  async update(id: string, patch: ChannelPatch): Promise<ChannelView> {
     const row: Record<string, unknown> = {};
     if (patch.name !== undefined) row.name = patch.name;
     if (patch.baseUrl !== undefined) row.baseUrl = patch.baseUrl.replace(/\/+$/, "");
@@ -113,20 +113,20 @@ export class ChannelService {
     if (patch.maxAttempts !== undefined) row.maxAttempts = patch.maxAttempts;
     if (patch.imageConcurrencyMax !== undefined) row.imageConcurrencyMax = patch.imageConcurrencyMax;
     if (patch.imageEditSupport !== undefined) row.imageEditSupport = patch.imageEditSupport ? 1 : 0;
-    return toView(this.repo.update(id, row));
+    return toView(await this.repo.update(id, row));
   }
 
-  delete(id: string): void {
-    this.repo.delete(id);
+  async delete(id: string): Promise<void> {
+    await this.repo.delete(id);
   }
 
-  reorder(orderedIds: string[]): void {
-    this.repo.reorder(orderedIds);
+  async reorder(orderedIds: string[]): Promise<void> {
+    await this.repo.reorder(orderedIds);
   }
 
   /** 连通性测试：只读 GET /models（无模型调用费用） */
   async test(id: string): Promise<{ ok: boolean; detail: string; modelCount: number }> {
-    const row = this.repo.require(id);
+    const row = await this.repo.require(id);
     const apiKey = decryptApiKey(this.encryptionKey, row.apiKeyEncrypted);
     let ok = false;
     let detail = "";
@@ -157,14 +157,14 @@ export class ChannelService {
 
   /* ── 路由装配：启用渠道 → Wire Provider；缺省侧由调用方兜底 Mock ── */
 
-  assembleRoutes(): {
+  async assembleRoutes(): Promise<{
     textRoutes: TextRoute[];
     imageRoutes: ImageRoute[];
     visualQuality: VisualQualityModel | null;
     mode: "mock" | "partial" | "real";
     label: string;
-  } {
-    const rows = this.repo.list().filter((row) => row.enabled === 1);
+  }> {
+    const rows = (await this.repo.list()).filter((row) => row.enabled === 1);
     const textRoutes: TextRoute[] = [];
     const imageRoutes: ImageRoute[] = [];
     let visualQuality: VisualQualityModel | null = null;
@@ -240,12 +240,12 @@ export class ChannelService {
 }
 
 /** 从环境变量自动导入初始渠道（仅渠道表为空时执行一次） */
-export function autoImportFromEnv(service: ChannelService): number {
-  if (service.list().length > 0) return 0;
+export async function autoImportFromEnv(service: ChannelService): Promise<number> {
+  if ((await service.list()).length > 0) return 0;
   let imported = 0;
   const { TEXT_BASE_URL, TEXT_API_KEY, TEXT_MODEL, IMAGE_BASE_URL, IMAGE_API_KEY, IMAGE_MODEL } = process.env;
   if (TEXT_BASE_URL && TEXT_API_KEY) {
-    service.create({
+    await service.create({
       name: "文本渠道（自动导入）",
       type: "text",
       baseUrl: TEXT_BASE_URL,
@@ -259,7 +259,7 @@ export function autoImportFromEnv(service: ChannelService): number {
     imported += 1;
   }
   if (IMAGE_BASE_URL && IMAGE_API_KEY) {
-    service.create({
+    await service.create({
       name: "图片渠道（自动导入）",
       type: "image",
       baseUrl: IMAGE_BASE_URL,

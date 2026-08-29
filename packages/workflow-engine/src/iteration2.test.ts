@@ -14,74 +14,74 @@ import {
   createRunWith,
   startEvalRunner,
   waitUntil,
+  type Harness,
 } from "./testkit";
 import { CreateRunInputSchema, type CreateRunInput } from "@aai/shared-schemas";
 
-const harnesses: ReturnType<typeof createHarness>[] = [];
-function makeHarness(options?: Parameters<typeof createHarness>[0]) {
-  const harness = createHarness(options);
+const harnesses: Harness[] = [];
+async function makeHarness(options?: Parameters<typeof createHarness>[0]): Promise<Harness> {
+  const harness = await createHarness(options);
   harnesses.push(harness);
   return harness;
 }
 
 async function runToSuccess(
-  harness: ReturnType<typeof createHarness>,
+  harness: Harness,
   input: Partial<CreateRunInput> & { topic: string },
 ): Promise<{ runId: string; jobId: string }> {
   const runner = startEvalRunner(harness);
-  const { runId, jobId } = createRunWith(harness, input);
-  await waitUntil(() => harness.jobRepo.require(jobId).status === "succeeded", 20_000);
+  const { runId, jobId } = await createRunWith(harness, input);
+  await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "succeeded", 20_000);
   await runner.stop();
   return { runId, jobId };
 }
 
 describe("iteration 2: page regen (Revision)", () => {
   it("regenerates a single page: old asset superseded, revision recorded, other pages untouched", async () => {
-    const harness = makeHarness({ mock: { latencyMs: 1 } });
+    const harness = await makeHarness({ mock: { latencyMs: 1 } });
     const { runId } = await runToSuccess(harness, { topic: "返修测试" });
 
     const before = new Map(
-      harness.assetRepo
-        .listByRun(runId)
+      (await harness.assetRepo.listByRun(runId))
         .filter((a) => a.kind === "generated")
         .map((a) => [a.pageIndex, a.id]),
     );
 
     // 单页返修：第 2 页换标题
     const runner = startEvalRunner(harness);
-    const { job } = harness.jobRepo.createOrReuse({
+    const { job } = await harness.jobRepo.createOrReuse({
       kind: "page_regen",
       runId,
       idempotencyKey: `page_regen:${runId}:1:v1`,
       payloadJson: JSON.stringify({ pageIndex: 1, headline: "全新标题" }),
     });
-    await waitUntil(() => harness.jobRepo.require(job.id).status === "succeeded", 15_000);
+    await waitUntil(async () => (await harness.jobRepo.require(job.id)).status === "succeeded", 15_000);
     await runner.stop();
 
     // 旧资产被替代，新资产成为当前版本
-    const oldAsset = harness.assetRepo.require(before.get(1)!);
+    const oldAsset = await harness.assetRepo.require(before.get(1)!);
     expect(oldAsset.supersededAt).not.toBeNull();
-    const current = harness.assetRepo.latestForPage(runId, 1);
+    const current = await harness.assetRepo.latestForPage(runId, 1);
     expect(current?.id).not.toBe(before.get(1));
     expect(JSON.parse(current?.metadataJson ?? "{}")).toMatchObject({ revision: 2 });
 
     // 其他页面不受影响
     for (const pageIndex of [0, 2, 3]) {
-      expect(harness.assetRepo.latestForPage(runId, pageIndex)?.id).toBe(before.get(pageIndex));
+      expect((await harness.assetRepo.latestForPage(runId, pageIndex))?.id).toBe(before.get(pageIndex));
     }
 
     // Revision 版本链
-    const revisions = harness.revisionRepo.listByPage(runId, 1);
+    const revisions = await harness.revisionRepo.listByPage(runId, 1);
     expect(revisions).toHaveLength(1);
     expect(JSON.parse(revisions[0]?.payloadJson ?? "{}")).toMatchObject({ pageIndex: 1, headline: "全新标题" });
 
     // 运行回到待审状态
-    expect(harness.runRepo.require(runId).reviewStatus).toBe("pending");
+    expect((await harness.runRepo.require(runId)).reviewStatus).toBe("pending");
 
     // 新文案已同步回 Storyboard（详情/导出与图片一致）
-    const storyboardNode = harness.runRepo
-      .listNodeRuns(runId)
-      .find((n) => n.nodeName === "generate-storyboard");
+    const storyboardNode = (await harness.runRepo.listNodeRuns(runId)).find(
+      (n) => n.nodeName === "generate-storyboard",
+    );
     const storyboard = (JSON.parse(storyboardNode!.outputRef!) as { value: { slides: Array<{ headline: string }> } }).value;
     expect(storyboard.slides[1]?.headline).toBe("全新标题");
   });
@@ -89,11 +89,10 @@ describe("iteration 2: page regen (Revision)", () => {
 
 describe("iteration 2: export ZIP", () => {
   it("builds a ZIP with ordered images, copy markdown, manifest and checklist", async () => {
-    const harness = makeHarness({ mock: { latencyMs: 1 } });
+    const harness = await makeHarness({ mock: { latencyMs: 1 } });
     const { runId } = await runToSuccess(harness, { topic: "ZIP 导出测试" });
 
-    const pages: ExportPageFile[] = harness.assetRepo
-      .listByRun(runId)
+    const pages: ExportPageFile[] = (await harness.assetRepo.listByRun(runId))
       .filter((a) => a.kind === "generated")
       .sort((a, b) => (a.pageIndex ?? 0) - (b.pageIndex ?? 0))
       .map((a) => ({
@@ -113,7 +112,7 @@ describe("iteration 2: export ZIP", () => {
       storyboard: { title: "测试作品", platform: "xiaohongshu", aspectRatio: "3:4" },
       pages,
       copy,
-      manifest: { runId, usage: harness.runRepo.runTotals(runId) },
+      manifest: { runId, usage: await harness.runRepo.runTotals(runId) },
     });
 
     const zip = await JSZip.loadAsync(zipBuffer);
@@ -133,7 +132,7 @@ describe("iteration 2: export ZIP", () => {
   });
 
   it("generates platform copy through the text model when available", async () => {
-    const harness = makeHarness({ mock: { latencyMs: 1 } });
+    const harness = await makeHarness({ mock: { latencyMs: 1 } });
     const input = CreateRunInputSchema.parse({ topic: "文案生成" });
     const copy = await generatePlatformCopy(harness.mock.bundle.text!, input, [
       { index: 0, role: "cover", headline: "封面", body: [], filename: "a.png", buffer: Buffer.alloc(0) },

@@ -3,16 +3,16 @@ import { SettingsView } from "./settings-view";
 
 export const dynamic = "force-dynamic";
 
-export default function SettingsPage() {
-  const runtime = getRuntime();
+export default async function SettingsPage() {
+  const runtime = await getRuntime();
   return (
     <SettingsView
       initial={{
-        channels: runtime.channelService.list(),
+        channels: await runtime.channelService.list(),
         providerMode: runtime.config.providerMode,
         providerLabel: runtime.config.providerLabel,
       }}
-      initialKits={runtime.brandKitRepo.list().map((kit) => ({
+      initialKits={(await runtime.brandKitRepo.list()).map((kit) => ({
         id: kit.id,
         name: kit.name,
         themeId: kit.themeId,

@@ -48,22 +48,22 @@ interface CaseResult {
 }
 
 async function runCase(evaluationCase: EvalCase): Promise<CaseResult> {
-  const harness = createHarness();
+  const harness = await createHarness();
   try {
     const runner = startEvalRunner(harness);
     const startedAt = Date.now();
-    const { runId, jobId } = createRunWith(harness, {
+    const { runId, jobId } = await createRunWith(harness, {
       topic: evaluationCase.topic,
       textRenderingMode: evaluationCase.mode,
     });
 
-    await waitUntil(() => {
-      const status = harness.jobRepo.require(jobId).status;
+    await waitUntil(async () => {
+      const status = (await harness.jobRepo.require(jobId)).status;
       return ["succeeded", "failed", "cancelled"].includes(status);
     }, 60_000);
     await runner.stop();
 
-    const nodes = harness.runRepo.listNodeRuns(runId);
+    const nodes = await harness.runRepo.listNodeRuns(runId);
     const briefOk = nodes.some((n) => n.nodeName === "generate-brief" && n.status === "succeeded");
     const storyboardOk = nodes.some((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded");
     const imageNodes = nodes.filter((n) => n.nodeName === "generate-images");
@@ -73,7 +73,7 @@ async function runCase(evaluationCase: EvalCase): Promise<CaseResult> {
       topic: evaluationCase.topic,
       category: evaluationCase.category,
       mode: evaluationCase.mode,
-      runStatus: harness.runRepo.require(runId).status,
+      runStatus: (await harness.runRepo.require(runId)).status,
       briefOk,
       storyboardOk,
       pagesExpected: imageNodes.length,
@@ -81,7 +81,7 @@ async function runCase(evaluationCase: EvalCase): Promise<CaseResult> {
       durationMs: Date.now() - startedAt,
     };
   } finally {
-    disposeHarness(harness);
+    await disposeHarness(harness);
   }
 }
 

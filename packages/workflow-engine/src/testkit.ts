@@ -21,7 +21,7 @@ import { registerKnowledgeCardPipeline, type ImageRoute, type TextRoute, type Wo
 import { registerComicPipeline, type ComicPipelineDeps } from "./pipeline/comic";
 import { registerPageRegenPipeline, type PageRegenDeps } from "./pipeline/page-regen";
 
-/** 评测与集成测试共用的流水线装置：内存 SQLite + Mock Provider + 临时目录 */
+/** 评测与集成测试共用的流水线装置：进程内 PGlite + Mock Provider + 临时目录 */
 export interface Harness {
   db: OpenDatabase;
   deps: WorkflowDeps;
@@ -43,8 +43,8 @@ export function migrationsDir(): string {
   return new URL("../../storage/drizzle", moduleUrl).pathname;
 }
 
-export function createHarness(options: { mock?: MockProviderOptions } = {}): Harness {
-  const db = openDatabase({ sqlitePath: ":memory:", migrationsFolder: migrationsDir() });
+export async function createHarness(options: { mock?: MockProviderOptions } = {}): Promise<Harness> {
+  const db = await openDatabase({ migrationsFolder: migrationsDir() });
   const assetsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "aai-eval-assets-"));
   const exportsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "aai-eval-exports-"));
   const mock = createMockProvider(options.mock);
@@ -113,8 +113,8 @@ export function createHarness(options: { mock?: MockProviderOptions } = {}): Har
   };
 }
 
-export function disposeHarness(harness: Harness): void {
-  harness.db.close();
+export async function disposeHarness(harness: Harness): Promise<void> {
+  await harness.db.close();
   fs.rmSync(harness.assetsRoot, { recursive: true, force: true });
   fs.rmSync(harness.exportsRoot, { recursive: true, force: true });
 }
@@ -128,21 +128,24 @@ export function startEvalRunner(harness: Harness): JobRunner {
   return runner;
 }
 
-export function createRunWith(
+export async function createRunWith(
   harness: Harness,
   input: Partial<CreateRunInput> & { topic: string },
-): { runId: string; jobId: string } {
-  const project = harness.projectRepo.create({ title: input.topic });
+): Promise<{ runId: string; jobId: string }> {
+  const project = await harness.projectRepo.create({ title: input.topic });
   const parsed = CreateRunInputSchema.parse(input);
-  const run = harness.runRepo.create({ projectId: project.id, inputJson: JSON.stringify(parsed) });
+  const run = await harness.runRepo.create({ projectId: project.id, inputJson: JSON.stringify(parsed) });
   const kind = parsed.recipe === "comic_story" ? "comic_story_run" : "knowledge_card_run";
-  const { job } = harness.jobRepo.createOrReuse({ kind, runId: run.id });
+  const { job } = await harness.jobRepo.createOrReuse({ kind, runId: run.id });
   return { runId: run.id, jobId: job.id };
 }
 
-export async function waitUntil(condition: () => boolean, timeoutMs = 15_000): Promise<void> {
+export async function waitUntil(
+  condition: () => boolean | Promise<boolean>,
+  timeoutMs = 15_000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
+  while (!(await condition())) {
     if (Date.now() > deadline) throw new Error("waitUntil timed out");
     await new Promise((resolve) => setTimeout(resolve, 25));
   }

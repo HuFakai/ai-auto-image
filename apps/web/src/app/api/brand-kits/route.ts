@@ -28,8 +28,8 @@ function view(row: BrandKit): BrandKitView {
 }
 
 export async function GET() {
-  const runtime = getRuntime();
-  return NextResponse.json({ kits: runtime.brandKitRepo.list().map(view) });
+  const runtime = await getRuntime();
+  return NextResponse.json({ kits: (await runtime.brandKitRepo.list()).map(view) });
 }
 
 export async function POST(request: Request) {
@@ -43,8 +43,8 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid input", issues: parsed.error.issues.slice(0, 4) }, { status: 400 });
   }
-  const runtime = getRuntime();
-  const kit = runtime.brandKitRepo.create({
+  const runtime = await getRuntime();
+  const kit = await runtime.brandKitRepo.create({
     name: parsed.data.name,
     themeId: parsed.data.themeId,
     styleKeywords: parsed.data.styleKeywords,

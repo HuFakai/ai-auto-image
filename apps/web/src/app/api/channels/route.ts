@@ -5,9 +5,9 @@ import { getRuntime } from "@/server/runtime";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const runtime = getRuntime();
+  const runtime = await getRuntime();
   return NextResponse.json({
-    channels: runtime.channelService.list(),
+    channels: await runtime.channelService.list(),
     providerMode: runtime.config.providerMode,
     providerLabel: runtime.config.providerLabel,
   });
@@ -27,8 +27,8 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const runtime = getRuntime();
-  const channel = runtime.channelService.create(parsed.data);
-  runtime.refreshChannels();
+  const runtime = await getRuntime();
+  const channel = await runtime.channelService.create(parsed.data);
+  await runtime.refreshChannels();
   return NextResponse.json({ channel }, { status: 201 });
 }

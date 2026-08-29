@@ -7,8 +7,8 @@ export const dynamic = "force-dynamic";
 
 export default async function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const runtime = getRuntime();
-  const detail = buildRunDetail(runtime, id);
+  const runtime = await getRuntime();
+  const detail = await buildRunDetail(runtime, id);
   if (!detail) notFound();
   return <RunDetailView initial={detail} />;
 }

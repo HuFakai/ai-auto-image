@@ -19,15 +19,15 @@ const opened: Harness[] = [];
 import { CreateRunInputSchema } from "@aai/shared-schemas";
 
 const harnesses: Harness[] = [];
-function makeHarness(options?: Parameters<typeof createHarness>[0]) {
-  const harness = createHarness(options);
+async function makeHarness(options?: Parameters<typeof createHarness>[0]): Promise<Harness> {
+  const harness = await createHarness(options);
   harnesses.push(harness);
   opened.push(harness);
   return harness;
 }
 
-afterAll(() => {
-  for (const harness of opened) disposeHarness(harness);
+afterAll(async () => {
+  for (const harness of opened) await disposeHarness(harness);
 });
 
 describe("comic consistency checks", () => {
@@ -73,23 +73,25 @@ describe("comic consistency checks", () => {
 
 describe("comic pipeline (mock, edit-capable route)", () => {
   it("runs end to end: cast → ref image → storyboard+checks → 4 pages → bubbles", async () => {
-    const harness = makeHarness({ mock: { latencyMs: 1 } });
+    const harness = await makeHarness({ mock: { latencyMs: 1 } });
     const runner = startEvalRunner(harness);
-    const { runId, jobId } = createRunWith(harness, {
+    const { runId, jobId } = await createRunWith(harness, {
       recipe: "comic_story",
       topic: "什么是复利",
     });
-    await waitUntil(() => harness.jobRepo.require(jobId).status === "succeeded", 20_000);
+    await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "succeeded", 20_000);
     await runner.stop();
 
-    expect(harness.runRepo.require(runId).status).toBe("succeeded");
+    expect((await harness.runRepo.require(runId)).status).toBe("succeeded");
 
     // 角色定妆图
-    const refAsset = harness.assetRepo.listByRun(runId).find((a) => a.kind === "reference");
+    const refAsset = (await harness.assetRepo.listByRun(runId)).find((a) => a.kind === "reference");
     expect(refAsset).toBeDefined();
 
     // 分镜与一致性检查已入库
-    const storyboardNode = harness.runRepo.listNodeRuns(runId).find((n) => n.nodeName === "generate-comic-storyboard");
+    const storyboardNode = (await harness.runRepo.listNodeRuns(runId)).find(
+      (n) => n.nodeName === "generate-comic-storyboard",
+    );
     const stored = JSON.parse(storyboardNode!.outputRef!) as {
       value: { pages: unknown[]; cast: Array<{ name: string }> };
       checks: Array<{ name: string; status: string }>;
@@ -98,13 +100,13 @@ describe("comic pipeline (mock, edit-capable route)", () => {
     expect(stored.checks.find((c) => c.name === "dialogue_attribution")?.status).toBe("pass");
 
     // 合成页（画面 + 气泡）4 张，metadata 含对白
-    const composites = harness.assetRepo.listByRun(runId).filter((a) => a.kind === "composite");
+    const composites = (await harness.assetRepo.listByRun(runId)).filter((a) => a.kind === "composite");
     expect(composites).toHaveLength(4);
     const first = JSON.parse(composites[0]!.metadataJson ?? "{}") as { dialogues: unknown[] };
     expect(first.dialogues.length).toBeGreaterThanOrEqual(1);
 
     // Mock 渠道具备编辑能力 → 走图生图参考链
-    const generated = harness.assetRepo.listByRun(runId).find((a) => a.kind === "generated");
+    const generated = (await harness.assetRepo.listByRun(runId)).find((a) => a.kind === "generated");
     expect(JSON.parse(generated!.metadataJson ?? "{}")).toMatchObject({ usedEdit: true });
   });
 });

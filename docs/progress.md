@@ -13,7 +13,7 @@
 | 阶段 0 | 工程基础与技术验证 | ~95% | Linux 服务器 Docker 实测（脚本就绪） |
 | 阶段 1 | 图文生成 MVP | ~85% | 20 套作品人工评审 |
 | 阶段 2 | 漫画与高级视觉 | ~80% | Scene Bible 完整版、多模态一致性检查（待视觉渠道） |
-| 阶段 3 | 基建与发布 | ~40% | PG 侧导入演练、Redis Worker、画布、MCP、鉴权 |
+| 阶段 3 | 基建与发布 | ~55% | Redis Worker（可选）；画布/MCP/开放 API 鉴权已按新规划移除 |
 | 阶段 4 | 平台化 | 未启动 | 按需启动 |
 
 ## 二、已完成功能
@@ -73,12 +73,13 @@
 - [ ] 多模态一致性检查（需视觉模型渠道，接口已预留）
 - [ ] 局部重绘框选 UI（API 已就绪）；原生 Mask 待网关支持
 
-### 阶段 3（迭代 4 剩余，当前进行中）
-- [ ] Redis/BullMQ 独立 Worker 拆分（`apps/worker`，需 Redis 环境）
-- [ ] React Flow 可编辑工作流画布
-- [ ] MCP Server（七工具：create/generate/status/revise/export/validate-draft/create-draft）
-- [ ] 开放 API Key 鉴权中间件 + Scope + 限流
-- [ ] PG 侧导入与双读演练（导出工具已就绪：`pnpm pg:export`）
+### 阶段 3（2026-08-30 方向调整）
+- [x] **PostgreSQL 切换完成**：schema 全量改 pg 方言（15 表，含预留 users/sessions）；测试用进程内 PGlite、生产用 postgres.js（`DATABASE_URL`）；Repository 层 async 化；`pnpm db:migrate` 已在甲骨文服务器 PG（134.185.113.0/ai_image）建库，`pg:export → pg:import` 数据导入演练通过（渠道 + Brand Kit 已带上服务器）
+- [ ] 用户登录注册（账号密码，预留微信小程序扫码）— 下一批
+- [ ] 服务器部署上线（1Panel + Docker + HTTPS）— 登录后
+- [ ] 内容类型扩展 + Brand Kit 增强（见 docs/05-next-development-plan.md 批次 4/5）
+- [ ] Redis/BullMQ 独立 Worker（可选，服务器已有 Redis；单机自用暂缓）
+- [x] ~~React Flow 画布 / MCP Server / 开放 API 鉴权~~（2026-08-30 决策移除，见 05 文档「不做清单」）
 
 ### 阶段 4（迭代 5，按需启动）
 - [ ] 登录会话 + RBAC（**公网部署前必须**，当前仅限内网）
@@ -87,18 +88,19 @@
 
 ## 四、接下来的规划
 
-| 批次 | 内容 | 说明 |
+| 批次 | 内容 | 状态 |
 |---|---|---|
-| 迭代 4·第二批 | MCP Server + 开放 API 鉴权限流 | 可本机验证，与 Claude 等客户端打通生成全流程 |
-| 迭代 4·第三批 | React Flow 工作流画布 | 替换简化只读链路图为可编辑画布 |
-| 迭代 4·第四批 | Redis/BullMQ Worker + PG 导入演练 | 需 Redis/PG 环境（服务器或本机 Docker） |
-| 迭代 4·收尾 | 批量生成脚本 + 20 套评审 → 阶段 1 正式出口；服务器 Docker 实测 → 阶段 0 正式出口 | 两个阶段的验收收尾 |
-| 迭代 5 | 阶段 4 平台化 | 公网部署则 RBAC 提前 |
+| 批次 1 | PostgreSQL 切换（PG 方言 + PGlite 测试 + 远程建库 + 数据导入） | ✅ 完成（2026-08-30） |
+| 批次 2 | 用户登录注册（账号密码 + 微信扫码预留 + 资源隔离） | 下一批 |
+| 批次 3 | 服务器部署上线（1Panel + Docker + HTTPS，甲骨文 4C24G/ARM） | 待批次 2 |
+| 批次 4 | 内容类型扩展（金句卡/清单卡/对比卡/产品种草/图书推荐/长文拆解/四格漫画） | 上线后推进 |
+| 批次 5 | Brand Kit / 品牌手册增强（水印/签名/字体/色板/封面模板） | 上线后推进 |
+| 批次 6 | BullMQ Worker 拆分（可选） | 按需 |
 
 ## 五、已知限制与风险
 
 1. **单用户假设**：无登录/RBAC，仅限内网/VPN 部署；公网暴露前必须实现认证。
 2. **渠道依赖**：漫画角色一致性依赖支持图生图的渠道（gpt-image-2 已启用）；grok 渠道仅文生图。
 3. **多模态审查缺失**：原生文字准确性检查需视觉模型渠道（TEXT_VISION=1），当前渠道不支持，已降级为规则检查+人工核对。
-4. **PG/Redis 侧未演练**：迁移工具与手册已交付，端到端演练需具备环境后执行。
+4. **存储已切 PostgreSQL**：本地零配置回退 PGlite（内存）；生产/开发用 `DATABASE_URL`。旧 SQLite 迁移文件已退役（git 历史保留），`pg:export` 仍可直读旧库。
 5. **历史数据**：早期运行的部分展示字段（如页级模型）为旧格式，新生成的运行数据完整。

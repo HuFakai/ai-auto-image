@@ -132,14 +132,14 @@ export function buildComicPagePrompt(input: CreateRunInput, storyboard: ComicSto
 export function registerComicPipeline(runner: JobRunner, deps: ComicPipelineDeps): void {
   runner.register(COMIC_RUN_KIND, async (ctx) => {
     if (!ctx.runId) throw new Error("comic_story_run requires runId");
-    const run = deps.runRepo.require(ctx.runId);
+    const run = await deps.runRepo.require(ctx.runId);
     const input = JSON.parse(run.inputJson) as CreateRunInput;
-    deps.runRepo.updateStatus(run.id, "running");
+    await deps.runRepo.updateStatus(run.id, "running");
 
     try {
       await executeComicRun(deps, ctx, run.id, input);
     } catch (error) {
-      if (ctx.signal.aborted) deps.runRepo.updateStatus(run.id, "cancelled");
+      if (ctx.signal.aborted) await deps.runRepo.updateStatus(run.id, "cancelled");
       throw error;
     }
   });
@@ -152,19 +152,19 @@ async function executeComicRun(
   input: CreateRunInput,
 ): Promise<void> {
   /* parse-input */
-  const parseDone = deps.runRepo
-    .listNodeRuns(runId)
-    .some((n) => n.nodeName === "parse-input" && n.status === "succeeded");
+  const parseDone = (await deps.runRepo.listNodeRuns(runId)).some(
+    (n) => n.nodeName === "parse-input" && n.status === "succeeded",
+  );
   if (!parseDone) {
-    const node = deps.runRepo.createNodeRun(runId, "parse-input");
-    deps.runRepo.startNode(node.id);
-    deps.runRepo.succeedNode(node.id, {
+    const node = await deps.runRepo.createNodeRun(runId, "parse-input");
+    await deps.runRepo.startNode(node.id);
+    await deps.runRepo.succeedNode(node.id, {
       outputRef: JSON.stringify({ recipe: "comic_story", aspectRatio: input.aspectRatio, mode: input.textRenderingMode }),
     });
   }
 
   /* RunSnapshot */
-  deps.runRepo.setSnapshot(
+  await deps.runRepo.setSnapshot(
     runId,
     JSON.stringify({
       recipe: "comic_story",
@@ -217,14 +217,14 @@ async function executeComicRun(
     cast = anchors;
 
     /* 定妆图：独立节点（文生图，所有渠道都支持；幂等） */
-    const refNodeDone = deps.runRepo
-      .listNodeRuns(runId)
-      .find((n) => n.nodeName === "generate-character-ref" && n.status === "succeeded");
+    const refNodeDone = (await deps.runRepo.listNodeRuns(runId)).find(
+      (n) => n.nodeName === "generate-character-ref" && n.status === "succeeded",
+    );
     if (refNodeDone?.outputRef) {
       characterRefAssetId = (JSON.parse(refNodeDone.outputRef) as { assetId?: string }).assetId ?? null;
     } else {
-      const refNode = deps.runRepo.createNodeRun(runId, "generate-character-ref");
-      deps.runRepo.startNode(refNode.id, {
+      const refNode = await deps.runRepo.createNodeRun(runId, "generate-character-ref");
+      await deps.runRepo.startNode(refNode.id, {
         routeId: deps.imageRoutes[0]?.config.id,
         model: deps.imageRoutes[0]?.model,
       });
@@ -235,7 +235,7 @@ async function executeComicRun(
       ].join("\n");
       const image = await generateImageWithFallbacks(deps, ctx, runId, refNode.id, refPrompt, null);
       const saved = await deps.assetStore.saveGeneratedImage(image, path.join("runs", runId, "character-ref.png"));
-      const asset = deps.assetRepo.create({
+      const asset = await deps.assetRepo.create({
         runId,
         nodeRunId: refNode.id,
         kind: "reference",
@@ -246,7 +246,7 @@ async function executeComicRun(
         metadataJson: JSON.stringify({ purpose: "character-ref" }),
       });
       characterRefAssetId = asset.id;
-      deps.runRepo.succeedNode(refNode.id, {
+      await deps.runRepo.succeedNode(refNode.id, {
         outputRef: JSON.stringify({ assetId: asset.id }),
         images: 1,
         promptTokens: image.usage?.promptTokens ?? 0,
@@ -254,7 +254,7 @@ async function executeComicRun(
       });
     }
     if (characterRefAssetId) {
-      const refAsset = deps.assetRepo.require(characterRefAssetId);
+      const refAsset = await deps.assetRepo.require(characterRefAssetId);
       characterRefBase64 = fs.readFileSync(deps.assetStore.resolve(refAsset.filePath)).toString("base64");
     }
   }
@@ -288,10 +288,10 @@ async function executeComicRun(
       page.index = index;
     });
     checks = runComicConsistencyChecks(storyboard);
-    deps.runRepo.setNodeOutput(result.nodeId, JSON.stringify({ value: storyboard, checks }));
+    await deps.runRepo.setNodeOutput(result.nodeId, JSON.stringify({ value: storyboard, checks }));
     const failed = checks.filter((c) => c.status === "fail");
     if (failed.length > 0) {
-      deps.runRepo.failNode(result.nodeId, "invalid_request", `一致性检查未过：${failed.map((c) => c.detail).join("；")}`);
+      await deps.runRepo.failNode(result.nodeId, "invalid_request", `一致性检查未过：${failed.map((c) => c.detail).join("；")}`);
       throw new Error(`comic consistency check failed: ${failed.map((c) => c.detail).join("；")}`);
     }
   }
@@ -302,7 +302,7 @@ async function executeComicRun(
   const failedPages: number[] = [];
   const editCapableRoutes = deps.imageRoutes.filter((route) => route.image.capabilities().imageEditSingle);
   const tasks = storyboard.pages.map((page) => async () => {
-    const existing = deps.assetRepo.latestForPage(runId, page.index);
+    const existing = await deps.assetRepo.latestForPage(runId, page.index);
     if (existing) return;
     await generateComicPage(deps, ctx, {
       runId,
@@ -316,18 +316,18 @@ async function executeComicRun(
     });
   });
   await runPool(tasks, effectiveConcurrency(deps, input));
-  throwIfAborted(deps, runId, ctx.signal);
+  await throwIfAborted(deps, runId, ctx.signal);
 
   /* render-comic-bubbles：对白气泡程序渲染（确定性模式或统一渲染页脚） */
-  const bubblesDone = deps.runRepo
-    .listNodeRuns(runId)
-    .find((n) => n.nodeName === "render-comic-bubbles" && n.status === "succeeded");
+  const bubblesDone = (await deps.runRepo.listNodeRuns(runId)).find(
+    (n) => n.nodeName === "render-comic-bubbles" && n.status === "succeeded",
+  );
   if (!bubblesDone) {
-    const bubblesNode = deps.runRepo.createNodeRun(runId, "render-comic-bubbles");
-    deps.runRepo.startNode(bubblesNode.id);
+    const bubblesNode = await deps.runRepo.createNodeRun(runId, "render-comic-bubbles");
+    await deps.runRepo.startNode(bubblesNode.id);
     try {
       for (const page of storyboard.pages) {
-        const generated = deps.assetRepo.latestForPage(runId, page.index);
+        const generated = await deps.assetRepo.latestForPage(runId, page.index);
         if (!generated) continue;
         if (generated.kind === "composite") continue; // 已合成
         const panelBase64 = fs.readFileSync(deps.assetStore.resolve(generated.filePath)).toString("base64");
@@ -344,8 +344,8 @@ async function executeComicRun(
           buffer,
           path.join("runs", runId, "pages", `page-${page.index}-composite.png`),
         );
-        deps.assetRepo.supersedePage(runId, page.index);
-        deps.assetRepo.create({
+        await deps.assetRepo.supersedePage(runId, page.index);
+        await deps.assetRepo.create({
           runId,
           nodeRunId: bubblesNode.id,
           pageIndex: page.index,
@@ -361,39 +361,39 @@ async function executeComicRun(
           }),
         });
       }
-      deps.runRepo.succeedNode(bubblesNode.id, { outputRef: JSON.stringify({ templateVersion: "comic-bubbles@1" }) });
+      await deps.runRepo.succeedNode(bubblesNode.id, { outputRef: JSON.stringify({ templateVersion: "comic-bubbles@1" }) });
     } catch (error) {
       const aiError = toAiError(error);
-      deps.runRepo.failNode(bubblesNode.id, aiError.category, aiError.message.slice(0, 400));
+      await deps.runRepo.failNode(bubblesNode.id, aiError.category, aiError.message.slice(0, 400));
       throw error;
     }
   }
 
   /* package-export */
-  if (!deps.runRepo.listNodeRuns(runId).some((n) => n.nodeName === "package-export" && n.status === "succeeded")) {
-    const exportNode = deps.runRepo.createNodeRun(runId, "package-export");
-    deps.runRepo.startNode(exportNode.id);
-    const totals = deps.runRepo.runTotals(runId);
+  if (!(await deps.runRepo.listNodeRuns(runId)).some((n) => n.nodeName === "package-export" && n.status === "succeeded")) {
+    const exportNode = await deps.runRepo.createNodeRun(runId, "package-export");
+    await deps.runRepo.startNode(exportNode.id);
+    const totals = await deps.runRepo.runTotals(runId);
     const exportDir = path.join(deps.exportsDir, runId);
     fs.mkdirSync(exportDir, { recursive: true });
     fs.writeFileSync(
       path.join(exportDir, "manifest.json"),
       JSON.stringify({ runId, input, storyboard, checks, pages: storyboard.pages.length, failedPages, usage: totals, generatedAt: new Date().toISOString() }, null, 2),
     );
-    deps.runRepo.succeedNode(exportNode.id, { outputRef: JSON.stringify({ manifest: true }) });
+    await deps.runRepo.succeedNode(exportNode.id, { outputRef: JSON.stringify({ manifest: true }) });
   }
 
   if (failedPages.length > 0) {
     const summary = `pages failed: ${failedPages.join(", ")}`;
-    deps.runRepo.updateStatus(runId, "failed", { errorSummary: summary });
+    await deps.runRepo.updateStatus(runId, "failed", { errorSummary: summary });
     throw new Error(summary);
   }
   if (input.requireApproval) {
-    deps.runRepo.updateStatus(runId, "awaiting_approval");
+    await deps.runRepo.updateStatus(runId, "awaiting_approval");
     logger.info("comic run awaiting final approval", { runId, pages: pageCount });
     return;
   }
-  deps.runRepo.updateStatus(runId, "succeeded");
+  await deps.runRepo.updateStatus(runId, "succeeded");
   logger.info("comic run completed", { runId, pages: pageCount });
 }
 
@@ -412,8 +412,8 @@ async function generateComicPage(
   },
 ) {
   const { runId, input, storyboard, pageIndex } = args;
-  const node = deps.runRepo.createNodeRun(runId, "generate-comic-pages");
-  deps.runRepo.startNode(node.id, { routeId: deps.imageRoutes[0]?.config.id, model: deps.imageRoutes[0]?.model });
+  const node = await deps.runRepo.createNodeRun(runId, "generate-comic-pages");
+  await deps.runRepo.startNode(node.id, { routeId: deps.imageRoutes[0]?.config.id, model: deps.imageRoutes[0]?.model });
   const prompt = buildComicPagePrompt(input, storyboard, pageIndex);
 
   try {
@@ -446,8 +446,8 @@ async function generateComicPage(
           return images;
         });
       },
-      onAttempt: (record) => {
-        deps.providerRepo.recordAttempt({
+      onAttempt: async (record) => {
+        await deps.providerRepo.recordAttempt({
           runId,
           nodeRunId: node.id,
           routeId: record.routeId,
@@ -469,7 +469,7 @@ async function generateComicPage(
       image,
       path.join("runs", runId, "pages", `page-${pageIndex}.png`),
     );
-    const asset = deps.assetRepo.create({
+    const asset = await deps.assetRepo.create({
       runId,
       nodeRunId: node.id,
       pageIndex,
@@ -484,7 +484,7 @@ async function generateComicPage(
         model: usedModel,
       }),
     });
-    deps.runRepo.succeedNode(node.id, {
+    await deps.runRepo.succeedNode(node.id, {
       outputRef: JSON.stringify({ pageIndex, assetId: asset.id }),
       images: 1,
       model: usedModel ?? undefined,
@@ -494,7 +494,7 @@ async function generateComicPage(
     });
   } catch (error) {
     const aiError = toAiError(error);
-    deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
+    await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
     args.failedPages.push(pageIndex);
     logger.error("comic page failed", { runId, page: pageIndex, error: aiError.message.slice(0, 200) });
   }
@@ -502,9 +502,9 @@ async function generateComicPage(
 
 /* ── 共享工具 ─────────────────────────────────────────────────── */
 
-function throwIfAborted(deps: ComicPipelineDeps, runId: string, signal: AbortSignal): void {
+async function throwIfAborted(deps: ComicPipelineDeps, runId: string, signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
-    deps.runRepo.updateStatus(runId, "cancelled");
+    await deps.runRepo.updateStatus(runId, "cancelled");
     throw new Error("run cancelled by user");
   }
 }
@@ -558,8 +558,8 @@ async function generateImageWithFallbacks(
         return images;
       });
     },
-    onAttempt: (record) => {
-      deps.providerRepo.recordAttempt({
+    onAttempt: async (record) => {
+      await deps.providerRepo.recordAttempt({
         runId,
         nodeRunId,
         routeId: record.routeId,
@@ -588,9 +588,9 @@ async function runStructured<T>(
   prompt: string,
 ): Promise<{ value: T; nodeId: string }> {
 
-  const existing = deps.runRepo
-    .listNodeRuns(runId)
-    .find((n) => n.nodeName === nodeName && n.status === "succeeded");
+  const existing = (await deps.runRepo.listNodeRuns(runId)).find(
+    (n) => n.nodeName === nodeName && n.status === "succeeded",
+  );
   if (existing?.outputRef) {
     try {
       return { value: (JSON.parse(existing.outputRef) as { value: T }).value, nodeId: existing.id };
@@ -598,8 +598,8 @@ async function runStructured<T>(
       /* 重新生成 */
     }
   }
-  const node = deps.runRepo.createNodeRun(runId, nodeName);
-  deps.runRepo.startNode(node.id, {
+  const node = await deps.runRepo.createNodeRun(runId, nodeName);
+  await deps.runRepo.startNode(node.id, {
     routeId: deps.textRoutes[0]?.config.id,
     model: deps.textRoutes[0]?.model,
   });
@@ -622,8 +622,8 @@ async function runStructured<T>(
         });
         return result as T;
       },
-      onAttempt: (record) => {
-        deps.providerRepo.recordAttempt({
+      onAttempt: async (record) => {
+        await deps.providerRepo.recordAttempt({
           runId,
           nodeRunId: node.id,
           routeId: record.routeId,
@@ -639,7 +639,7 @@ async function runStructured<T>(
         });
       },
     });
-    deps.providerRepo.recordUsage({
+    await deps.providerRepo.recordUsage({
       runId,
       nodeRunId: node.id,
       routeId: deps.textRoutes[0]?.config.id ?? "unknown",
@@ -648,7 +648,7 @@ async function runStructured<T>(
       completionTokens: usageAcc.completionTokens,
       totalTokens: usageAcc.totalTokens,
     });
-    deps.runRepo.succeedNode(node.id, {
+    await deps.runRepo.succeedNode(node.id, {
       outputRef: JSON.stringify({ value, schemaName }),
       promptTokens: usageAcc.promptTokens,
       completionTokens: usageAcc.completionTokens,
@@ -657,7 +657,7 @@ async function runStructured<T>(
     return { value: value as T, nodeId: node.id };
   } catch (error) {
     const aiError = toAiError(error);
-    deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
+    await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
     throw error;
   }
 }

@@ -33,26 +33,26 @@ export async function POST(
     return NextResponse.json({ error: "invalid input", issues: parsed.error.issues.slice(0, 4) }, { status: 400 });
   }
 
-  const runtime = getRuntime();
+  const runtime = await getRuntime();
   try {
-    runtime.runRepo.require(id);
+    await runtime.runRepo.require(id);
   } catch {
     return NextResponse.json({ error: "run not found" }, { status: 404 });
   }
-  const run = runtime.runRepo.require(id);
+  const run = await runtime.runRepo.require(id);
   if (run.status !== "succeeded") {
     return NextResponse.json({ error: "run not finished" }, { status: 409 });
   }
 
-  const revisionCount = runtime.assetRepo.pageVersionCount(id, pageIndex);
-  const { job } = runtime.jobRepo.createOrReuse({
+  const revisionCount = await runtime.assetRepo.pageVersionCount(id, pageIndex);
+  const { job } = await runtime.jobRepo.createOrReuse({
     kind: PAGE_REGEN_KIND,
     runId: id,
     idempotencyKey: `page_regen:${id}:${pageIndex}:v${revisionCount + 1}`,
     payloadJson: JSON.stringify({ pageIndex, ...parsed.data }),
     maxAttempts: 3,
   });
-  runtime.jobRepo.appendEvent(job.id, "created", `page=${pageIndex}`);
+  await runtime.jobRepo.appendEvent(job.id, "created", `page=${pageIndex}`);
 
   return NextResponse.json(
     { jobId: job.id, runId: id, pageIndex, revision: revisionCount + 1 },

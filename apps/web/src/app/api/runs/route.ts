@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   let brandKit: BrandKitConfig | undefined;
   if (brandKitId) {
     try {
-      const kit = getRuntime().brandKitRepo.require(brandKitId);
+      const kit = await (await getRuntime()).brandKitRepo.require(brandKitId);
       brandKit = {
         themeId: kit.themeId as ThemeId,
         styleKeywords: JSON.parse(kit.styleKeywordsJson) as string[],
@@ -41,18 +41,18 @@ export async function POST(request: Request) {
   }
   const input = parsed.data;
 
-  const runtime = getRuntime();
+  const runtime = await getRuntime();
   const effective = runtime.effectiveConcurrency(input.requestedImageConcurrency);
-  const project = runtime.projectRepo.create({ title: input.topic.slice(0, 60) });
-  const run = runtime.runRepo.create({ projectId: project.id, inputJson: JSON.stringify(input) });
+  const project = await runtime.projectRepo.create({ title: input.topic.slice(0, 60) });
+  const run = await runtime.runRepo.create({ projectId: project.id, inputJson: JSON.stringify(input) });
   const jobKind = input.recipe === "comic_story" ? "comic_story_run" : "knowledge_card_run";
-  const { job } = runtime.jobRepo.createOrReuse({
+  const { job } = await runtime.jobRepo.createOrReuse({
     kind: jobKind,
     runId: run.id,
     idempotencyKey: `${jobKind}:${run.id}`,
     maxAttempts: 3,
   });
-  runtime.jobRepo.appendEvent(job.id, "created", `run=${run.id}`);
+  await runtime.jobRepo.appendEvent(job.id, "created", `run=${run.id}`);
 
   return NextResponse.json(
     {
@@ -66,8 +66,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
-  const runtime = getRuntime();
-  const runs: RunListItem[] = listRunItems(runtime, 20);
+  const runtime = await getRuntime();
+  const runs: RunListItem[] = await listRunItems(runtime, 20);
   return NextResponse.json({
     runs,
     providerLabel: runtime.config.providerLabel,

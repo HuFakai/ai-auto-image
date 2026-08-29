@@ -29,13 +29,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: `不支持的图片类型：${mime ?? "未知"}` }, { status: 415 });
   }
 
-  const runtime = getRuntime();
+  const runtime = await getRuntime();
   const safeName = (file.name || "upload").replace(/[\\/:*?"<>|]/g, "").slice(-60) || "upload";
   const saved = await runtime.assetStore.saveBuffer(
     buffer,
     path.join("uploads", `${Date.now()}-${safeName}`),
   );
-  const asset = runtime.assetRepo.create({
+  const asset = await runtime.assetRepo.create({
     kind: "upload",
     filePath: saved.filePath,
     mimeType: saved.mimeType,

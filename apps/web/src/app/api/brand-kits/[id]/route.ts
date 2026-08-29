@@ -25,9 +25,9 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid input" }, { status: 400 });
   }
-  const runtime = getRuntime();
+  const runtime = await getRuntime();
   try {
-    const kit = runtime.brandKitRepo.update(id, parsed.data);
+    const kit = await runtime.brandKitRepo.update(id, parsed.data);
     return NextResponse.json({ kit: { id: kit.id, name: kit.name } });
   } catch {
     return NextResponse.json({ error: "brand kit not found" }, { status: 404 });
@@ -36,11 +36,11 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
 
 export async function DELETE(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const runtime = getRuntime();
-  const kit = runtime.brandKitRepo.require(id);
+  const runtime = await getRuntime();
+  const kit = await runtime.brandKitRepo.require(id);
   if (kit.builtIn === 1) {
     return NextResponse.json({ error: "内置主题不可删除，可编辑改名" }, { status: 409 });
   }
-  runtime.brandKitRepo.delete(id);
+  await runtime.brandKitRepo.delete(id);
   return NextResponse.json({ ok: true });
 }

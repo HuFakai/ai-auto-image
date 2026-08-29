@@ -1,27 +1,36 @@
 import { relations } from "drizzle-orm";
 import {
+  bigint,
   index,
   integer,
+  pgTable,
   real,
-  sqliteTable,
   text,
   uniqueIndex,
-} from "drizzle-orm/sqlite-core";
+} from "drizzle-orm/pg-core";
+
+/**
+ * PostgreSQL 方言（生产 postgres.js / 测试 PGlite 同一套 schema）。
+ * 时间戳统一为 epoch 毫秒整数（bigint mode number），与原 SQLite 数据形状一致；
+ * 布尔语义列保持 0/1 整数（enabled 等），Repo 层数据形状与旧版完全兼容。
+ */
 
 /** 时间戳统一为 epoch 毫秒整数 */
-const createdAt = () => integer("created_at").notNull();
+const createdAt = () => bigint("created_at", { mode: "number" }).notNull();
+
+const epochColumn = (name: string) => bigint(name, { mode: "number" });
 
 /** 一次内容创作项目 */
-export const projects = sqliteTable("projects", {
+export const projects = pgTable("projects", {
   id: text("id").primaryKey(),
   title: text("title").notNull(),
   status: text("status").notNull().default("active"),
   createdAt: createdAt(),
-  updatedAt: integer("updated_at").notNull(),
+  updatedAt: epochColumn("updated_at").notNull(),
 });
 
 /** 一次工作流执行；input/snapshot 为 JSON 字符串 */
-export const workflowRuns = sqliteTable(
+export const workflowRuns = pgTable(
   "workflow_runs",
   {
     id: text("id").primaryKey(),
@@ -34,17 +43,17 @@ export const workflowRuns = sqliteTable(
     errorSummary: text("error_summary"),
     reviewStatus: text("review_status").notNull().default("pending"),
     reviewNote: text("review_note"),
-    reviewedAt: integer("reviewed_at"),
+    reviewedAt: epochColumn("reviewed_at"),
     createdAt: createdAt(),
-    updatedAt: integer("updated_at").notNull(),
-    startedAt: integer("started_at"),
-    finishedAt: integer("finished_at"),
+    updatedAt: epochColumn("updated_at").notNull(),
+    startedAt: epochColumn("started_at"),
+    finishedAt: epochColumn("finished_at"),
   },
   (t) => [index("idx_workflow_runs_project").on(t.projectId)],
 );
 
 /** 单节点执行记录：输入输出、尝试次数、Provider、成本与错误 */
-export const nodeRuns = sqliteTable(
+export const nodeRuns = pgTable(
   "node_runs",
   {
     id: text("id").primaryKey(),
@@ -65,14 +74,14 @@ export const nodeRuns = sqliteTable(
     completionTokens: integer("completion_tokens").notNull().default(0),
     images: integer("images").notNull().default(0),
     costUsd: real("cost_usd"),
-    startedAt: integer("started_at"),
-    finishedAt: integer("finished_at"),
+    startedAt: epochColumn("started_at"),
+    finishedAt: epochColumn("finished_at"),
   },
   (t) => [index("idx_node_runs_run").on(t.runId)],
 );
 
 /** Prompt 模板版本 */
-export const promptVersions = sqliteTable(
+export const promptVersions = pgTable(
   "prompt_versions",
   {
     id: text("id").primaryKey(),
@@ -85,7 +94,7 @@ export const promptVersions = sqliteTable(
 );
 
 /** 资产：原始、生成、合成与导出文件 */
-export const assets = sqliteTable(
+export const assets = pgTable(
   "assets",
   {
     id: text("id").primaryKey(),
@@ -104,14 +113,14 @@ export const assets = sqliteTable(
     bytes: integer("bytes").notNull().default(0),
     checksum: text("checksum"),
     metadataJson: text("metadata_json"),
-    supersededAt: integer("superseded_at"),
+    supersededAt: epochColumn("superseded_at"),
     createdAt: createdAt(),
   },
   (t) => [index("idx_assets_run").on(t.runId)],
 );
 
 /** 资产血缘：参考、派生、替代与版本关系 */
-export const assetRelations = sqliteTable(
+export const assetRelations = pgTable(
   "asset_relations",
   {
     id: text("id").primaryKey(),
@@ -128,7 +137,7 @@ export const assetRelations = sqliteTable(
 );
 
 /** 每次 Provider 调用尝试：成功与失败都记录，不只记最终成功者 */
-export const providerAttempts = sqliteTable(
+export const providerAttempts = pgTable(
   "provider_attempts",
   {
     id: text("id").primaryKey(),
@@ -142,15 +151,15 @@ export const providerAttempts = sqliteTable(
     errorCategory: text("error_category"),
     errorSummary: text("error_summary"),
     providerRequestId: text("provider_request_id"),
-    startedAt: integer("started_at").notNull(),
-    finishedAt: integer("finished_at"),
+    startedAt: epochColumn("started_at").notNull(),
+    finishedAt: epochColumn("finished_at"),
     durationMs: integer("duration_ms"),
   },
   (t) => [index("idx_provider_attempts_run").on(t.runId)],
 );
 
 /** Provider 用量与成本账本 */
-export const providerUsages = sqliteTable(
+export const providerUsages = pgTable(
   "provider_usages",
   {
     id: text("id").primaryKey(),
@@ -169,7 +178,7 @@ export const providerUsages = sqliteTable(
 );
 
 /** 可恢复作业；租约字段防止多实例重复执行 */
-export const jobs = sqliteTable(
+export const jobs = pgTable(
   "jobs",
   {
     id: text("id").primaryKey(),
@@ -184,11 +193,11 @@ export const jobs = sqliteTable(
     recoveries: integer("recoveries").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(3),
     leaseHolder: text("lease_holder"),
-    leaseExpiresAt: integer("lease_expires_at"),
-    lastProgressAt: integer("last_progress_at"),
+    leaseExpiresAt: epochColumn("lease_expires_at"),
+    lastProgressAt: epochColumn("last_progress_at"),
     lastError: text("last_error"),
     createdAt: createdAt(),
-    updatedAt: integer("updated_at").notNull(),
+    updatedAt: epochColumn("updated_at").notNull(),
   },
   (t) => [
     uniqueIndex("uq_jobs_idempotency").on(t.idempotencyKey),
@@ -197,7 +206,7 @@ export const jobs = sqliteTable(
 );
 
 /** 模型渠道（Studio 设置页管理，密钥加密落库）；type: text | image */
-export const channels = sqliteTable(
+export const channels = pgTable(
   "channels",
   {
     id: text("id").primaryKey(),
@@ -212,21 +221,21 @@ export const channels = sqliteTable(
     responseFormat: text("response_format").notNull().default("b64_json"),
     resolution: text("resolution"),
     enabled: integer("enabled").notNull().default(1),
-    sortOrder: integer("sort_order").notNull().default(0),
+    sortOrder: bigint("sort_order", { mode: "number" }).notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(3),
     imageConcurrencyMax: integer("image_concurrency_max"),
     imageEditSupport: integer("image_edit_support").notNull().default(0),
     lastTestOk: integer("last_test_ok"),
-    lastTestAt: integer("last_test_at"),
+    lastTestAt: epochColumn("last_test_at"),
     lastTestDetail: text("last_test_detail"),
     createdAt: createdAt(),
-    updatedAt: integer("updated_at").notNull(),
+    updatedAt: epochColumn("updated_at").notNull(),
   },
   (t) => [index("idx_channels_type_order").on(t.type, t.sortOrder)],
 );
 
 /** 作业事件流水，供进度展示与审计 */
-export const jobEvents = sqliteTable(
+export const jobEvents = pgTable(
   "job_events",
   {
     id: text("id").primaryKey(),
@@ -241,7 +250,7 @@ export const jobEvents = sqliteTable(
 );
 
 /** 单页返修版本链：保留每次返修的输入与产物 */
-export const revisions = sqliteTable(
+export const revisions = pgTable(
   "revisions",
   {
     id: text("id").primaryKey(),
@@ -258,7 +267,7 @@ export const revisions = sqliteTable(
 );
 
 /** 品牌手册：主题、风格关键词与 Logo */
-export const brandKits = sqliteTable("brand_kits", {
+export const brandKits = pgTable("brand_kits", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   themeId: text("theme_id").notNull().default("darkroom"),
@@ -267,12 +276,53 @@ export const brandKits = sqliteTable("brand_kits", {
   logoAssetId: text("logo_asset_id"),
   builtIn: integer("built_in").notNull().default(0),
   createdAt: createdAt(),
-  updatedAt: integer("updated_at").notNull(),
+  updatedAt: epochColumn("updated_at").notNull(),
 });
+
+/** 登录用户（账号密码先行；auth_provider/provider_subject 预留微信小程序扫码） */
+export const users = pgTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    username: text("username").notNull(),
+    passwordHash: text("password_hash"),
+    role: text("role").notNull().default("user"),
+    status: text("status").notNull().default("active"),
+    authProvider: text("auth_provider").notNull().default("password"),
+    providerSubject: text("provider_subject"),
+    createdAt: createdAt(),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_users_username").on(t.username),
+    uniqueIndex("uq_users_provider_subject").on(t.providerSubject),
+  ],
+);
+
+/** 登录会话（服务端存 token 摘要，可随时吊销） */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    authProvider: text("auth_provider").notNull().default("password"),
+    createdAt: createdAt(),
+    expiresAt: epochColumn("expires_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_sessions_token_hash").on(t.tokenHash),
+    index("idx_sessions_user").on(t.userId),
+  ],
+);
 
 export type Channel = typeof channels.$inferSelect;
 export type BrandKit = typeof brandKits.$inferSelect;
 export type Revision = typeof revisions.$inferSelect;
+export type User = typeof users.$inferSelect;
+export type Session = typeof sessions.$inferSelect;
 
 export const workflowRunsRelations = relations(workflowRuns, ({ many }) => ({
   nodeRuns: many(nodeRuns),

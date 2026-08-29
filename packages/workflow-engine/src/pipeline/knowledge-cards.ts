@@ -106,16 +106,16 @@ function pageIndexOf(row: NodeRowLike): number | undefined {
 export function registerKnowledgeCardPipeline(runner: JobRunner, deps: WorkflowDeps): void {
   runner.register(KNOWLEDGE_CARD_KIND, async (ctx) => {
     if (!ctx.runId) throw new Error("knowledge_card_run requires runId");
-    const run = deps.runRepo.require(ctx.runId);
+    const run = await deps.runRepo.require(ctx.runId);
     const input = JSON.parse(run.inputJson) as CreateRunInput;
-    deps.runRepo.updateStatus(run.id, "running");
+    await deps.runRepo.updateStatus(run.id, "running");
 
     try {
       await executeKnowledgeCardRun(deps, ctx, run.id, input);
     } catch (error) {
       // 中途取消发生在节点内部时，保证 Run 不停留在 running
       if (ctx.signal.aborted) {
-        deps.runRepo.updateStatus(run.id, "cancelled");
+        await deps.runRepo.updateStatus(run.id, "cancelled");
       }
       throw error;
     }
@@ -129,7 +129,7 @@ async function executeKnowledgeCardRun(
   runId: string,
   input: CreateRunInput,
 ): Promise<void> {
-  const existingNodes = deps.runRepo.listNodeRuns(runId) as unknown as NodeRowLike[];
+  const existingNodes = (await deps.runRepo.listNodeRuns(runId)) as unknown as NodeRowLike[];
     const providerMaxValues = deps.imageRoutes
       .map((route) => route.config.imageConcurrencyMax)
       .filter((value): value is number => typeof value === "number");
@@ -141,9 +141,9 @@ async function executeKnowledgeCardRun(
 
     /* parse-input */
     if (!succeededNode(existingNodes, "parse-input")) {
-      const node = deps.runRepo.createNodeRun(runId, "parse-input");
-      deps.runRepo.startNode(node.id);
-      deps.runRepo.succeedNode(node.id, {
+      const node = await deps.runRepo.createNodeRun(runId, "parse-input");
+      await deps.runRepo.startNode(node.id);
+      await deps.runRepo.succeedNode(node.id, {
         outputRef: JSON.stringify({
           platform: input.platform,
           aspectRatio: input.aspectRatio,
@@ -153,7 +153,7 @@ async function executeKnowledgeCardRun(
     }
 
     /* RunSnapshot：冻结模式、并发、路由与模板版本 */
-    deps.runRepo.setSnapshot(
+    await deps.runRepo.setSnapshot(
       runId,
       JSON.stringify({
         textRenderingMode: input.textRenderingMode,
@@ -179,7 +179,7 @@ async function executeKnowledgeCardRun(
       schema: ContentBriefSchema,
       buildPrompt: () => buildBriefPrompt(input),
     });
-    throwIfAborted(deps, runId, ctx.signal);
+    await throwIfAborted(deps, runId, ctx.signal);
 
     /* generate-storyboard */
     const storyboard = await runStructuredNode(deps, ctx, runId, existingNodes, {
@@ -192,19 +192,20 @@ async function executeKnowledgeCardRun(
     storyboard.slides.forEach((slide, index) => {
       slide.index = index;
     });
-    throwIfAborted(deps, runId, ctx.signal);
+    await throwIfAborted(deps, runId, ctx.signal);
     const pageCount = storyboard.slides.length;
 
     /* generate-images：按有效并发并行；已成功页面跳过 */
     const failedPages: number[] = [];
     const pageTasks = storyboard.slides.map((slide) => async () => {
-      if (succeededPageNode(deps.runRepo.listNodeRuns(runId) as unknown as NodeRowLike[], slide.index)) {
+      const rows = (await deps.runRepo.listNodeRuns(runId)) as unknown as NodeRowLike[];
+      if (succeededPageNode(rows, slide.index)) {
         return;
       }
       await generatePage(deps, ctx, runId, input, storyboard, slide, pageCount, effective, failedPages);
     });
     await runPool(pageTasks, effective);
-    throwIfAborted(deps, runId, ctx.signal);
+    await throwIfAborted(deps, runId, ctx.signal);
 
     /* render-slides：仅确定性模式 */
     if (input.textRenderingMode === "deterministic") {
@@ -212,20 +213,20 @@ async function executeKnowledgeCardRun(
     }
 
     /* package-export */
-    const totals = writeExportManifest(deps, runId, input, brief, storyboard, failedPages);
+    const totals = await writeExportManifest(deps, runId, input, brief, storyboard, failedPages);
 
     if (failedPages.length > 0) {
       const summary = `pages failed: ${failedPages.join(", ")}`;
-      deps.runRepo.updateStatus(runId, "failed", { errorSummary: summary });
+      await deps.runRepo.updateStatus(runId, "failed", { errorSummary: summary });
       throw new Error(summary);
     }
     if (input.requireApproval) {
       // 审批门：挂起等待人工确认（确认后由 review API 置 succeeded，导出才放行）
-      deps.runRepo.updateStatus(runId, "awaiting_approval");
+      await deps.runRepo.updateStatus(runId, "awaiting_approval");
       logger.info("run awaiting final approval", { runId, pages: pageCount });
       return;
     }
-    deps.runRepo.updateStatus(runId, "succeeded");
+    await deps.runRepo.updateStatus(runId, "succeeded");
     logger.info("knowledge card run completed", {
       runId: runId,
       pages: pageCount,
@@ -248,8 +249,8 @@ async function generatePage(
 ): Promise<void> {
   const mode = input.textRenderingMode;
   const plan = buildSlidePrompt(slide, storyboard, input, mode);
-  const node = deps.runRepo.createNodeRun(runId, "generate-images");
-  deps.runRepo.startNode(node.id, {
+  const node = await deps.runRepo.createNodeRun(runId, "generate-images");
+  await deps.runRepo.startNode(node.id, {
     routeId: deps.imageRoutes[0]?.config.id,
     model: deps.imageRoutes[0]?.model,
   });
@@ -277,8 +278,8 @@ async function generatePage(
           return images;
         });
       },
-      onAttempt: (record) => {
-        deps.providerRepo.recordAttempt({
+      onAttempt: async (record) => {
+        await deps.providerRepo.recordAttempt({
           runId,
           nodeRunId: node.id,
           routeId: record.routeId,
@@ -326,7 +327,7 @@ async function generatePage(
 
     const relPath = path.join("runs", runId, "pages", `page-${slide.index}.png`);
     const saved = await deps.assetStore.saveGeneratedImage(image, relPath);
-    const asset = deps.assetRepo.create({
+    const asset = await deps.assetRepo.create({
       runId,
       nodeRunId: node.id,
       pageIndex: slide.index,
@@ -338,7 +339,7 @@ async function generatePage(
       metadataJson: JSON.stringify({ ...metadata, model: usedModel }),
     });
 
-    deps.runRepo.succeedNode(node.id, {
+    await deps.runRepo.succeedNode(node.id, {
       outputRef: JSON.stringify({
         pageIndex: slide.index,
         assetId: asset.id,
@@ -357,7 +358,7 @@ async function generatePage(
     void effective;
   } catch (error) {
     const aiError = toAiError(error);
-    deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
+    await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
     failedPages.push(slide.index);
     logger.error("page generation failed", {
       runId,
@@ -369,11 +370,11 @@ async function generatePage(
 }
 
 /** 读取 Brand Kit Logo（缺失或读取失败时返回 undefined，不阻塞渲染） */
-function readLogoBase64(deps: WorkflowDeps, input: CreateRunInput): string | undefined {
+async function readLogoBase64(deps: WorkflowDeps, input: CreateRunInput): Promise<string | undefined> {
   const logoAssetId = input.brandKit?.logoAssetId;
   if (!logoAssetId) return undefined;
   try {
-    const asset = deps.assetRepo.require(logoAssetId);
+    const asset = await deps.assetRepo.require(logoAssetId);
     return fs.readFileSync(deps.assetStore.resolve(asset.filePath)).toString("base64");
   } catch {
     return undefined;
@@ -387,21 +388,19 @@ async function renderAllSlides(
   storyboard: Storyboard,
   pageCount: number,
 ): Promise<void> {
-  const renderNode = deps.runRepo.createNodeRun(runId, "render-slides");
-  deps.runRepo.startNode(renderNode.id, { model: deps.templateVersion });
+  const renderNode = await deps.runRepo.createNodeRun(runId, "render-slides");
+  await deps.runRepo.startNode(renderNode.id, { model: deps.templateVersion });
   try {
     for (const slide of storyboard.slides) {
-      const pageNode = succeededPageNode(
-        deps.runRepo.listNodeRuns(runId) as unknown as NodeRowLike[],
-        slide.index,
-      );
+      const rows = (await deps.runRepo.listNodeRuns(runId)) as unknown as NodeRowLike[];
+      const pageNode = succeededPageNode(rows, slide.index);
       if (!pageNode) continue;
 
-      const visualAsset = deps.assetRepo.require(
+      const visualAsset = await deps.assetRepo.require(
         (JSON.parse(pageNode.outputRef ?? "{}") as { assetId?: string }).assetId!,
       );
       const visualBase64 = fs.readFileSync(deps.assetStore.resolve(visualAsset.filePath)).toString("base64");
-      const logoBase64 = readLogoBase64(deps, input);
+      const logoBase64 = await readLogoBase64(deps, input);
 
       const buffer = await renderSlideDeterministic({
         theme: themeById(input.brandKit?.themeId),
@@ -415,7 +414,7 @@ async function renderAllSlides(
         buffer,
         path.join("runs", runId, "pages", `page-${slide.index}-composite.png`),
       );
-      deps.assetRepo.create({
+      await deps.assetRepo.create({
         runId,
         nodeRunId: renderNode.id,
         pageIndex: slide.index,
@@ -431,40 +430,44 @@ async function renderAllSlides(
         }),
       });
     }
-    deps.runRepo.succeedNode(renderNode.id, {
+    await deps.runRepo.succeedNode(renderNode.id, {
       outputRef: JSON.stringify({ templateVersion: deps.templateVersion }),
     });
   } catch (error) {
     const aiError = toAiError(error);
-    deps.runRepo.failNode(renderNode.id, aiError.category, aiError.message.slice(0, 400));
+    await deps.runRepo.failNode(renderNode.id, aiError.category, aiError.message.slice(0, 400));
     throw error;
   }
 }
 
-function writeExportManifest(
+async function writeExportManifest(
   deps: WorkflowDeps,
   runId: string,
   input: CreateRunInput,
   brief: ContentBrief,
   storyboard: Storyboard,
   failedPages: number[],
-): ModelUsage {
-  const exportNode = deps.runRepo.createNodeRun(runId, "package-export");
-  deps.runRepo.startNode(exportNode.id);
-  const totals = deps.runRepo.runTotals(runId);
+): Promise<ModelUsage> {
+  const exportNode = await deps.runRepo.createNodeRun(runId, "package-export");
+  await deps.runRepo.startNode(exportNode.id);
+  const totals = await deps.runRepo.runTotals(runId);
 
   const exportDir = path.join(deps.exportsDir, runId);
   fs.mkdirSync(exportDir, { recursive: true });
   const manifestPath = path.join(exportDir, "manifest.json");
 
+  // 一次取出全部节点与资产（flatMap 回调内无法 await）
+  const existingRowsCache = (await deps.runRepo.listNodeRuns(runId)) as unknown as NodeRowLike[];
+  const allAssetsCache = await deps.assetRepo.listByRun(runId);
+
   const pages = storyboard.slides.flatMap((slide) => {
     const pageNode = succeededPageNode(
-      deps.runRepo.listNodeRuns(runId) as unknown as NodeRowLike[],
+      existingRowsCache,
       slide.index,
     );
     if (!pageNode) return [];
     const output = JSON.parse(pageNode.outputRef ?? "{}") as { assetId?: string };
-    const asset = deps.assetRepo.listByRun(runId).find((row) => row.id === output.assetId);
+    const asset = allAssetsCache.find((row) => row.id === output.assetId);
     if (!asset) return [];
     const metadata = JSON.parse(asset.metadataJson ?? "{}") as Record<string, unknown>;
     return [
@@ -503,7 +506,7 @@ function writeExportManifest(
     ),
   );
 
-  const manifestAsset = deps.assetRepo.create({
+  const manifestAsset = await deps.assetRepo.create({
     runId,
     nodeRunId: exportNode.id,
     kind: "export-manifest",
@@ -511,7 +514,7 @@ function writeExportManifest(
     mimeType: "application/json",
     bytes: fs.statSync(manifestPath).size,
   });
-  deps.runRepo.succeedNode(exportNode.id, {
+  await deps.runRepo.succeedNode(exportNode.id, {
     outputRef: JSON.stringify({ manifestAssetId: manifestAsset.id }),
   });
   return totals;
@@ -539,8 +542,8 @@ async function runStructuredNode<T>(
     }
   }
 
-  const node = deps.runRepo.createNodeRun(runId, spec.nodeName);
-  deps.runRepo.startNode(node.id, {
+  const node = await deps.runRepo.createNodeRun(runId, spec.nodeName);
+  await deps.runRepo.startNode(node.id, {
     routeId: deps.textRoutes[0]?.config.id,
     model: deps.textRoutes[0]?.model,
   });
@@ -564,8 +567,8 @@ async function runStructuredNode<T>(
         });
         return result;
       },
-      onAttempt: (record) => {
-        deps.providerRepo.recordAttempt({
+      onAttempt: async (record) => {
+        await deps.providerRepo.recordAttempt({
           runId,
           nodeRunId: node.id,
           routeId: record.routeId,
@@ -582,7 +585,7 @@ async function runStructuredNode<T>(
       },
     });
 
-    deps.providerRepo.recordUsage({
+    await deps.providerRepo.recordUsage({
       runId,
       nodeRunId: node.id,
       routeId: deps.textRoutes[0]?.config.id ?? "unknown",
@@ -591,7 +594,7 @@ async function runStructuredNode<T>(
       completionTokens: usageAcc.completionTokens,
       totalTokens: usageAcc.totalTokens,
     });
-    deps.runRepo.succeedNode(node.id, {
+    await deps.runRepo.succeedNode(node.id, {
       outputRef: JSON.stringify({ value, schemaName: spec.schemaName }),
       promptTokens: usageAcc.promptTokens,
       completionTokens: usageAcc.completionTokens,
@@ -600,19 +603,19 @@ async function runStructuredNode<T>(
     return value;
   } catch (error) {
     const aiError = toAiError(error);
-    deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
+    await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
     throw error;
   }
 }
 
 /** 用户取消：Run 置为 cancelled 并抛出，Runner 会保留取消终态 */
-function throwIfAborted(
+async function throwIfAborted(
   deps: WorkflowDeps,
   runId: string,
   signal: AbortSignal,
-): void {
+): Promise<void> {
   if (signal.aborted) {
-    deps.runRepo.updateStatus(runId, "cancelled");
+    await deps.runRepo.updateStatus(runId, "cancelled");
     throw new Error("run cancelled by user");
   }
 }

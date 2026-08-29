@@ -12,26 +12,28 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "fonts": "bash scripts/fetch-fonts.sh",
-    "db:migrate": "tsx scripts/db-migrate.ts",
-    "db:seed": "tsx scripts/db-seed.ts",
+    "db:migrate": "tsx scripts/db-migrate.mts",
+    "db:seed": "tsx scripts/db-seed.mts",
     "verify:openai": "tsx scripts/verify-openai.mts",
     "verify:live": "tsx scripts/verify-live.mts",
     "verify:xai": "tsx scripts/verify-xai.mts",
     "eval": "tsx scripts/eval.mts",
-    "pg:export": "tsx scripts/pg-export.mts"
+    "pg:export": "tsx scripts/pg-export.mts",
+    "pg:import": "tsx scripts/pg-import.mts"
   },
   "devDependencies": {
     "@aai/ai-core": "workspace:*",
     "@aai/provider-openai": "workspace:*",
     "@aai/provider-xai": "workspace:*",
+    "@aai/render-engine": "workspace:*",
     "@aai/shared-schemas": "workspace:*",
     "@aai/storage": "workspace:*",
     "@aai/workflow-engine": "workspace:*",
+    "better-sqlite3": "^12.2.0",
     "eslint": "^9.30.0",
-    "turbo": "^2.5.0",
+    "postgres": "^3.4.9",
     "tsx": "^4.20.0",
-    "typescript-eslint": "^8.35.0",
-    "@aai/render-engine": "workspace:*",
-    "better-sqlite3": "^12.2.0"
+    "turbo": "^2.5.0",
+    "typescript-eslint": "^8.35.0"
   }
 }

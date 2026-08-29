@@ -25,8 +25,8 @@ export interface FallbackOptions<T> {
   routes: FallbackRoute[];
   /** 对单个路由执行一次调用（内部不要自行 catch AiError） */
   run: (route: FallbackRoute, signal?: AbortSignal) => Promise<T>;
-  /** 每次尝试（含成功）的回调：调用方负责持久化到 provider_attempts */
-  onAttempt?: ((record: RouteAttemptRecord) => void) | undefined;
+  /** 每次尝试（含成功）的回调：调用方负责持久化到 provider_attempts；支持异步等待 */
+  onAttempt?: ((record: RouteAttemptRecord) => void | Promise<void>) | undefined;
   signal?: AbortSignal | undefined;
   /** 重试退避基数，默认 500ms */
   backoffBaseMs?: number | undefined;
@@ -76,7 +76,7 @@ export async function withModelFallbacks<T>(options: FallbackOptions<T>): Promis
           ok: true,
         };
         attempts.push(record);
-        onAttempt?.(record);
+        await onAttempt?.(record);
         return result;
       } catch (error) {
         const aiError = toAiError(error);
@@ -94,7 +94,7 @@ export async function withModelFallbacks<T>(options: FallbackOptions<T>): Promis
           providerRequestId: aiError.providerRequestId,
         };
         attempts.push(record);
-        onAttempt?.(record);
+        await onAttempt?.(record);
 
         // 用户取消：立即终止，不重试也不切换路由
         if (signal?.aborted) throw error;

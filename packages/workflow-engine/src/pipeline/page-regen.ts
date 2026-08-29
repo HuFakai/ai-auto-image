@@ -34,16 +34,21 @@ export interface PageRegenDeps {
   visualQuality: VisualQualityModel | null;
 }
 
-function loadStoryboard(deps: PageRegenDeps, runId: string): Storyboard {
-  const nodes = deps.runRepo.listNodeRuns(runId);
+async function loadStoryboard(deps: PageRegenDeps, runId: string): Promise<Storyboard> {
+  const nodes = await deps.runRepo.listNodeRuns(runId);
   const node = nodes.find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded");
   if (!node?.outputRef) throw new Error("storyboard not found for run");
   return (JSON.parse(node.outputRef) as { value: Storyboard }).value;
 }
 
 /** 返修成功后把新文案同步回 Storyboard，保证详情/导出与图片一致 */
-function syncStoryboardSlide(deps: PageRegenDeps, runId: string, pageIndex: number, slide: StoryboardSlide): void {
-  const nodes = deps.runRepo.listNodeRuns(runId);
+async function syncStoryboardSlide(
+  deps: PageRegenDeps,
+  runId: string,
+  pageIndex: number,
+  slide: StoryboardSlide,
+): Promise<void> {
+  const nodes = await deps.runRepo.listNodeRuns(runId);
   const node = nodes.find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded");
   if (!node?.outputRef) return;
   try {
@@ -52,7 +57,7 @@ function syncStoryboardSlide(deps: PageRegenDeps, runId: string, pageIndex: numb
     if (!target) return;
     target.headline = slide.headline;
     target.body = slide.body;
-    deps.runRepo.setNodeOutput(node.id, JSON.stringify(wrapper));
+    await deps.runRepo.setNodeOutput(node.id, JSON.stringify(wrapper));
   } catch {
     /* 同步失败不影响返修结果 */
   }
@@ -64,12 +69,12 @@ function syncStoryboardSlide(deps: PageRegenDeps, runId: string, pageIndex: numb
  */
 export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps): void {
   runner.register(PAGE_REGEN_KIND, async (ctx) => {
-    const job = deps.jobRepo.require(ctx.jobId);
+    const job = await deps.jobRepo.require(ctx.jobId);
     if (!ctx.runId || !job.payloadJson) throw new Error("page_regen requires runId and payload");
     const payload = JSON.parse(job.payloadJson) as PageRegenPayload;
-    const run = deps.runRepo.require(ctx.runId);
+    const run = await deps.runRepo.require(ctx.runId);
     const input = JSON.parse(run.inputJson) as CreateRunInput;
-    const storyboard = loadStoryboard(deps, ctx.runId);
+    const storyboard = await loadStoryboard(deps, ctx.runId);
     const original = storyboard.slides[payload.pageIndex];
     if (!original) throw new Error(`page index out of range: ${payload.pageIndex}`);
 
@@ -83,8 +88,8 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       ? { imagePrompt: payload.imagePromptOverride, expectedCopy: [slide.headline, ...slide.body] }
       : buildSlidePrompt(slide, storyboard, input, mode);
 
-    const node = deps.runRepo.createNodeRun(ctx.runId, "generate-images");
-    deps.runRepo.startNode(node.id, {
+    const node = await deps.runRepo.createNodeRun(ctx.runId, "generate-images");
+    await deps.runRepo.startNode(node.id, {
       routeId: deps.imageRoutes[0]?.config.id,
       model: deps.imageRoutes[0]?.model,
     });
@@ -106,8 +111,8 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
             return images;
           });
         },
-        onAttempt: (record) => {
-          deps.providerRepo.recordAttempt({
+        onAttempt: async (record) => {
+          await deps.providerRepo.recordAttempt({
             runId: ctx.runId!,
             nodeRunId: node.id,
             routeId: record.routeId,
@@ -125,7 +130,7 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       });
 
       const image = result[0]!;
-      const version = deps.assetRepo.pageVersionCount(ctx.runId, payload.pageIndex) + 1;
+      const version = (await deps.assetRepo.pageVersionCount(ctx.runId, payload.pageIndex)) + 1;
 
       /* deterministic：AI 只出视觉层，文字由程序重新排版合成 */
       if (mode === "deterministic") {
@@ -152,11 +157,11 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       }
 
       /* native：模型出完整图，直接作为新版本 */
-      syncStoryboardSlide(deps, ctx.runId, payload.pageIndex, slide);
+      await syncStoryboardSlide(deps, ctx.runId, payload.pageIndex, slide);
       const relPath = path.join("runs", ctx.runId, "pages", `page-${payload.pageIndex}-v${version}.png`);
       const saved = await deps.assetStore.saveGeneratedImage(image, relPath);
-      deps.assetRepo.supersedePage(ctx.runId, payload.pageIndex);
-      const asset = deps.assetRepo.create({
+      await deps.assetRepo.supersedePage(ctx.runId, payload.pageIndex);
+      const asset = await deps.assetRepo.create({
         runId: ctx.runId,
         nodeRunId: node.id,
         pageIndex: payload.pageIndex,
@@ -171,22 +176,22 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
           revision: version,
         }),
       });
-      deps.revisionRepo.create({
+      await deps.revisionRepo.create({
         runId: ctx.runId,
         pageIndex: payload.pageIndex,
         kind: "page-regen",
         payloadJson: JSON.stringify({ ...payload, mode }),
         assetId: asset.id,
       });
-      deps.runRepo.succeedNode(node.id, {
+      await deps.runRepo.succeedNode(node.id, {
         outputRef: JSON.stringify({ pageIndex: payload.pageIndex, assetId: asset.id, revision: version }),
         images: 1,
       });
-      deps.runRepo.setReview(ctx.runId, "pending");
+      await deps.runRepo.setReview(ctx.runId, "pending");
       logger.info("page regenerated", { runId: ctx.runId, page: payload.pageIndex, version });
     } catch (error) {
       const aiError = toAiError(error);
-      deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
+      await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
       throw error;
     }
   });
@@ -205,11 +210,11 @@ async function finishRegen(
     version: number;
   },
 ): Promise<void> {
-  syncStoryboardSlide(deps, args.runId, args.payload.pageIndex, args.slide);
+  await syncStoryboardSlide(deps, args.runId, args.payload.pageIndex, args.slide);
   const relPath = path.join("runs", args.runId, "pages", `page-${args.payload.pageIndex}-v${args.version}.png`);
   const saved = await deps.assetStore.saveBuffer(args.buffer, relPath);
-  deps.assetRepo.supersedePage(args.runId, args.payload.pageIndex);
-  const asset = deps.assetRepo.create({
+  await deps.assetRepo.supersedePage(args.runId, args.payload.pageIndex);
+  const asset = await deps.assetRepo.create({
     runId: args.runId,
     nodeRunId: args.node.id,
     pageIndex: args.payload.pageIndex,
@@ -224,18 +229,18 @@ async function finishRegen(
       revision: args.version,
     }),
   });
-  deps.revisionRepo.create({
+  await deps.revisionRepo.create({
     runId: args.runId,
     pageIndex: args.payload.pageIndex,
     kind: "page-regen",
     payloadJson: JSON.stringify({ ...args.payload, mode: "deterministic" }),
     assetId: asset.id,
   });
-  deps.runRepo.succeedNode(args.node.id, {
+  await deps.runRepo.succeedNode(args.node.id, {
     outputRef: JSON.stringify({ pageIndex: args.payload.pageIndex, assetId: asset.id, revision: args.version }),
     images: 1,
   });
-  deps.runRepo.setReview(args.runId, "pending");
+  await deps.runRepo.setReview(args.runId, "pending");
   void ctx;
   logger.info("page regenerated (deterministic)", { runId: args.runId, page: args.payload.pageIndex, version: args.version });
 }

@@ -17,8 +17,8 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid input" }, { status: 400 });
   }
-  const runtime = getRuntime();
-  runtime.channelService.reorder(parsed.data.ids);
-  runtime.refreshChannels();
+  const runtime = await getRuntime();
+  await runtime.channelService.reorder(parsed.data.ids);
+  await runtime.refreshChannels();
   return NextResponse.json({ ok: true });
 }

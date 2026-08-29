@@ -6,8 +6,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const runtime = getRuntime();
-  const file = readAssetFile(runtime, id);
+  const runtime = await getRuntime();
+  const file = await readAssetFile(runtime, id);
   if (!file) return new Response("asset not found", { status: 404 });
 
   return new Response(Readable.toWeb(file.body) as ReadableStream, {

@@ -45,16 +45,14 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "invalid input" }, { status: 400 });
   }
 
-  const runtime = getRuntime();
-  const run = runtime.runRepo.require(id);
+  const runtime = await getRuntime();
+  const run = await runtime.runRepo.require(id);
   const input = JSON.parse(run.inputJson) as CreateRunInput;
-  const current = runtime.assetRepo.latestForPage(id, pageIndex);
+  const current = await runtime.assetRepo.latestForPage(id, pageIndex);
   if (!current) return NextResponse.json({ error: "page asset missing" }, { status: 409 });
 
   // 找支持图生图的渠道路由（运行时快照里的路由）
-  const editRoute = runtime
-    .channelService.list()
-    .some((c) => c.type === "image" && c.enabled && c.imageEditSupport);
+  const editRoute = (await runtime.channelService.list()).some((c) => c.type === "image" && c.enabled && c.imageEditSupport);
   if (!editRoute) {
     return NextResponse.json(
       { error: "没有支持图生图的启用渠道；请在设置页为渠道勾选「支持图片编辑」，或使用整页重绘" },
@@ -90,7 +88,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
 
   // 读取 Mask 编辑路由并执行（运行时管线内的 imageRoutes 由 runner 快照持有；
   // 这里直接通过渠道服务装配一条编辑路由）
-  const assembled = runtime.channelService.assembleRoutes();
+  const assembled = await runtime.channelService.assembleRoutes();
   const route = assembled.imageRoutes.find((r) => r.image.capabilities().imageEditSingle);
   if (!route) {
     return NextResponse.json({ error: "没有可用图生图路由" }, { status: 409 });
@@ -104,13 +102,13 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   });
   const image = images[0]!;
 
-  const version = runtime.assetRepo.pageVersionCount(id, pageIndex) + 1;
+  const version = (await runtime.assetRepo.pageVersionCount(id, pageIndex)) + 1;
   const saved = await runtime.assetStore.saveGeneratedImage(
     image,
     path.join("runs", id, "pages", `page-${pageIndex}-v${version}.png`),
   );
-  runtime.assetRepo.supersedePage(id, pageIndex);
-  const asset = runtime.assetRepo.create({
+  await runtime.assetRepo.supersedePage(id, pageIndex);
+  const asset = await runtime.assetRepo.create({
     runId: id,
     pageIndex,
     kind: "generated",
@@ -124,14 +122,14 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       revision: version,
     }),
   });
-  runtime.revisionRepo.create({
+  await runtime.revisionRepo.create({
     runId: id,
     pageIndex,
     kind: "repaint",
     payloadJson: JSON.stringify({ rect: parsed.data.rect, prompt: parsed.data.prompt }),
     assetId: asset.id,
   });
-  runtime.runRepo.setReview(id, "pending");
+  await runtime.runRepo.setReview(id, "pending");
 
   return NextResponse.json({ assetId: asset.id, revision: version }, { status: 201 });
 }

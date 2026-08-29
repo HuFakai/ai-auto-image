@@ -1,1 +1,0 @@
-ALTER TABLE `channels` ADD `image_edit_support` integer DEFAULT 0 NOT NULL;

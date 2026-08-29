@@ -5,16 +5,16 @@ import type { BrandKitView, RunsListPayload } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export default function HomePage() {
-  const runtime = getRuntime();
+export default async function HomePage() {
+  const runtime = await getRuntime();
   const initial: RunsListPayload = {
-    runs: listRunItems(runtime, 20),
+    runs: await listRunItems(runtime, 20),
     providerLabel: runtime.config.providerLabel,
     providerMode: runtime.config.providerMode,
     serverMaxConcurrency: runtime.config.serverMaxConcurrency,
     defaultConcurrency: runtime.config.defaultConcurrency,
   };
-  const brandKits: BrandKitView[] = runtime.brandKitRepo.list().map((kit) => ({
+  const brandKits: BrandKitView[] = (await runtime.brandKitRepo.list()).map((kit) => ({
     id: kit.id,
     name: kit.name,
     themeId: kit.themeId,

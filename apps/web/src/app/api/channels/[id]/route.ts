@@ -19,10 +19,10 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
       { status: 400 },
     );
   }
-  const runtime = getRuntime();
+  const runtime = await getRuntime();
   try {
-    const channel = runtime.channelService.update(id, parsed.data);
-    runtime.refreshChannels();
+    const channel = await runtime.channelService.update(id, parsed.data);
+    await runtime.refreshChannels();
     return NextResponse.json({ channel });
   } catch {
     return NextResponse.json({ error: "channel not found" }, { status: 404 });
@@ -31,10 +31,10 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
 
 export async function DELETE(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const runtime = getRuntime();
+  const runtime = await getRuntime();
   try {
-    runtime.channelService.delete(id);
-    runtime.refreshChannels();
+    await runtime.channelService.delete(id);
+    await runtime.refreshChannels();
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ error: "channel not found" }, { status: 404 });

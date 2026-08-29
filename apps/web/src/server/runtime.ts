@@ -103,7 +103,7 @@ export interface Runtime {
   imageApiSemaphore: Semaphore;
   runner: JobRunner;
   /** 重新从数据库装配渠道路由（渠道增删改、启停、排序后调用） */
-  refreshChannels(): void;
+  refreshChannels(): Promise<void>;
   /** 导出文案等附加能力使用的首选文本模型（未配置时 null） */
   preferredTextModel(): TextModel | null;
   /** 计算某次请求的有效并发（min(requested, serverMax, providerMax)） */
@@ -111,12 +111,21 @@ export interface Runtime {
 }
 
 declare global {
-  var __aaiRuntime: Runtime | undefined;
+  var __aaiRuntimePromise: Promise<Runtime> | undefined;
 }
 
-export function getRuntime(): Runtime {
-  if (globalThis.__aaiRuntime) return globalThis.__aaiRuntime;
+export function getRuntime(): Promise<Runtime> {
+  if (!globalThis.__aaiRuntimePromise) {
+    // 初始化失败（如远程 PG 短暂不可达）时重置缓存，允许下一次调用重试
+    globalThis.__aaiRuntimePromise = initRuntime().catch((error: unknown) => {
+      globalThis.__aaiRuntimePromise = undefined;
+      throw error;
+    });
+  }
+  return globalThis.__aaiRuntimePromise;
+}
 
+async function initRuntime(): Promise<Runtime> {
   loadRootEnvFile();
   const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
   const sqlitePath = process.env.SQLITE_PATH ?? path.join(dataDir, "db", "app.db");
@@ -126,17 +135,17 @@ export function getRuntime(): Runtime {
   const defaultConcurrency = envInt("IMAGE_GENERATION_CONCURRENCY_DEFAULT", 1);
   const postprocessMax = envInt("IMAGE_POSTPROCESS_CONCURRENCY_MAX", 1);
 
-  const db = openDatabase({ sqlitePath, migrationsFolder: resolveMigrationsDir() });
+  const db = await openDatabase({ url: process.env.DATABASE_URL, migrationsFolder: resolveMigrationsDir() });
   const channelService = new ChannelService(new ChannelRepo(db.db), dataDir);
   const brandKitRepo = new BrandKitRepo(db.db);
-  const seededKits = brandKitRepo.seedBuiltIns();
+  const seededKits = await brandKitRepo.seedBuiltIns();
   if (seededKits > 0) {
     console.log(
       JSON.stringify({ ts: new Date().toISOString(), level: "info", msg: `seeded ${seededKits} built-in brand kits` }),
     );
   }
   // 渠道表为空且环境变量有配置时自动导入一次（之后以设置页管理为准）
-  const imported = autoImportFromEnv(channelService);
+  const imported = await autoImportFromEnv(channelService);
   if (imported > 0) {
     console.log(
       JSON.stringify({
@@ -194,8 +203,8 @@ export function getRuntime(): Runtime {
     preferredTextModel(): TextModel | null {
       return pipelineDeps.textRoutes[0]?.text ?? null;
     },
-    refreshChannels(): void {
-      const assembled = channelService.assembleRoutes();
+    async refreshChannels(): Promise<void> {
+      const assembled = await channelService.assembleRoutes();
       pipelineDeps.textRoutes = assembled.textRoutes;
       pipelineDeps.imageRoutes = assembled.imageRoutes;
       pipelineDeps.visualQuality = assembled.visualQuality;
@@ -294,12 +303,11 @@ export function getRuntime(): Runtime {
     },
   });
 
-  runtime.refreshChannels();
-  globalThis.__aaiRuntime = runtime;
+  await runtime.refreshChannels();
   return runtime;
 }
 
-export function startRuntimeRunner(): void {
-  const runtime = getRuntime();
+export async function startRuntimeRunner(): Promise<void> {
+  const runtime = await getRuntime();
   runtime.runner.start();
 }

@@ -38,8 +38,8 @@ export async function POST(
     return NextResponse.json({ error: "invalid input" }, { status: 400 });
   }
 
-  const runtime = getRuntime();
-  const run = runtime.runRepo.require(id);
+  const runtime = await getRuntime();
+  const run = await runtime.runRepo.require(id);
   const input = JSON.parse(run.inputJson) as CreateRunInput;
   if (input.textRenderingMode !== "deterministic") {
     return NextResponse.json(
@@ -49,9 +49,9 @@ export async function POST(
   }
 
   // Storyboard 与页面
-  const storyboardNode = runtime
-    .runRepo.listNodeRuns(id)
-    .find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded");
+  const storyboardNode = (await runtime.runRepo.listNodeRuns(id)).find(
+    (n) => n.nodeName === "generate-storyboard" && n.status === "succeeded",
+  );
   if (!storyboardNode?.outputRef) return NextResponse.json({ error: "storyboard missing" }, { status: 409 });
   const storyboard = (JSON.parse(storyboardNode.outputRef) as { value: Storyboard }).value;
   const original = storyboard.slides[pageIndex];
@@ -60,16 +60,18 @@ export async function POST(
   const slide: StoryboardSlide = { ...original, headline: parsed.data.headline, body: parsed.data.body };
 
   // 视觉层沿用当前版本，文字重排
-  const visualAsset = runtime.assetRepo.latestForPage(id, pageIndex);
+  const visualAsset = await runtime.assetRepo.latestForPage(id, pageIndex);
   if (!visualAsset) return NextResponse.json({ error: "page asset missing" }, { status: 409 });
   const visualBase64 = fs
     .readFileSync(runtime.assetStore.resolve(visualAsset.filePath))
     .toString("base64");
   const logoBase64 = input.brandKit?.logoAssetId
-    ? (() => {
+    ? await (async () => {
         try {
           return fs
-            .readFileSync(runtime.assetStore.resolve(runtime.assetRepo.require(input.brandKit!.logoAssetId!).filePath))
+            .readFileSync(
+              runtime.assetStore.resolve((await runtime.assetRepo.require(input.brandKit!.logoAssetId!)).filePath),
+            )
             .toString("base64");
         } catch {
           return undefined;
@@ -94,20 +96,20 @@ export async function POST(
       if (target) {
         target.headline = slide.headline;
         target.body = slide.body;
-        runtime.runRepo.setNodeOutput(storyboardNode.id, JSON.stringify(wrapper));
+        await runtime.runRepo.setNodeOutput(storyboardNode.id, JSON.stringify(wrapper));
       }
     } catch {
       /* 同步失败不影响重排结果 */
     }
   }
 
-  const version = runtime.assetRepo.pageVersionCount(id, pageIndex) + 1;
+  const version = (await runtime.assetRepo.pageVersionCount(id, pageIndex)) + 1;
   const saved = await runtime.assetStore.saveBuffer(
     buffer,
     path.join("runs", id, "pages", `page-${pageIndex}-v${version}.png`),
   );
-  runtime.assetRepo.supersedePage(id, pageIndex);
-  const asset = runtime.assetRepo.create({
+  await runtime.assetRepo.supersedePage(id, pageIndex);
+  const asset = await runtime.assetRepo.create({
     runId: id,
     pageIndex,
     kind: "composite",
@@ -121,14 +123,14 @@ export async function POST(
       revision: version,
     }),
   });
-  runtime.revisionRepo.create({
+  await runtime.revisionRepo.create({
     runId: id,
     pageIndex,
     kind: "rerender",
     payloadJson: JSON.stringify({ headline: slide.headline, body: slide.body }),
     assetId: asset.id,
   });
-  runtime.runRepo.setReview(id, "pending");
+  await runtime.runRepo.setReview(id, "pending");
 
   return NextResponse.json({ assetId: asset.id, revision: version }, { status: 201 });
 }
