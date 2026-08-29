@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="template:media-width" content="1024">
+  <meta name="template:media-height" content="1536">
+  <meta name="viewport" content="width=1080, height=1920">
+  <title>每日早安电台 V1</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; }
+    body { position: relative; background: {{surface_color:color=#EFE8DB}}; color: {{text_color:color=#FFF9EE}}; font-family: "PingFang SC", "Hiragino Sans GB", sans-serif; }
+    .media, .media img { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .media img { display: block; object-fit: cover; }
+    .media::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(22,18,13,.08) 28%, rgba(22,18,13,.22) 54%, rgba(22,18,13,.88) 100%); }
+    .brand { position: absolute; left: 81px; top: 96px; padding: 13px 22px; border: 1px solid rgba(255,255,255,.55); border-radius: 999px; background: rgba(22,18,13,.76); font-size: 24px; font-weight: 750; letter-spacing: .12em; }
+    .title { position: absolute; top: 190px; left: 81px; right: 81px; padding: 18px 22px 22px; border-radius: 20px; background: rgba(22,18,13,.72); font: 650 58px/1.28 "Songti SC", "STSong", serif; text-shadow: 0 4px 24px rgba(0,0,0,.28); }
+    .card { position: absolute; left: 81px; right: 81px; bottom: 350px; padding: 38px 40px 42px; border: 1px solid rgba(255,255,255,.38); border-radius: 30px; background: rgba(22,18,13,{{card_opacity:number=0.76}}); box-shadow: 0 24px 70px rgba(0,0,0,.24); backdrop-filter: blur(22px); }
+    .eyebrow { margin-bottom: 17px; color: {{accent_color:color=#FFD99A}}; font-size: 21px; font-weight: 850; letter-spacing: .18em; }
+    .copy { margin: 0; font: 600 48px/1.48 "Songti SC", "STSong", serif; overflow-wrap: anywhere; }
+    .progress { position: absolute; left: 112px; right: 112px; bottom: 292px; height: 2px; background: rgba(255,255,255,.24); }
+    .progress span { display: block; width: {{progress_percent:number=20}}%; height: 100%; background: {{accent_color:color=#FFD99A}}; }
+  </style>
+</head>
+<body>
+  <div class="media" data-pixelle-media-layer="full-canvas"><img src="{{image}}" alt=""></div>
+  <div class="brand">{{brand_label:text=每日早安电台}}</div>
+  <div class="title" data-pixelle-safe="title" data-pixelle-safe-min-font="30">{{title}}</div>
+  <section class="card">
+    <div class="eyebrow">{{eyebrow_label:text=GOOD MORNING}} · {{index}}</div>
+    <p class="copy" data-pixelle-safe="subtitle" data-pixelle-safe-min-font="30">{{text}}</p>
+  </section>
+  <div class="progress"><span></span></div>
+</body>
+</html>

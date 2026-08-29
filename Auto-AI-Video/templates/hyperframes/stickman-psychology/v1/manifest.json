@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "template_id": "stickman-psychology",
+  "version": 1,
+  "display_name": "火柴人心理学",
+  "category": "psychology",
+  "native_template": "1080x1920/f2_stickman_psychology_v1.html",
+  "variables": {
+    "accent_color": {"type": "color", "label": "强调色", "default": "#F3C94B"},
+    "surface_color": {"type": "color", "label": "纸张底色", "default": "#F7F2E8"},
+    "text_color": {"type": "color", "label": "正文颜色", "default": "#171916"},
+    "brand_label": {"type": "text", "label": "栏目角标", "default": "火柴人心理学", "max_length": 24},
+    "eyebrow_label": {"type": "text", "label": "分镜标签", "default": "MENTAL NOTE", "max_length": 24},
+    "card_opacity": {"type": "number", "label": "字幕卡透明度", "default": 0.94, "min": 0.55, "max": 1}
+  }
+}

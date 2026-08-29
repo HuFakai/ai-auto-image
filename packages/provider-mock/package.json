@@ -1,0 +1,29 @@
+{
+  "name": "@aai/provider-mock",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@aai/ai-core": "workspace:*",
+    "@aai/shared-schemas": "workspace:*",
+    "sharp": "^0.34.0"
+  },
+  "devDependencies": {
+    "@aai/config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.30.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.35.0",
+    "vitest": "^3.2.0"
+  }
+}

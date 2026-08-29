@@ -1,0 +1,382 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 28%, rgba(255, 107, 87, 0.08), transparent 35%),
+    rgba(3, 3, 3, 0.91);
+  backdrop-filter: blur(8px);
+}
+
+.dialog {
+  width: min(720px, 100%);
+  max-height: min(860px, calc(100dvh - 48px));
+  overflow: auto;
+  border: 1px solid #70443d;
+  background: #0d0e0d;
+  box-shadow: 0 34px 120px rgba(0, 0, 0, 0.84);
+  scrollbar-color: #5b3731 #111;
+}
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid #422b27;
+  padding: 20px 22px;
+  background: rgba(13, 14, 13, 0.96);
+  backdrop-filter: blur(14px);
+}
+
+.titleBlock {
+  min-width: 0;
+}
+
+.titleBlock > span {
+  display: block;
+  color: var(--red);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.19em;
+}
+
+.titleBlock h2 {
+  margin: 7px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--paper);
+  font: 500 clamp(23px, 4vw, 30px) / 1.15 var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+.closeButton {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.closeButton:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.loading {
+  display: flex;
+  min-height: 260px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.error {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 16px 22px 0;
+  border: 1px solid #72473f;
+  background: #211210;
+  color: #ffb1a5;
+  padding: 12px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.error svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.body {
+  display: grid;
+  gap: 14px;
+  padding: 20px 22px;
+}
+
+.verdict {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 11px;
+  border: 1px solid #6f4039;
+  background: #1d100e;
+  color: var(--red);
+  padding: 14px;
+}
+
+.verdict.allowed {
+  border-color: #786035;
+  background: linear-gradient(110deg, #211a0c, #15140d);
+  color: var(--warning);
+}
+
+.verdict strong,
+.verdict span {
+  display: block;
+}
+
+.verdict strong {
+  color: var(--paper);
+  font-size: 11px;
+}
+
+.verdict span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.impactGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  border: 1px solid var(--line);
+  background: #0a0b0a;
+}
+
+.impactGrid > div {
+  min-width: 0;
+  min-height: 78px;
+  padding: 13px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.impactGrid strong,
+.impactGrid span {
+  display: block;
+}
+
+.impactGrid strong {
+  color: var(--red);
+  font: 500 26px/1 var(--font-display);
+}
+
+.impactGrid span {
+  margin-top: 7px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.consequences {
+  border: 1px solid var(--line);
+  background: #0a0b0a;
+  padding: 14px;
+}
+
+.consequences > span {
+  color: var(--red);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+}
+
+.consequences p {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: 9px;
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.consequences i {
+  color: var(--red);
+  font-style: normal;
+}
+
+.consequences p > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.files {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  border: 1px solid #58502f;
+  background: linear-gradient(110deg, #17180e, #10110d);
+  color: var(--warning);
+  padding: 14px;
+}
+
+.files svg {
+  margin-top: 1px;
+}
+
+.files > span {
+  min-width: 0;
+}
+
+.files strong,
+.files small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.files strong {
+  color: var(--paper);
+  font-size: 11px;
+}
+
+.files small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.confirmation {
+  display: grid;
+  gap: 8px;
+}
+
+.confirmationPrompt {
+  display: flex;
+  min-height: 25px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.confirmationPrompt button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 25px;
+  border: 1px dashed #846052;
+  background: #1c1110;
+  color: #ffb3a8;
+  padding: 3px 8px;
+  font: 800 10px var(--font-body);
+  cursor: copy;
+}
+
+.confirmationPrompt button:hover {
+  border-style: solid;
+  border-color: var(--red);
+  background: var(--red);
+  color: #170907;
+}
+
+.copyFeedback {
+  min-width: 78px;
+  color: var(--acid);
+  font-weight: 700;
+}
+
+.confirmation > input {
+  width: 100%;
+  border: 1px solid #633b36;
+  border-radius: 0;
+  background: #080909;
+  color: var(--paper);
+  padding: 11px 12px;
+  font: 11px var(--font-body);
+}
+
+.confirmation > input:focus {
+  border-color: var(--red);
+}
+
+.footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  border-top: 1px solid #422b27;
+  padding: 13px 22px;
+  background: rgba(13, 14, 13, 0.97);
+  backdrop-filter: blur(14px);
+}
+
+.footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 96px;
+  min-height: 38px;
+  padding: 9px 14px;
+  font: 800 10px var(--font-body);
+  cursor: pointer;
+}
+
+.cancelButton {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--paper);
+}
+
+.cancelButton:hover {
+  border-color: var(--paper);
+}
+
+.submitButton {
+  border: 1px solid var(--red);
+  background: var(--red);
+  color: #170907;
+}
+
+.submitButton:not(:disabled):hover {
+  background: #ff8a78;
+}
+
+.footer button:disabled,
+.closeButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+@media (max-width: 620px) {
+  .overlay {
+    align-items: end;
+    padding: 0;
+  }
+
+  .dialog {
+    width: 100%;
+    max-height: 100dvh;
+    border-width: 1px 0 0;
+  }
+
+  .header,
+  .body,
+  .footer {
+    padding-inline: 15px;
+  }
+
+  .impactGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .footer button {
+    flex: 1 1 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay {
+    backdrop-filter: none;
+  }
+}

@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
-import { getDb } from "@/server/db";
-import { jobs, projects, workflowRuns } from "@/server/db/schema";
+import { getRuntime } from "@/server/runtime";
 
-type Params = { params: Promise<{ id: string }> };
+export const dynamic = "force-dynamic";
 
-export async function POST(_req: Request, { params }: Params) {
-  const { id } = await params;
-  const db = getDb();
-  const run = db.select().from(workflowRuns).where(eq(workflowRuns.id, id)).get();
-  if (!run) return NextResponse.json({ error: "Run 不存在" }, { status: 404 });
-  // cancel queued job if not started; running jobs observe next poll
-  db.update(jobs).set({ status: "cancelled", updatedAt: new Date().toISOString() }).where(eq(jobs.runId, id)).run();
-  db.update(workflowRuns).set({ status: "CANCELLED", finishedAt: new Date().toISOString() }).where(eq(workflowRuns.id, id)).run();
-  db.update(projects).set({ status: "PAUSED", updatedAt: new Date().toISOString() }).where(eq(projects.id, run.projectId)).run();
-  return NextResponse.json({ ok: true });
+export async function POST(_request: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  const runtime = getRuntime();
+  const run = runtime.runRepo.list(200).find((r) => r.id === id);
+  if (!run) return NextResponse.json({ error: "run not found" }, { status: 404 });
+
+  const job = runtime.jobRepo.list(200).find((j) => j.runId === id);
+  if (!job) return NextResponse.json({ error: "job not found" }, { status: 404 });
+
+  runtime.runner.cancel(job.id);
+  runtime.runRepo.updateStatus(id, "cancelled");
+  return NextResponse.json({ ok: true, runId: id, jobStatus: "cancelled" });
 }

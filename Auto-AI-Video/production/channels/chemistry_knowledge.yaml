@@ -1,0 +1,119 @@
+id: chemistry_knowledge
+name: 化学小知识科普
+enabled: true
+config_source: ai
+generation_reason: 用户请求创建一个化学小知识科普频道，当前快照中没有化学垂直主题频道，新建该频道可以填补这一内容空白，并以白板动画形式提供准确、直观的日常化学知识。
+topic:
+  strategy: llm
+  seeds:
+  - 切洋葱时为什么会流泪？是硫化物气体在作怪
+  - 铁锈到底是怎么来的？氧气和水谁才是主角？
+  - 为什么微波炉不能放进金属碗？火花是怎么产生的？
+  - 煮鸡蛋时蛋壳为什么会出现裂痕？热胀冷缩的化学解释
+  - 白色衣服沾上果汁为什么很难洗？单宁酸和色素的秘密
+  prompt: 为“化学小知识科普”竖屏短视频策划一个单一、准确、有反直觉亮点的日常化学选题。主题可来自生活中的化学现象、元素、材料、反应机理；避免伪科学，明确区分事实与推测，并用普通人能理解的类比解释。每期时长控制在90秒以内，适合零基础观众。
+  history_window: 50
+  fallback_to_seeds: true
+inventory:
+  ready_target: 2
+  daily_target: 2
+  max_in_flight: 2
+  refill_batch: 1
+  max_task_retries: 2
+  circuit_breaker_failures: 3
+  failure_cooldown_seconds: 1800
+planning:
+  enabled: true
+  approval: auto
+  content_policy: science
+  llm_review: true
+quality:
+  auto_repair: true
+visual_memory:
+  characters: []
+  palette: []
+  composition: []
+  forbidden_elements: []
+  exemplars: []
+video:
+  mode: generate
+  n_scenes: 10
+  video_fps: 30
+  voice_id: zh-CN-YunyangNeural
+  tts_speed: 1
+  prompt_prefix: Clear chemical science illustration, simple flat shapes, laboratory
+    glassware, atoms and molecules, clean high-contrast composition, accurate objects
+    and scale cues, vertical video, no labels, no text, no watermark
+  subtitle_effect: typewriter
+  limit_scenes: true
+  watermark:
+    enabled: false
+    text: ''
+    motion: fixed
+    opacity: 0.35
+    position: bottom_right
+  voice_preset: {}
+  bgm_path: ''
+  bgm_mode: loop
+  bgm_volume: 0.18
+  image_generation_concurrency: 4
+  production_mode: whiteboard_animation
+  render_engine: whiteboard_cv
+  media_workflow: api/default/image
+  frame_template: null
+  whiteboard:
+    template_id: minimal-whiteboard
+    template_version: 1
+    template_fingerprint: 013ec9dd28adb77fea33474ba9775062693c9eea21bef4e6297dc6437709465b
+    prompt_recipe: 暖白色纯净背景，圆润有亲和力的粗黑马克笔轮廓，人物和物体高度概括， 只使用橙色与钴蓝色做少量平涂点缀；几乎没有阴影、纹理和细碎结构，留白充足，
+      像现场快速画出的清爽白板简笔画。
+    render_profile:
+      background_mode: light
+      path_mode: skeleton
+      reveal_mode: ink_then_color
+      color_fill: contour_wipe
+      stroke_detail: standard
+    hand_enabled: true
+    hand_asset_id: default
+    fallback_policy: grid
+  renderer_version: whiteboard-cv-v1
+  native:
+    image_motion: none
+    transition: none
+    transition_duration: 0.35
+    scene_direction: auto
+    motion_pool:
+    - ken_burns
+    - push_in
+    - pull_out
+    - pan_left
+    - pan_right
+    - pan_up
+    transition_pool:
+    - crossfade
+    - dissolve
+    - slide_left
+    - circle_open
+    - zoom_in
+    - blur
+  hyperframes:
+    template_id: knowledge-card
+    template_version: 1
+    variables:
+      accent_color: '#BFFF3C'
+      surface_color: '#0B0F0D'
+      text_color: '#F4F5EF'
+      brand_label: 一分钟知识卡
+      eyebrow_label: KNOWLEDGE / NOTE
+      card_opacity: 0.88
+    quality: standard
+    strictness: strict
+    use_gpu: true
+    fallback_to_native: true
+  template_params:
+    accent_color: '#BFFF3C'
+    surface_color: '#0B0F0D'
+    text_color: '#F4F5EF'
+    brand_label: 一分钟知识卡
+    eyebrow_label: KNOWLEDGE / NOTE
+    card_opacity: 0.88

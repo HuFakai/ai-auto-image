@@ -1,18 +1,33 @@
 {
   "name": "ai-auto-image",
   "private": true,
-  "version": "0.1.0",
-  "packageManager": "pnpm@9.15.0",
+  "packageManager": "pnpm@11.8.0",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint",
+    "build": "turbo run build",
+    "lint": "eslint .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "db:migrate": "pnpm --filter @aai/web db:migrate"
+    "fonts": "bash scripts/fetch-fonts.sh",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "db:seed": "tsx scripts/db-seed.ts",
+    "verify:openai": "tsx scripts/verify-openai.mts",
+    "verify:live": "tsx scripts/verify-live.mts",
+    "verify:xai": "tsx scripts/verify-xai.mts"
   },
   "devDependencies": {
-    "turbo": "^2.3.3",
-    "typescript": "^5.7.2"
+    "@aai/ai-core": "workspace:*",
+    "@aai/provider-openai": "workspace:*",
+    "@aai/provider-xai": "workspace:*",
+    "@aai/shared-schemas": "workspace:*",
+    "@aai/storage": "workspace:*",
+    "@aai/workflow-engine": "workspace:*",
+    "eslint": "^9.30.0",
+    "turbo": "^2.5.0",
+    "tsx": "^4.20.0",
+    "typescript-eslint": "^8.35.0"
   }
 }

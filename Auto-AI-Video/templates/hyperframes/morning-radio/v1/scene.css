@@ -1,0 +1,11 @@
+.scene, .scene-content { background: var(--surface_color); color: var(--text_color); }
+.scene-media-wrap::after { background: linear-gradient(180deg, rgba(22,18,13,.08) 28%, rgba(22,18,13,.22) 54%, rgba(22,18,13,.88) 100%); }
+.scene-media-wrap img { object-fit: cover; }
+.scene-chrome { position: absolute; inset: 0; z-index: 2; }
+.series-label { position: absolute; left: 81px; top: 96px; padding: 13px 22px; border: 1px solid rgba(255,255,255,.55); border-radius: 999px; background: rgba(22,18,13,.76); color: var(--text_color); font-size: 24px; font-weight: 750; letter-spacing: .12em; backdrop-filter: blur(12px); }
+.template-title { position: absolute; top: 190px; left: 81px; right: 81px; padding: 18px 22px 22px; border-radius: 20px; background: rgba(22,18,13,.72); color: var(--text_color); font-family: "Songti SC", "STSong", serif; font-size: 58px; font-weight: 650; line-height: 1.28; text-shadow: 0 4px 24px rgba(0,0,0,.28); }
+.scene-copy { left: 81px; right: 81px; bottom: 350px; padding: 38px 40px 42px; border: 1px solid rgba(255,255,255,.38); border-left: 1px solid rgba(255,255,255,.38); border-radius: 30px; background: rgba(22,18,13,var(--card_opacity)); box-shadow: 0 24px 70px rgba(0,0,0,.24); backdrop-filter: blur(22px); }
+.scene-index { color: var(--accent_color); font-size: 21px; letter-spacing: .18em; }
+.scene-copy p { color: var(--text_color); font-family: "Songti SC", "STSong", serif; font-size: 48px; font-weight: 600; line-height: 1.48; }
+.scene-progress { position: absolute; left: 112px; right: 112px; bottom: 292px; height: 2px; background: rgba(255,255,255,.24); }
+.scene-progress span { display: block; width: var(--scene-progress); height: 100%; background: var(--accent_color); }

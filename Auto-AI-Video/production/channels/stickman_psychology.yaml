@@ -1,0 +1,114 @@
+id: stickman_psychology
+name: 火柴人心理学
+enabled: true
+config_source: manual
+generation_reason: ''
+topic:
+  strategy: llm
+  seeds:
+  - 为什么越想停止内耗，脑子反而越停不下来？
+  - 总是不敢拒绝别人，可能不是善良而是边界感模糊
+  - 拖延并不总是懒惰，它可能是在保护你免受失败感
+  - 争吵时突然沉默的人，内心通常发生了什么？
+  - 如何用两分钟从情绪风暴中找回控制感？
+  prompt: 为“火柴人心理学”竖屏短视频策划一个具体、生活化、能在 60 秒内讲清楚的心理学选题。 优先选择拖延、内耗、边界感、依恋、沟通、自尊和情绪调节等普通人高频问题；
+    不做医学诊断，不制造焦虑，结尾要给出一个可执行的小行动。
+  history_window: 50
+  fallback_to_seeds: true
+inventory:
+  ready_target: 5
+  daily_target: 2
+  max_in_flight: 2
+  refill_batch: 2
+  max_task_retries: 2
+  circuit_breaker_failures: 3
+  failure_cooldown_seconds: 1800
+planning:
+  enabled: true
+  approval: auto
+  content_policy: psychology
+  llm_review: true
+quality:
+  auto_repair: true
+visual_memory:
+  characters: []
+  palette: []
+  composition: []
+  forbidden_elements: []
+  exemplars: []
+video:
+  mode: generate
+  n_scenes: 6
+  min_narration_words: 15
+  max_narration_words: 35
+  min_image_prompt_words: 30
+  max_image_prompt_words: 60
+  production_mode: hyperframes
+  render_engine: hyperframes
+  renderer_version: 0.8.4
+  media_workflow: api/default/image
+  frame_template: 1080x1920/f2_knowledge_card_v1.html
+  video_fps: 30
+  voice_id: zh-CN-YunxiNeural
+  prompt_prefix: Minimalist black-and-white stick figure animation, clean hand-drawn
+    lines, expressive body language, simple white background, strong visual metaphor,
+    consistent character design, vertical composition, no text, no watermark
+  bgm_volume: 0.18
+  template_params:
+    accent_color: '#BFFF3C'
+    surface_color: '#0B0F0D'
+    text_color: '#F4F5EF'
+    brand_label: 火柴人心理学
+    eyebrow_label: ''
+    card_opacity: 0.88
+  native:
+    image_motion: none
+    transition: crossfade
+    transition_duration: 0.35
+    scene_direction: auto
+    motion_pool:
+    - push_in
+    - pull_out
+    transition_pool:
+    - crossfade
+    - dissolve
+    - zoom_in
+    - blur
+  hyperframes:
+    template_id: knowledge-card
+    template_version: 1
+    variables:
+      accent_color: '#BFFF3C'
+      surface_color: '#0B0F0D'
+      text_color: '#F4F5EF'
+      brand_label: 火柴人心理学
+      eyebrow_label: ''
+      card_opacity: 0.88
+    quality: standard
+    strictness: strict
+    use_gpu: true
+    fallback_to_native: true
+  subtitle_effect: typewriter
+  image_generation_concurrency: 4
+  limit_scenes: true
+  watermark:
+    enabled: false
+    text: ''
+    motion: fixed
+    opacity: 0.35
+    position: bottom_right
+  whiteboard:
+    template_id: minimal-whiteboard
+    template_version: 1
+    template_fingerprint: 013ec9dd28adb77fea33474ba9775062693c9eea21bef4e6297dc6437709465b
+    prompt_recipe: 暖白色纯净背景，圆润有亲和力的粗黑马克笔轮廓，人物和物体高度概括， 只使用橙色与钴蓝色做少量平涂点缀；几乎没有阴影、纹理和细碎结构，留白充足，
+      像现场快速画出的清爽白板简笔画。
+    render_profile:
+      background_mode: light
+      path_mode: skeleton
+      reveal_mode: ink_then_color
+      color_fill: contour_wipe
+      stroke_detail: standard
+    hand_enabled: true
+    hand_asset_id: default
+    fallback_policy: grid

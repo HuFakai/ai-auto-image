@@ -1,0 +1,114 @@
+id: economics_fables
+name: 经济学寓言
+enabled: true
+config_source: manual
+generation_reason: ''
+topic:
+  strategy: llm
+  seeds:
+  - 小岛上的渔民为什么越捕越少？
+  - 两个村庄共用一片草场，为什么草场会退化？
+  - 人人都想走捷径，为什么捷径反而变成最远的路？
+  - 一个农夫的鸡蛋该留给自己吃还是拿去卖？
+  prompt: 为“经济学寓言”频道策划一期短视频：以经济学研究生的视角写一个原创寓言故事，用间接、隐喻的方式讲清一个经济学、心理学或社会学概念。不要在开头点破概念，尽量让观众在故事接近尾声时才恍然意识到；故事讲完后，再用30秒左右解释这个概念，并逐条说明故事中的角色、场景、冲突分别隐喻什么。每期控制在90秒以内，避免复杂数学，不制造焦虑，适合零基础观众。
+  history_window: 50
+  fallback_to_seeds: true
+inventory:
+  ready_target: 7
+  daily_target: 3
+  max_in_flight: 3
+  refill_batch: 2
+  max_task_retries: 3
+  circuit_breaker_failures: 3
+  failure_cooldown_seconds: 1800
+planning:
+  enabled: true
+  approval: auto
+  content_policy: general
+  llm_review: true
+quality:
+  auto_repair: true
+visual_memory:
+  characters: []
+  palette: []
+  composition: []
+  forbidden_elements: []
+  exemplars: []
+video:
+  mode: generate
+  n_scenes: 10
+  video_fps: 30
+  voice_id: zh-CN-YunxiNeural
+  prompt_prefix: Paper-cut metaphor illustration for an economics parable, warm beige
+    and charcoal paper layers, symbolic objects, subtle paper shadows, hand-torn edges,
+    elegant editorial storytelling composition, vertical video, no text, no watermark
+  subtitle_effect: typewriter
+  bgm_volume: 0.18
+  image_generation_concurrency: 5
+  production_mode: whiteboard_animation
+  render_engine: whiteboard_cv
+  media_workflow: api/default/image
+  frame_template: null
+  whiteboard:
+    template_id: comic-ink-explainer
+    template_version: 1
+    template_fingerprint: 462b3756f2cd536ef4b451f99aa36130299b1346fcb60d8528e39410ed46fbca
+    prompt_recipe: 暖灰米白纸张背景，使用自信、粗细有变化的黑色漫画墨线；灰面和阴影只用经典圆点半色调。 黑白灰为主体，固定暖黄色只用于关键物件，每张图最多再使用两种低饱和语义色。
+      关系必须用具体物件、路径、状态变化和重复材料证明，禁止 3D、摄影写实和光滑渐变。
+    render_profile:
+      background_mode: light
+      path_mode: skeleton
+      reveal_mode: ink_then_color
+      color_fill: contour_wipe
+      stroke_detail: full
+    hand_enabled: true
+    hand_asset_id: default
+    fallback_policy: grid
+  renderer_version: whiteboard-cv-v1
+  native:
+    image_motion: none
+    transition: none
+    transition_duration: 0.35
+    scene_direction: auto
+    motion_pool:
+    - ken_burns
+    - push_in
+    - pull_out
+    - pan_left
+    - pan_right
+    - pan_up
+    transition_pool:
+    - crossfade
+    - dissolve
+    - slide_left
+    - circle_open
+    - zoom_in
+    - blur
+  hyperframes:
+    template_id: knowledge-card
+    template_version: 1
+    variables:
+      accent_color: '#BFFF3C'
+      surface_color: '#0B0F0D'
+      text_color: '#F4F5EF'
+      brand_label: 一分钟知识卡
+      eyebrow_label: KNOWLEDGE / NOTE
+      card_opacity: 0.88
+    quality: standard
+    strictness: strict
+    use_gpu: true
+    fallback_to_native: true
+  limit_scenes: true
+  watermark:
+    enabled: true
+    text: '@善能科技'
+    motion: moving
+    opacity: 0.5
+    position: top_left
+  template_params:
+    accent_color: '#BFFF3C'
+    surface_color: '#0B0F0D'
+    text_color: '#F4F5EF'
+    brand_label: 一分钟知识卡
+    eyebrow_label: KNOWLEDGE / NOTE
+    card_opacity: 0.88

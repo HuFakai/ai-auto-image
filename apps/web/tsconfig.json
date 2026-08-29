@@ -1,35 +1,19 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "@aai/config/tsconfig/base.json",
   "compilerOptions": {
-    "noEmit": true,
-    "allowJs": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "preserve",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "module": "ESNext",
+    "allowJs": true,
+    "noEmit": true,
+    "incremental": true,
+    "module": "esnext",
     "moduleResolution": "bundler",
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
+    "resolveJsonModule": true,
+    "plugins": [{ "name": "next" }],
     "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    },
-    "incremental": true
+      "@/*": ["./src/*"]
+    }
   },
-  "include": [
-    "drizzle.config.ts",
-    "next.config.ts",
-    "src",
-    ".next/types/**/*.ts"
-  ],
-  "exclude": [
-    "node_modules"
-  ]
+  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", ".next", "standalone"]
 }

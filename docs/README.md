@@ -4,14 +4,16 @@
 
 ## 文档导航
 
+0. [开发文档：环境配置与启动指南](./development.md)
 1. [GitHub 项目与 Skills 调研报告](./01-research-and-reference.md)
 2. [总体开发规划方案](./02-master-development-plan.md)
 3. [实现评审与下一步开发路线图](./03-implementation-review-and-roadmap.md)
-3. [阶段 0：工程基础与技术验证](./phases/00-foundation-and-validation.md)
-4. [阶段 1：图文生成 MVP](./phases/01-mvp-carousel-generation.md)
-5. [阶段 2：漫画与高级视觉](./phases/02-comic-and-advanced-visuals.md)
-6. [阶段 3：工作流与平台发布](./phases/03-workflow-and-publishing.md)
-7. [阶段 4：运营闭环与平台化](./phases/04-growth-and-platformization.md)
+4. [基于 Auto-AI-Video 提取的 AI 图文基础框架解决方案](./04-ai-image-framework-solution.md)
+5. [阶段 0：工程基础与技术验证](./phases/00-foundation-and-validation.md)
+6. [阶段 1：图文生成 MVP](./phases/01-mvp-carousel-generation.md)
+7. [阶段 2：漫画与高级视觉](./phases/02-comic-and-advanced-visuals.md)
+8. [阶段 3：工作流与平台发布](./phases/03-workflow-and-publishing.md)
+9. [阶段 4：运营闭环与平台化](./phases/04-growth-and-platformization.md)
 
 ## 阅读顺序
 
@@ -22,10 +24,13 @@
 
 ## 当前状态
 
-- 当前仓库为新项目，尚未初始化工程代码。
-- 已完成 GitHub、Agent Skills、模型兼容方式和参考架构调研。
-- 已确认初期采用单机服务器 Docker 部署、SQLite 数据库、Docker 持久卷资产存储和进程内任务执行器。
-- PostgreSQL、Redis/BullMQ 和独立 Worker 延后到核心功能基本完成后的阶段 3。
-- 默认使用主力图片模型直接生成包含中文的完整图片；Satori/SVG + Sharp 确定性文字渲染作为可控兜底，默认关闭。
-- 用户可以自定义图片生成并发，但受服务器安全上限和 Provider 限流约束；本地 Sharp 后处理并发独立限制。
-- 下一步从阶段 0 的工程初始化和模型能力验证开始。
+- 阶段 0 工程代码已初始化：TypeScript Monorepo（pnpm + Turborepo），`apps/web` + 8 个 packages。
+- 已实现：统一 Schema（Zod）、Provider 层（openai / xai / compatible / mock + 路由回退）、
+  SQLite 存储（Drizzle，10 表迁移入库）、进程内 Job Runner（租约 / 心跳 / 重启恢复）、
+  知识卡片 Spike 流水线（native 默认 + deterministic 兜底）、暗房风格 Web Studio。
+- 已通过：全仓 lint / typecheck / test / build 全绿；Mock 全流程、单页重试、重启恢复、
+  取消、双文字模式均集成测试通过；生产 standalone 启动与 `/api/health` 验证通过。
+- 待办：在 Linux 服务器执行 `docker compose up -d` 验证部署；配置
+  `OPENAI_API_KEY` / `XAI_API_KEY` 后运行 `pnpm verify:openai` / `pnpm verify:xai`
+  完成真实调用验证（脚本与报告输出已就绪）。
+- 架构决策记录见 [docs/adr/](./adr/)。

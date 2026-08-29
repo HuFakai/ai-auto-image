@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="template:media-width" content="1024">
+  <meta name="template:media-height" content="1536">
+  <meta name="viewport" content="width=1080, height=1920">
+  <title>电影纪录片 V1</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; }
+    body { position: relative; background: {{surface_color:color=#11100E}}; color: {{text_color:color=#FFF8EA}}; font-family: "PingFang SC", "Hiragino Sans GB", sans-serif; }
+    .media, .media img { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .media img { display: block; object-fit: cover; }
+    .media::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(5,4,3,.36), transparent 34%, rgba(5,4,3,.2) 56%, rgba(5,4,3,.94)); }
+    .brand { position: absolute; left: 81px; top: 72px; padding-left: 22px; border-left: 7px solid {{accent_color:color=#F4B860}}; font-size: 23px; font-weight: 800; letter-spacing: .17em; }
+    .title { position: absolute; left: 81px; right: 190px; top: 176px; font: 650 60px/1.2 "Songti SC", "STSong", serif; text-shadow: 0 5px 28px rgba(0,0,0,.55); }
+    .card { position: absolute; left: 81px; right: 81px; bottom: 370px; padding: 34px 38px 40px; border: 1px solid {{accent_color:color=#F4B860}}; background: rgba(17,16,14,{{card_opacity:number=0.78}}); backdrop-filter: blur(18px); }
+    .eyebrow { margin-bottom: 17px; color: {{accent_color:color=#F4B860}}; font-size: 20px; font-weight: 850; letter-spacing: .19em; }
+    .copy { margin: 0; font: 640 49px/1.44 "Songti SC", "STSong", serif; overflow-wrap: anywhere; }
+    .progress { position: absolute; left: 81px; right: 81px; bottom: 284px; height: 3px; background: rgba(255,248,234,.2); }
+    .progress span { display: block; width: {{progress_percent:number=20}}%; height: 100%; background: {{accent_color:color=#F4B860}}; }
+  </style>
+</head>
+<body>
+  <div class="media" data-pixelle-media-layer="full-canvas"><img src="{{image}}" alt=""></div>
+  <div class="brand">{{brand_label:text=FIELD NOTES}}</div>
+  <div class="title" data-pixelle-safe="title" data-pixelle-safe-min-font="30">{{title}}</div>
+  <section class="card">
+    <div class="eyebrow">{{eyebrow_label:text=DOCUMENTARY / 01}} · {{index}}</div>
+    <p class="copy" data-pixelle-safe="subtitle" data-pixelle-safe-min-font="30">{{text}}</p>
+  </section>
+  <div class="progress"><span></span></div>
+</body>
+</html>

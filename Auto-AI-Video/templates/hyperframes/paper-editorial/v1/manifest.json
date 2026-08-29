@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "template_id": "paper-editorial",
+  "version": 1,
+  "display_name": "纸刊手记",
+  "category": "lifestyle",
+  "native_template": "1080x1920/f2_paper_editorial_v1.html",
+  "variables": {
+    "accent_color": {"type": "color", "label": "编辑红", "default": "#D5533D"},
+    "surface_color": {"type": "color", "label": "纸张底色", "default": "#EFE6D2"},
+    "text_color": {"type": "color", "label": "油墨颜色", "default": "#211E19"},
+    "brand_label": {"type": "text", "label": "刊物名称", "default": "DAILY EDITION", "max_length": 24},
+    "eyebrow_label": {"type": "text", "label": "分镜标签", "default": "NOTES / TODAY", "max_length": 24},
+    "card_opacity": {"type": "number", "label": "纸卡透明度", "default": 0.91, "min": 0.6, "max": 1}
+  }
+}

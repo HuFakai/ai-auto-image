@@ -1,0 +1,68 @@
+import type { ProviderRouteConfig } from "@aai/shared-schemas";
+import type { CompatCapabilities } from "./provider";
+
+export const DEFAULT_TIMEOUT_MS = 120_000;
+
+/** 官方 OpenAI 路由预设 */
+export function openaiRoute(overrides: Partial<ProviderRouteConfig> = {}): ProviderRouteConfig {
+  return {
+    id: "openai",
+    kind: "openai",
+    baseUrl: "https://api.openai.com/v1",
+    apiKeyRef: "OPENAI_API_KEY",
+    textModel: "gpt-4.1-mini",
+    imageModel: "gpt-image-2",
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    maxAttempts: 3,
+    ...overrides,
+  };
+}
+
+/** xAI/Grok 路由预设（OpenAI SDK + xAI Base URL） */
+export function xaiRoute(overrides: Partial<ProviderRouteConfig> = {}): ProviderRouteConfig {
+  return {
+    id: "xai",
+    kind: "xai",
+    baseUrl: "https://api.x.ai/v1",
+    apiKeyRef: "XAI_API_KEY",
+    textModel: "grok-4.5",
+    imageModel: "grok-imagine-image-2.0",
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    maxAttempts: 3,
+    ...overrides,
+  };
+}
+
+/** xAI 能力声明：图片默认返回临时 URL，必须立即转存（docs/01 §4） */
+export const XAI_CAPABILITIES: CompatCapabilities = {
+  image: {
+    imageEditSingle: true,
+    imageEditMulti: false,
+    maskEdit: false,
+    returns: ["url"],
+    supportsSeed: true,
+    persistentFiles: false,
+  },
+  text: {
+    structuredOutput: true,
+    imageInput: true,
+  },
+};
+
+/** 自定义 compatible 路由预设：全部能力显式配置，不根据模型名猜测 */
+export function compatibleRoute(
+  input: Partial<ProviderRouteConfig> = {},
+): ProviderRouteConfig {
+  if (!input.baseUrl) throw new Error("compatibleRoute requires baseUrl");
+  return {
+    id: "compatible",
+    kind: "openai-compatible",
+    baseUrl: input.baseUrl,
+    apiKeyRef: "COMPATIBLE_API_KEY",
+    textModel: input.textModel ?? "COMPATIBLE_TEXT_MODEL",
+    imageModel: input.imageModel ?? "COMPATIBLE_IMAGE_MODEL",
+    timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    maxAttempts: input.maxAttempts ?? 2,
+    headers: input.headers,
+  };
+}

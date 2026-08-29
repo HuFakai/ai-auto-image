@@ -1,0 +1,7 @@
+node_modules/
+benchmark-results/
+fixtures/*/node_modules/
+fixtures/*/renders/
+fixtures/*/snapshots/
+fixtures/*/.hyperframes/
+runtime/

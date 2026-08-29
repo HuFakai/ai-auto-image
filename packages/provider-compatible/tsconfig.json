@@ -1,7 +1,4 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
+  "extends": "@aai/config/tsconfig/library.json",
   "include": ["src"]
 }

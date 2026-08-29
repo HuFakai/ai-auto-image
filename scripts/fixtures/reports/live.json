@@ -1,0 +1,24 @@
+{
+  "provider": "live",
+  "textModel": "deepseek-v4-flash",
+  "imageModel": "grok-imagine-image-2.0",
+  "storyboardTitle": "三分钟看懂量子纠缠",
+  "slides": 6,
+  "expectedCopy": [
+    "三分钟看懂量子纠缠",
+    "量子力学中的真实关联现象，不是玄学",
+    "1/6"
+  ],
+  "asset": {
+    "path": "data/assets/verify/live/cover.png",
+    "bytes": 270528,
+    "mimeType": "image/jpeg"
+  },
+  "usage": {
+    "promptTokens": 0,
+    "completionTokens": 0,
+    "totalTokens": 0,
+    "images": 1
+  },
+  "at": "2026-08-29T06:03:00.511Z"
+}

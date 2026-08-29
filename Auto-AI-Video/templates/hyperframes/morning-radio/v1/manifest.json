@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "template_id": "morning-radio",
+  "version": 1,
+  "display_name": "每日早安电台",
+  "category": "lifestyle",
+  "native_template": "1080x1920/f2_morning_radio_v1.html",
+  "variables": {
+    "accent_color": {"type": "color", "label": "晨光强调色", "default": "#FFD99A"},
+    "surface_color": {"type": "color", "label": "暖灰底色", "default": "#EFE8DB"},
+    "text_color": {"type": "color", "label": "正文颜色", "default": "#FFF9EE"},
+    "brand_label": {"type": "text", "label": "栏目角标", "default": "每日早安电台", "max_length": 24},
+    "eyebrow_label": {"type": "text", "label": "分镜标签", "default": "GOOD MORNING", "max_length": 24},
+    "card_opacity": {"type": "number", "label": "字幕卡透明度", "default": 0.76, "min": 0.45, "max": 0.95}
+  }
+}

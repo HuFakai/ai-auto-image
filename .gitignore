@@ -12,3 +12,5 @@ dist/
 coverage/
 .DS_Store
 packages/render-engine/assets/fonts/
+**/data/
+*.part

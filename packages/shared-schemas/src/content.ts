@@ -1,0 +1,73 @@
+import { z } from "zod";
+
+/** 平台目标 */
+export const PlatformSchema = z.enum(["xiaohongshu", "douyin", "wechat"]);
+export type Platform = z.infer<typeof PlatformSchema>;
+
+/** 画布比例 */
+export const AspectRatioSchema = z.enum(["3:4", "9:16", "1:1", "16:9"]);
+export type AspectRatio = z.infer<typeof AspectRatioSchema>;
+
+/** 比例对应的标准画布尺寸（宽 × 高） */
+export const CANVAS_SIZES: Record<AspectRatio, { width: number; height: number }> = {
+  "3:4": { width: 1242, height: 1656 },
+  "9:16": { width: 1080, height: 1920 },
+  "1:1": { width: 1080, height: 1080 },
+  "16:9": { width: 1920, height: 1080 },
+};
+
+/** 证据项：一条内容判断及其可信度 */
+export const EvidenceSchema = z.object({
+  claim: z.string().min(1),
+  source: z.string().optional(),
+  confidence: z.enum(["verified", "provided", "inferred"]),
+});
+export type Evidence = z.infer<typeof EvidenceSchema>;
+
+/** 最小 Content Brief（阶段 0 Schema，见 docs/phases/00 §4.1） */
+export const ContentBriefSchema = z.object({
+  topic: z.string().min(1),
+  audience: z.string().min(1),
+  objective: z.enum(["educate", "promote", "convert", "recommend"]),
+  coreMessage: z.string().min(1),
+  evidence: z.array(EvidenceSchema),
+  tone: z.array(z.string()),
+  callToAction: z.string().optional(),
+  prohibitedClaims: z.array(z.string()),
+});
+export type ContentBrief = z.infer<typeof ContentBriefSchema>;
+
+/** 单页角色 */
+export const SlideRoleSchema = z.enum(["cover", "content", "summary", "cta"]);
+export type SlideRole = z.infer<typeof SlideRoleSchema>;
+
+/** Storyboard 单页 */
+export const StoryboardSlideSchema = z.object({
+  index: z.number().int().min(0),
+  role: SlideRoleSchema,
+  headline: z.string().min(1),
+  body: z.array(z.string()),
+  visualIntent: z.string(),
+  layoutHint: z.string(),
+});
+export type StoryboardSlide = z.infer<typeof StoryboardSlideSchema>;
+
+/** 最小 Storyboard（阶段 0 Schema，见 docs/phases/00 §4.2） */
+export const StoryboardSchema = z.object({
+  title: z.string().min(1),
+  platform: PlatformSchema,
+  aspectRatio: AspectRatioSchema,
+  slides: z.array(StoryboardSlideSchema).min(1).max(12),
+});
+export type Storyboard = z.infer<typeof StoryboardSchema>;
+
+/**
+ * 单页生成计划：在 Storyboard 基础上补充图片 Prompt 与预期文案。
+ * 原生模式把 expectedCopy 逐字写入 Prompt；质量检查用它对比图片中的实际文字。
+ */
+export const SlidePlanSchema = StoryboardSlideSchema.extend({
+  imagePrompt: z.string().min(1),
+  /** 期望出现在图上的全部文字（含标题、正文、页码），逐字精确 */
+  expectedCopy: z.array(z.string()),
+});
+export type SlidePlan = z.infer<typeof SlidePlanSchema>;

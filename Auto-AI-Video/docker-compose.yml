@@ -1,0 +1,172 @@
+version: '3.8'
+
+# Build Arguments Configuration
+# You can override these by setting environment variables before running docker-compose
+#
+# Example for China environment (auto uses Tsinghua mirror):
+#   USE_CN_MIRROR=true docker-compose up -d
+#
+# Example for international environment (default):
+#   docker-compose up -d
+
+services:
+  # Init Service - Ensures config.yaml exists before other services start
+  # This fixes the Docker issue where mounting a non-existent file creates a directory
+  init:
+    image: alpine:latest
+    volumes:
+      - ./:/workspace
+    command: >
+      sh -c '
+        if [ -d /workspace/config.yaml ]; then
+          echo "⚠️  config.yaml is a directory, removing it...";
+          rm -rf /workspace/config.yaml;
+        fi;
+        if [ ! -f /workspace/config.yaml ] && [ -f /workspace/config.example.yaml ]; then
+          echo "📋 Creating config.yaml from config.example.yaml...";
+          cp /workspace/config.example.yaml /workspace/config.yaml;
+          echo "✅ config.yaml created successfully!";
+        else
+          echo "✅ config.yaml already exists.";
+        fi
+      '
+    restart: "no"
+
+  # Optional advanced renderer. API production remains available when this service is down;
+  # HyperFrames-enabled channels can fall back to the native image + HTML renderer.
+  hyperframes-renderer:
+    build:
+      context: ./services/hyperframes-renderer
+      dockerfile: Dockerfile
+    container_name: pixelle-video-hyperframes
+    ports:
+      - "127.0.0.1:8788:8788"
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+    environment:
+      - TZ=Asia/Shanghai
+      - HYPERFRAMES_MAX_CONCURRENT=${HYPERFRAMES_MAX_CONCURRENT:-0}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    networks:
+      - pixelle-network
+
+  # API Service - FastAPI backend
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USE_CN_MIRROR: ${USE_CN_MIRROR:-false}
+    container_name: pixelle-video-api
+    command: .venv/bin/python api/app.py --host 0.0.0.0 --port 8000
+    depends_on:
+      init:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount config file (read-write to allow saving from Web UI)
+      # Note: init service auto-creates config.yaml from config.example.yaml if not exists
+      - ./config.yaml:/app/config.yaml
+      # Mount data directories for persistence
+      # data/ contains durable jobs, user resources, BGM, and templates
+      - ./data:/app/data
+      - ./output:/app/output
+      # Note: Default BGM and templates are baked into the image
+      # Custom resources in data/* will override defaults
+    environment:
+      - TZ=Asia/Shanghai
+      - HYPERFRAMES_RENDERER_URL=http://hyperframes-renderer:8788
+      - PIXELLE_HYPERFRAMES_AUTOSTART=false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - pixelle-network
+
+  # Production Studio - Next.js frontend
+  studio:
+    build:
+      context: ./studio
+      dockerfile: Dockerfile
+    container_name: pixelle-video-studio
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - TZ=Asia/Shanghai
+      - HOSTNAME=0.0.0.0
+      - PORT=3000
+      - PIXELLE_API_URL=http://api:8000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - pixelle-network
+
+  # Durable inventory runner - keeps enabled channels at their configured watermarks
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USE_CN_MIRROR: ${USE_CN_MIRROR:-false}
+    container_name: pixelle-video-runner
+    command: .venv/bin/python scripts/run_production.py --config production/runner.yaml run
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    volumes:
+      - ./config.yaml:/app/config.yaml
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./production:/app/production:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - PIXELLE_PRODUCTION_API_BASE_URL=http://api:8000
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - pixelle-network
+
+networks:
+  pixelle-network:
+    driver: bridge

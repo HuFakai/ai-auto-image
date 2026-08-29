@@ -1,0 +1,16 @@
+api_base_url: "http://127.0.0.1:18123"
+database_path: "data/production.db"
+channels_dir: "production/channels"
+poll_interval_seconds: 30
+lease_seconds: 120
+request_timeout_seconds: 30
+timezone: "Asia/Shanghai"
+operations:
+  backups_dir: "data/backups"
+  minimum_free_gb: 5
+  backup_warning_hours: 26
+notifications:
+  enabled: false
+  webhook_url: ""
+  events: [job_ready, job_failed, channel_circuit_open, runner_error]
+  timeout_seconds: 10

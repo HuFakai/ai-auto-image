@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="template:media-width" content="1024">
+  <meta name="template:media-height" content="1536">
+  <meta name="viewport" content="width=1080, height=1920">
+  <title>纸刊手记 V1</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 1080px; height: 1920px; overflow: hidden; }
+    body { position: relative; background: {{surface_color:color=#EFE6D2}}; color: {{text_color:color=#211E19}}; font-family: "PingFang SC", sans-serif; }
+    body::after { content: ""; position: absolute; inset: 0; opacity: .25; background-image: repeating-linear-gradient(0deg, transparent 0 34px, rgba(33,30,25,.1) 35px); pointer-events: none; }
+    .media { position: absolute; inset: 286px 58px 620px; overflow: hidden; border: 2px solid {{text_color:color=#211E19}}; box-shadow: 18px 18px 0 {{accent_color:color=#D5533D}}; }
+    .media img { width: 100%; height: 100%; display: block; object-fit: cover; filter: saturate(.78) contrast(1.04); }
+    .media::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 74%, rgba(239,230,210,.48)); }
+    .brand { position: absolute; left: 81px; top: 58px; color: {{accent_color:color=#D5533D}}; font: 800 22px Georgia, "Songti SC", serif; letter-spacing: .17em; }
+    .title { position: absolute; left: 81px; right: 81px; top: 116px; padding-bottom: 24px; border-bottom: 5px solid {{text_color:color=#211E19}}; font: 700 55px/1.22 Georgia, "Songti SC", serif; }
+    .card { position: absolute; left: 81px; right: 81px; bottom: 370px; padding: 36px 40px 42px; border: 2px solid {{text_color:color=#211E19}}; background: rgba(239,230,210,{{card_opacity:number=0.91}}); box-shadow: 11px 11px 0 {{accent_color:color=#D5533D}}; }
+    .eyebrow { margin-bottom: 17px; color: {{accent_color:color=#D5533D}}; font-size: 20px; font-weight: 850; letter-spacing: .16em; }
+    .copy { margin: 0; font: 650 48px/1.43 Georgia, "Songti SC", serif; overflow-wrap: anywhere; }
+    .progress { position: absolute; left: 81px; right: 81px; bottom: 280px; height: 5px; background: rgba(33,30,25,.16); }
+    .progress span { display: block; width: {{progress_percent:number=20}}%; height: 100%; background: {{accent_color:color=#D5533D}}; }
+  </style>
+</head>
+<body>
+  <div class="media" data-pixelle-media-layer="inset"><img src="{{image}}" alt=""></div>
+  <div class="brand">{{brand_label:text=DAILY EDITION}}</div>
+  <div class="title" data-pixelle-safe="title" data-pixelle-safe-min-font="29">{{title}}</div>
+  <section class="card">
+    <div class="eyebrow">{{eyebrow_label:text=NOTES / TODAY}} · {{index}}</div>
+    <p class="copy" data-pixelle-safe="subtitle" data-pixelle-safe-min-font="30">{{text}}</p>
+  </section>
+  <div class="progress"><span></span></div>
+</body>
+</html>

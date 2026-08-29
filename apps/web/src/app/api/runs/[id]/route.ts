@@ -1,24 +1,13 @@
 import { NextResponse } from "next/server";
-import { desc, eq } from "drizzle-orm";
-import { getDb } from "@/server/db";
-import { nodeRuns, workflowRuns } from "@/server/db/schema";
-import { getJobStatus } from "@/server/runner";
+import { getRuntime } from "@/server/runtime";
+import { buildRunDetail } from "@/server/run-views";
 
-type Params = { params: Promise<{ id: string }> };
+export const dynamic = "force-dynamic";
 
-export async function GET(_req: Request, { params }: Params) {
-  const { id } = await params;
-  const db = getDb();
-  const run = db.select().from(workflowRuns).where(eq(workflowRuns.id, id)).get();
-  if (!run) return NextResponse.json({ error: "Run 不存在" }, { status: 404 });
-  const nodes = db.select().from(nodeRuns).where(eq(nodeRuns.runId, id)).all();
-  return NextResponse.json({ run, nodes });
-}
-
-export async function DELETE(_req: Request, { params }: Params) {
-  // cancel endpoint lives at /cancel; DELETE marks run cancelled in DB
-  const { id } = await params;
-  const db = getDb();
-  db.update(workflowRuns).set({ status: "CANCELLED", finishedAt: new Date().toISOString() }).where(eq(workflowRuns.id, id)).run();
-  return NextResponse.json({ ok: true });
+export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params;
+  const runtime = getRuntime();
+  const detail = buildRunDetail(runtime, id);
+  if (!detail) return NextResponse.json({ error: "run not found" }, { status: 404 });
+  return NextResponse.json(detail);
 }

@@ -1,0 +1,48 @@
+import { z } from "zod";
+import { AspectRatioSchema, PlatformSchema } from "./content";
+
+/**
+ * 双文字渲染模式（docs/02 §9.1）：
+ * - native：默认。已确认文案写入图片 Prompt，由主力图片模型直接生成含中文的完整图片。
+ * - deterministic：显式开启。图片模型生成无文字视觉层，Satori/SVG + Sharp 合成文字。
+ * - auto_fallback：可选。先原生，质量检查失败后按策略转入确定性渲染。默认不开启。
+ */
+export const TextRenderingModeSchema = z.enum(["native", "deterministic", "auto_fallback"]);
+export type TextRenderingMode = z.infer<typeof TextRenderingModeSchema>;
+
+/** 图片生成并发配置：有效并发取各上限最小值（docs/02 §9.3） */
+export const GenerationConcurrencySchema = z.object({
+  /** 用户请求的并发 */
+  requested: z.number().int().min(1),
+  /** 服务器安全上限（环境变量 IMAGE_GENERATION_CONCURRENCY_MAX） */
+  serverMax: z.number().int().min(1),
+  /** Provider 路由限流上限（能力表声明） */
+  providerMax: z.number().int().min(1).optional(),
+  /** 最终生效并发 = min(requested, serverMax, providerMax) */
+  effective: z.number().int().min(1),
+  /** 本地 Sharp 后处理并发，独立于图片 API 并发 */
+  postprocessMax: z.number().int().min(1),
+});
+
+/** 计算有效并发 */
+export function effectiveImageConcurrency(input: {
+  requested: number;
+  serverMax: number;
+  providerMax?: number | undefined;
+}): number {
+  const candidates = [input.requested, input.serverMax];
+  if (input.providerMax !== undefined) {
+    candidates.push(input.providerMax);
+  }
+  return Math.max(1, Math.min(...candidates));
+}
+
+/** Studio 发起一次生成运行的输入 */
+export const CreateRunInputSchema = z.object({
+  topic: z.string().min(1).max(4000),
+  platform: PlatformSchema.default("xiaohongshu"),
+  aspectRatio: AspectRatioSchema.default("3:4"),
+  textRenderingMode: TextRenderingModeSchema.default("native"),
+  requestedImageConcurrency: z.number().int().min(1).max(16).default(1),
+});
+export type CreateRunInput = z.infer<typeof CreateRunInputSchema>;
