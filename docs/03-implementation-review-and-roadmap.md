@@ -150,12 +150,12 @@
 
 | # | 任务 | 验收标准 |
 |---|---|---|
-| 4.1 | PG 迁移工具：导出/导入脚本 + 行数/校验和校验 + 双读开关 + 回滚演练文档 | 演练报告；数据零丢失 |
-| 4.2 | BullMQ Worker 拆分（`apps/worker`），JobPort 双实现 + 环境变量切换 | 队列任务在独立进程执行 |
-| 4.3 | Human Approval 真接入执行器（审批点暂停/恢复） | 审批前任务挂起，批准后继续 |
-| 4.4 | React Flow 可编辑画布替换简化版（节点库/配置面板/静态校验） | 拖拽搭建并运行一个图文工作流 |
-| 4.5 | MCP Server（七工具：create/generate/status/revise/export/validate-draft/create-draft） | Claude/支持 MCP 的客户端可调用生成全流程 |
-| 4.6 | API Key 鉴权中间件 + Scope + 每分钟限流生效 | 开放 API 可用 Key 调用，超限 429 |
+| 4.1 | PG 迁移工具：导出/导入脚本 + 行数/校验和校验 + 双读开关 + 回滚演练文档 | 🔶 `pnpm pg:export`（13 表 JSONL + manifest 校验和）+ docs/pg-migration.md 已交付；PG 侧导入/双读待 PG 环境 |
+| 4.2 | BullMQ Worker 拆分（`apps/worker`），JobPort 双实现 + 环境变量切换 | ⏳ 下一批（需 Redis 环境） |
+| 4.3 | Human Approval 真接入执行器（审批点暂停/恢复） | ✅ requireApproval → awaiting_approval（job 结束/run 挂起）→ 评审通过放行、驳回终止；导出门禁生效；测试覆盖 |
+| 4.4 | React Flow 可编辑画布替换简化版（节点库/配置面板/静态校验） | ⏳ 下一批 |
+| 4.5 | MCP Server（七工具：create/generate/status/revise/export/validate-draft/create-draft） | ⏳ 下一批 |
+| 4.6 | API Key 鉴权中间件 + Scope + 每分钟限流生效 | ⏳ 与 4.5 同批 |
 
 ### 迭代 5：阶段 4 平台化（预计 5+ 天，按需启动）
 
