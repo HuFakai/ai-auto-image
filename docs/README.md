@@ -4,6 +4,8 @@
 
 ## 文档导航
 
+0. [开发进度文档](./progress.md)
+
 0. [开发文档：环境配置与启动指南](./development.md)
 1. [GitHub 项目与 Skills 调研报告](./01-research-and-reference.md)
 2. [总体开发规划方案](./02-master-development-plan.md)
