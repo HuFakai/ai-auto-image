@@ -5,18 +5,24 @@ import type { CreateRunInput, Storyboard } from "@aai/shared-schemas";
 import { StoryboardSchema } from "@aai/shared-schemas";
 import { buildExportZip, generatePlatformCopy, templateCopy, type ExportPageFile } from "@aai/workflow-engine";
 import { getRuntime } from "@/server/runtime";
+import { requireApiUser } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
 
 /** 导出 ZIP：按序图片 + 发布文案 + manifest + 发布清单；结果缓存到 /data/exports */
 export async function GET(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  const user = await requireApiUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const runtime = await getRuntime();
   let run;
   try {
     run = await runtime.runRepo.require(id);
   } catch {
     return NextResponse.json({ error: "run not found" }, { status: 404 });
+  }
+  if (run.userId && run.userId !== user.id && user.role !== "admin") {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   if (run.status !== "succeeded") {
     return NextResponse.json({ error: "run not finished" }, { status: 409 });

@@ -4,6 +4,7 @@ import type { BrandKit } from "@aai/storage";
 import type { BrandKitView } from "@/lib/types";
 import { THEME_IDS, ThemeIdSchema } from "@aai/shared-schemas";
 import { getRuntime } from "@/server/runtime";
+import { requireAdmin, requireApiUser } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -28,11 +29,15 @@ function view(row: BrandKit): BrandKitView {
 }
 
 export async function GET() {
+  const user = await requireApiUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const runtime = await getRuntime();
   return NextResponse.json({ kits: (await runtime.brandKitRepo.list()).map(view) });
 }
 
 export async function POST(request: Request) {
+  const user = await requireAdmin();
+  if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   let body: unknown;
   try {
     body = await request.json();

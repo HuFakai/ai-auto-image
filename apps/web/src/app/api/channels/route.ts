@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { ChannelInputSchema } from "@/server/channel-service";
 import { getRuntime } from "@/server/runtime";
+import { requireAdmin } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const user = await requireAdmin();
+  if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const runtime = await getRuntime();
   return NextResponse.json({
     channels: await runtime.channelService.list(),
@@ -14,6 +17,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const user = await requireAdmin();
+  if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   let body: unknown;
   try {
     body = await request.json();

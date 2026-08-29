@@ -20,14 +20,19 @@ const createdAt = () => bigint("created_at", { mode: "number" }).notNull();
 
 const epochColumn = (name: string) => bigint(name, { mode: "number" });
 
-/** 一次内容创作项目 */
-export const projects = pgTable("projects", {
-  id: text("id").primaryKey(),
-  title: text("title").notNull(),
-  status: text("status").notNull().default("active"),
-  createdAt: createdAt(),
-  updatedAt: epochColumn("updated_at").notNull(),
-});
+/** 一次内容创作项目（归属用户；旧数据 user_id 为空，仅管理员可见） */
+export const projects = pgTable(
+  "projects",
+  {
+    id: text("id").primaryKey(),
+    title: text("title").notNull(),
+    status: text("status").notNull().default("active"),
+    userId: text("user_id").references(() => users.id, { onDelete: "cascade" }),
+    createdAt: createdAt(),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [index("idx_projects_user").on(t.userId)],
+);
 
 /** 一次工作流执行；input/snapshot 为 JSON 字符串 */
 export const workflowRuns = pgTable(
@@ -37,6 +42,7 @@ export const workflowRuns = pgTable(
     projectId: text("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id, { onDelete: "set null" }),
     status: text("status").notNull().default("queued"),
     inputJson: text("input_json").notNull(),
     snapshotJson: text("snapshot_json"),

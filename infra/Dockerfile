@@ -15,14 +15,13 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000 \
     DATA_DIR=/data \
-    SQLITE_PATH=/data/db/app.db \
     ASSETS_DIR=/data/assets \
     EXPORTS_DIR=/data/exports \
     SQLITE_MIGRATIONS_DIR=/app/drizzle \
     FONT_DIR=/app/fonts \
-    IMAGE_GENERATION_CONCURRENCY_DEFAULT=1 \
-    IMAGE_GENERATION_CONCURRENCY_MAX=4 \
-    IMAGE_POSTPROCESS_CONCURRENCY_MAX=1
+    IMAGE_GENERATION_CONCURRENCY_DEFAULT=2 \
+    IMAGE_GENERATION_CONCURRENCY_MAX=6 \
+    IMAGE_POSTPROCESS_CONCURRENCY_MAX=2
 
 COPY --from=build /repo/apps/web/.next/standalone ./
 COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static

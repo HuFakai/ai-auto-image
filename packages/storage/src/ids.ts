@@ -18,3 +18,5 @@ export const newJobEventId = () => prefixedId("evt");
 export const newChannelId = () => prefixedId("chn");
 export const newRevisionId = () => prefixedId("rev");
 export const newBrandKitId = () => prefixedId("kit");
+export const newUserId = () => prefixedId("user");
+export const newSessionId = () => prefixedId("sess");

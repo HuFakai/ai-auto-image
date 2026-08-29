@@ -1,5 +1,8 @@
 name: ai-auto-image
 
+# 生产部署：连接外部 PostgreSQL / Redis（如 1Panel 托管实例）。
+# 在仓库根 .env 提供 DATABASE_URL / REDIS_URL / APP_SECRET，然后：
+#   docker compose -f infra/docker-compose.yml up -d --build
 services:
   app:
     build:
@@ -7,23 +10,34 @@ services:
       dockerfile: infra/Dockerfile
     container_name: aai-app
     restart: unless-stopped
+    # 仅绑定回环：对外由 1Panel OpenResty（反代 + HTTPS）暴露，3000 端口不直连公网
     ports:
-      - "${PORT:-3000}:3000"
+      - "127.0.0.1:${PORT:-3000}:3000"
     volumes:
       - aai-data:/data
     environment:
-      # 真实 Provider 密钥由宿主机 .env 注入；留空时使用 Mock
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      XAI_API_KEY: ${XAI_API_KEY:-}
-      IMAGE_GENERATION_CONCURRENCY_DEFAULT: "1"
-      IMAGE_GENERATION_CONCURRENCY_MAX: "4"
-      IMAGE_POSTPROCESS_CONCURRENCY_MAX: "1"
-      JOB_RUNNER_CONCURRENCY: "1"
+      # ── 数据库（必填）：postgres://user:pass@1Panel-postgresql-VkBl:5432/ai_image ──
+      DATABASE_URL: ${DATABASE_URL:?请在 .env 配置 DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-}
+      # ── 安全（必填）：渠道密钥加密主密钥；沿用导入数据时须与加密端一致（见 docs/deployment.md）──
+      APP_SECRET: ${APP_SECRET:-}
+      # ── 注册策略：默认关闭；开启需 REGISTER_ENABLED=1，可选邀请码 ──
+      REGISTER_ENABLED: ${REGISTER_ENABLED:-0}
+      REGISTER_INVITE_CODE: ${REGISTER_INVITE_CODE:-}
+      DATA_DIR: /data
+      ASSETS_DIR: /data/assets
+      EXPORTS_DIR: /data/exports
+      SQLITE_MIGRATIONS_DIR: /app/drizzle
+      FONT_DIR: /app/fonts
+      IMAGE_GENERATION_CONCURRENCY_DEFAULT: "2"
+      IMAGE_GENERATION_CONCURRENCY_MAX: "6"
+      IMAGE_POSTPROCESS_CONCURRENCY_MAX: "2"
+      JOB_RUNNER_CONCURRENCY: "2"
       LOG_LEVEL: info
     deploy:
       resources:
         limits:
-          memory: 1g
+          memory: 4g
     healthcheck:
       test:
         [
@@ -39,3 +53,10 @@ services:
 
 volumes:
   aai-data:
+
+networks:
+  default:
+    # 与 1Panel 托管的 PostgreSQL/Redis 容器同网络，才能用容器名直连。
+    # 服务器上确认实际网络名：docker network ls | grep -i 1panel
+    name: ${DOCKER_NETWORK:-1panel-network}
+    external: true

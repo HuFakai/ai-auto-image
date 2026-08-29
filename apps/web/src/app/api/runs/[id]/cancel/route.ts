@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
 import { getRuntime } from "@/server/runtime";
+import { requireApiUser } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(_request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  const user = await requireApiUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const runtime = await getRuntime();
   const run = (await runtime.runRepo.list(200)).find((r) => r.id === id);
   if (!run) return NextResponse.json({ error: "run not found" }, { status: 404 });
+  if (run.userId && run.userId !== user.id && user.role !== "admin") {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
 
   const job = (await runtime.jobRepo.list(200)).find((j) => j.runId === id);
   if (!job) return NextResponse.json({ error: "job not found" }, { status: 404 });

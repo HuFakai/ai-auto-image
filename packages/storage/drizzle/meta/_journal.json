@@ -8,6 +8,13 @@
       "when": 1788026559832,
       "tag": "0000_nappy_aqueduct",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788029535368,
+      "tag": "0001_perfect_boomerang",
+      "breakpoints": true
     }
   ]
 }

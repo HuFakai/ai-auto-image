@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { PAGE_REGEN_KIND } from "@aai/workflow-engine";
 import { getRuntime } from "@/server/runtime";
+import { requireApiUser } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,8 @@ export async function POST(
   ctx: { params: Promise<{ id: string; index: string }> },
 ) {
   const { id, index } = await ctx.params;
+  const user = await requireApiUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const pageIndex = Number.parseInt(index, 10);
   if (!Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex > 20) {
     return NextResponse.json({ error: "invalid page index" }, { status: 400 });
@@ -34,12 +37,15 @@ export async function POST(
   }
 
   const runtime = await getRuntime();
+  let run;
   try {
-    await runtime.runRepo.require(id);
+    run = await runtime.runRepo.require(id);
   } catch {
     return NextResponse.json({ error: "run not found" }, { status: 404 });
   }
-  const run = await runtime.runRepo.require(id);
+  if (run.userId && run.userId !== user.id && user.role !== "admin") {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
   if (run.status !== "succeeded") {
     return NextResponse.json({ error: "run not finished" }, { status: 409 });
   }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getRuntime } from "@/server/runtime";
+import { requireApiUser } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,8 @@ const ReviewSchema = z.object({
 /** 人工评审标记：通过 / 驳回 / 复位 */
 export async function PATCH(request: Request, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
+  const user = await requireApiUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   let body: unknown;
   try {
     body = await request.json();
@@ -25,6 +28,9 @@ export async function PATCH(request: Request, ctx: { params: Promise<{ id: strin
   const runtime = await getRuntime();
   try {
     const run = await runtime.runRepo.require(id);
+    if (run.userId && run.userId !== user.id && user.role !== "admin") {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
     // 审批门：awaiting_approval 的运行由「评审通过」放行（→ succeeded，导出放行）；
     // 驳回则终止（→ cancelled，保留资产可追溯）
     if (run.status === "awaiting_approval") {

@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Noto_Sans_SC, Noto_Serif_SC } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
+import { getCurrentUser } from "@/server/auth";
+import UserBadge from "./user-badge";
 
 const serif = Noto_Serif_SC({
   weight: ["600", "900"],
@@ -24,7 +26,8 @@ export const metadata: Metadata = {
   description: "根据主题与文案，自动生成一套可发布的中文图文。",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const user = await getCurrentUser();
   return (
     <html lang="zh-CN" className={`${serif.variable} ${sans.variable} ${mono.variable}`}>
       <body className="grain">
@@ -45,12 +48,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/" className="hover:text-seal transition-colors">
                 工作台
               </Link>
-              <Link href="/settings" className="hover:text-seal transition-colors">
-                渠道设置
-              </Link>
+              {user?.role === "admin" && (
+                <Link href="/settings" className="hover:text-seal transition-colors">
+                  渠道设置
+                </Link>
+              )}
               <a href="/api/health" className="hidden hover:text-seal transition-colors sm:inline">
                 HEALTH
               </a>
+              {user ? (
+                <UserBadge username={user.username} role={user.role} />
+              ) : (
+                <Link href="/login" className="hover:text-seal transition-colors">
+                  登录
+                </Link>
+              )}
             </nav>
           </div>
         </header>

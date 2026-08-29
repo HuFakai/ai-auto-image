@@ -3,11 +3,15 @@ import type { BrandKitConfig, ThemeId } from "@aai/shared-schemas";
 import { CreateRunInputSchema } from "@aai/shared-schemas";
 import { getRuntime } from "@/server/runtime";
 import { listRunItems } from "@/server/run-views";
+import { requireApiUser } from "@/server/auth";
 import type { RunListItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
+  const user = await requireApiUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
   let body: Record<string, unknown>;
   try {
     body = (await request.json()) as Record<string, unknown>;
@@ -43,8 +47,12 @@ export async function POST(request: Request) {
 
   const runtime = await getRuntime();
   const effective = runtime.effectiveConcurrency(input.requestedImageConcurrency);
-  const project = await runtime.projectRepo.create({ title: input.topic.slice(0, 60) });
-  const run = await runtime.runRepo.create({ projectId: project.id, inputJson: JSON.stringify(input) });
+  const project = await runtime.projectRepo.create({ title: input.topic.slice(0, 60), userId: user.id });
+  const run = await runtime.runRepo.create({
+    projectId: project.id,
+    inputJson: JSON.stringify(input),
+    userId: user.id,
+  });
   const jobKind = input.recipe === "comic_story" ? "comic_story_run" : "knowledge_card_run";
   const { job } = await runtime.jobRepo.createOrReuse({
     kind: jobKind,
@@ -66,8 +74,10 @@ export async function POST(request: Request) {
 }
 
 export async function GET() {
+  const user = await requireApiUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const runtime = await getRuntime();
-  const runs: RunListItem[] = await listRunItems(runtime, 20);
+  const runs: RunListItem[] = await listRunItems(runtime, 20, user.role === "admin" ? null : user.id);
   return NextResponse.json({
     runs,
     providerLabel: runtime.config.providerLabel,

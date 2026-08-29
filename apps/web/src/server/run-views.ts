@@ -14,8 +14,13 @@ interface NodeRow {
 }
 
 /** 从持久化状态推导运行列表（供 SSR 与 GET /api/runs 复用） */
-export async function listRunItems(runtime: Runtime, limit: number): Promise<RunListItem[]> {
-  const runs = await runtime.runRepo.list(limit);
+export async function listRunItems(
+  runtime: Runtime,
+  limit: number,
+  /** 非 admin 传用户 id，仅返回其作品；admin/null 返回全部 */
+  viewerUserId: string | null = null,
+): Promise<RunListItem[]> {
+  const runs = await runtime.runRepo.listForUser(viewerUserId, limit);
   const items: RunListItem[] = [];
   for (const run of runs) {
     const input = JSON.parse(run.inputJson) as { topic: string; textRenderingMode: string };

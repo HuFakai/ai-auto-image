@@ -18,7 +18,9 @@ import {
   newPromptVersionId,
   newRevisionId,
   newRunId,
+  newSessionId,
   newUsageId,
+  newUserId,
 } from "./ids";
 import {
   assetRelations,
@@ -33,6 +35,8 @@ import {
   providerAttempts,
   providerUsages,
   revisions,
+  sessions,
+  users,
   workflowRuns,
 } from "./schema";
 
@@ -48,6 +52,8 @@ async function one<TRow>(query: Promise<TRow[]>): Promise<TRow | undefined> {
 
 export interface CreateProjectInput {
   title: string;
+  /** 归属用户；测试/旧数据可省略（null 归管理员可见集合） */
+  userId?: string | undefined;
 }
 
 export class ProjectRepo {
@@ -61,7 +67,7 @@ export class ProjectRepo {
     const ts = now();
     await this.client
       .insert(projects)
-      .values({ id, title: input.title, createdAt: ts, updatedAt: ts });
+      .values({ id, title: input.title, userId: input.userId ?? null, createdAt: ts, updatedAt: ts });
     return this.require(id);
   }
 
@@ -79,6 +85,8 @@ export class ProjectRepo {
 export interface CreateRunInputRow {
   projectId: string;
   inputJson: string;
+  /** 冗余归属（与 project 一致），用于行级过滤 */
+  userId?: string | undefined;
 }
 
 export class RunRepo {
@@ -92,7 +100,7 @@ export class RunRepo {
     const ts = now();
     await this.client
       .insert(workflowRuns)
-      .values({ id, projectId: input.projectId, inputJson: input.inputJson, createdAt: ts, updatedAt: ts });
+      .values({ id, projectId: input.projectId, userId: input.userId ?? null, inputJson: input.inputJson, createdAt: ts, updatedAt: ts });
     return this.require(id);
   }
 
@@ -110,6 +118,15 @@ export class RunRepo {
       .from(workflowRuns)
       .orderBy(sql`${workflowRuns.createdAt} DESC`)
       .limit(limit);
+  }
+
+  /** 按用户过滤的运行列表；userId 为 null 时返回全部（管理员视图） */
+  async listForUser(userId: string | null, limit = 50) {
+    const query = this.client.select().from(workflowRuns);
+    const filtered = userId
+      ? query.where(eq(workflowRuns.userId, userId))
+      : query;
+    return filtered.orderBy(sql`${workflowRuns.createdAt} DESC`).limit(limit);
   }
 
   async updateStatus(id: string, status: string, extra: { errorSummary?: string } = {}) {
@@ -898,5 +915,127 @@ export class BrandKitRepo {
       await this.create({ name, themeId, styleKeywords: keywords, negativeKeywords: [], builtIn: 1 });
     }
     return built.length;
+  }
+}
+
+/* ── Users & Sessions（账号密码登录；auth_provider 预留微信小程序扫码）── */
+
+export interface CreateUserInput {
+  username: string;
+  /** auth_provider=password 时必填（scrypt 格式）；第三方登录为 null */
+  passwordHash?: string | null;
+  role: "admin" | "user";
+  authProvider?: "password" | "wechat_mp";
+  providerSubject?: string | null;
+}
+
+export class UserRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async create(input: CreateUserInput) {
+    const id = newUserId();
+    const ts = now();
+    await this.client.insert(users).values({
+      id,
+      username: input.username,
+      passwordHash: input.passwordHash ?? null,
+      role: input.role,
+      authProvider: input.authProvider ?? "password",
+      providerSubject: input.providerSubject ?? null,
+      createdAt: ts,
+      updatedAt: ts,
+    });
+    return this.require(id);
+  }
+
+  async require(id: string) {
+    const row = await one(this.client.select().from(users).where(eq(users.id, id)).limit(1));
+    if (!row) throw new Error(`user not found: ${id}`);
+    return row;
+  }
+
+  async findByUsername(username: string) {
+    return one(this.client.select().from(users).where(eq(users.username, username)).limit(1));
+  }
+
+  async findByProviderSubject(authProvider: string, subject: string) {
+    return one(
+      this.client
+        .select()
+        .from(users)
+        .where(and(eq(users.authProvider, authProvider), eq(users.providerSubject, subject)))
+        .limit(1),
+    );
+  }
+
+  async count(): Promise<number> {
+    const row = await one(this.client.select({ n: sql<string>`count(*)` }).from(users).limit(1));
+    return Number(row?.n ?? 0);
+  }
+
+  async updateStatus(id: string, status: "active" | "disabled") {
+    await this.client.update(users).set({ status, updatedAt: now() }).where(eq(users.id, id));
+    return this.require(id);
+  }
+}
+
+export interface CreateSessionInput {
+  userId: string;
+  /** 随机 token 的 SHA-256 摘要（明文 token 只存 cookie） */
+  tokenHash: string;
+  authProvider?: string;
+  expiresAt: number;
+}
+
+export class SessionRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async create(input: CreateSessionInput) {
+    const id = newSessionId();
+    await this.client.insert(sessions).values({
+      id,
+      userId: input.userId,
+      tokenHash: input.tokenHash,
+      authProvider: input.authProvider ?? "password",
+      createdAt: now(),
+      expiresAt: input.expiresAt,
+    });
+    return id;
+  }
+
+  /** 按 token 摘要取会话；过期返回 null（并顺带清理） */
+  async findValidByTokenHash(tokenHash: string) {
+    const row = await one(
+      this.client.select().from(sessions).where(eq(sessions.tokenHash, tokenHash)).limit(1),
+    );
+    if (!row) return null;
+    if (row.expiresAt < now()) {
+      await this.delete(row.id);
+      return null;
+    }
+    return row;
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.client.delete(sessions).where(eq(sessions.id, id));
+  }
+
+  async deleteByTokenHash(tokenHash: string): Promise<void> {
+    await this.client.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
+  }
+
+  async deleteByUser(userId: string): Promise<void> {
+    await this.client.delete(sessions).where(eq(sessions.userId, userId));
+  }
+
+  /** 清理全部过期会话（可定期调用） */
+  async deleteExpired(): Promise<void> {
+    await this.client.delete(sessions).where(sql`${sessions.expiresAt} < ${now()}`);
   }
 }

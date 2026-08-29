@@ -12,6 +12,8 @@ import {
   ProviderRepo,
   RevisionRepo,
   RunRepo,
+  SessionRepo,
+  UserRepo,
   openDatabase,
   type OpenDatabase,
 } from "@aai/storage";
@@ -99,6 +101,8 @@ export interface Runtime {
   channelService: ChannelService;
   brandKitRepo: BrandKitRepo;
   revisionRepo: RevisionRepo;
+  userRepo: UserRepo;
+  sessionRepo: SessionRepo;
   assetStore: AssetStore;
   imageApiSemaphore: Semaphore;
   runner: JobRunner;
@@ -182,6 +186,8 @@ async function initRuntime(): Promise<Runtime> {
     channelService,
     brandKitRepo,
     revisionRepo: new RevisionRepo(db.db),
+    userRepo: new UserRepo(db.db),
+    sessionRepo: new SessionRepo(db.db),
     assetStore: new AssetStore(assetsDir),
     imageApiSemaphore: new Semaphore(serverMaxConcurrency),
     runner: new JobRunner(new JobRepo(db.db), {

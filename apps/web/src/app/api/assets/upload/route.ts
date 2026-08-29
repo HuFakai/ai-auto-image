@@ -2,6 +2,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import { detectImageMime } from "@aai/storage";
 import { getRuntime } from "@/server/runtime";
+import { requireAdmin } from "@/server/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +11,8 @@ const ALLOWED = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 /** 图片上传（Brand Kit Logo 等参考素材）：类型/大小/魔数三重检查后入资产库 */
 export async function POST(request: Request) {
+  const user = await requireAdmin();
+  if (!user) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   let form: FormData;
   try {
     form = await request.formData();

@@ -1,9 +1,13 @@
+import { redirect } from "next/navigation";
+import { requireAdmin } from "@/server/auth";
 import { getRuntime } from "@/server/runtime";
 import { SettingsView } from "./settings-view";
 
 export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
+  const admin = await requireAdmin();
+  if (!admin) redirect("/");
   const runtime = await getRuntime();
   return (
     <SettingsView
