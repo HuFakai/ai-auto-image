@@ -597,7 +597,6 @@ async function runStructured<T>(
   });
   try {
     let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
-    let usedModel: string | null = null;
     const value = await withModelFallbacks({
       routes: deps.textRoutes.map((route) => ({ config: route.config, model: route.model })),
       signal: ctx.signal,
