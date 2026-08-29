@@ -3,15 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { RunDetailPage, RunDetailPayload } from "@/lib/types";
 
-const nodeLabels: Record<string, string> = {
-  "parse-input": "解析输入",
-  "generate-brief": "内容 Brief",
-  "generate-storyboard": "Storyboard",
-  "generate-images": "生成页面",
-  "render-slides": "确定性排版",
-  "package-export": "装订导出",
-};
-
 function runStamp(status: string): { text: string; className: string } {
   switch (status) {
     case "succeeded":
@@ -147,49 +138,6 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
               )}
             </>
           ) : null}
-        </div>
-      </section>
-
-      {/* 工序目录 */}
-      <section className="rise" style={{ animationDelay: "60ms" }}>
-        <div className="rule-double mb-4 pt-2">
-          <h2 className="font-display text-lg font-bold">工序</h2>
-        </div>
-        <div className="grid grid-cols-2 gap-x-8 gap-y-0 sm:grid-cols-3">
-          {detail.nodes
-            .filter((node, index, all) => all.findIndex((n) => n.nodeName === node.nodeName) === index)
-            .map((node, index) => {
-              const status = node.status;
-              return (
-                <div
-                  key={node.nodeName}
-                  className="flex items-baseline justify-between border-b border-line py-2.5"
-                >
-                  <span className="text-sm">
-                    <span className="mr-2 font-mono text-[11px] text-ink-faint">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    {nodeLabels[node.nodeName] ?? node.nodeName}
-                    {node.attempt > 1 ? (
-                      <span className="ml-1 font-mono text-[10px] text-seal">×{node.attempt}</span>
-                    ) : null}
-                  </span>
-                  <span
-                    className={`font-mono text-[11px] ${
-                      status === "succeeded"
-                        ? "text-seal"
-                        : status === "running"
-                          ? "text-seal animate-pulse"
-                          : status === "failed"
-                            ? "text-ink line-through"
-                            : "text-ink-faint"
-                    }`}
-                  >
-                    {status === "succeeded" ? "✓" : status === "running" ? "…" : status === "failed" ? "✗" : "—"}
-                  </span>
-                </div>
-              );
-            })}
         </div>
       </section>
 

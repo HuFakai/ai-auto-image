@@ -39,6 +39,7 @@ export interface RunListItem {
   reviewStatus: "pending" | "approved" | "rejected";
   createdAt: number;
   pageCount: number;
+  coverAssetId?: string | undefined;
 }
 
 export interface RunDetailPage {

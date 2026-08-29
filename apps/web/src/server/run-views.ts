@@ -18,15 +18,22 @@ export function listRunItems(runtime: Runtime, limit: number): RunListItem[] {
   return runtime.runRepo.list(limit).map((run) => {
     const input = JSON.parse(run.inputJson) as { topic: string; textRenderingMode: string };
     const nodes = runtime.runRepo.listNodeRuns(run.id) as unknown as NodeRow[];
-    const storyboardNode = nodes.find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded");
+    // 知识卡片 / 科普漫画两种分镜节点
+    const storyboardNode =
+      nodes.find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded") ??
+      nodes.find((n) => n.nodeName === "generate-comic-storyboard" && n.status === "succeeded");
     let pageCount = 0;
     if (storyboardNode?.outputRef) {
       try {
-        pageCount = ((JSON.parse(storyboardNode.outputRef) as { value: Storyboard }).value.slides)?.length ?? 0;
+        pageCount = ((JSON.parse(storyboardNode.outputRef) as { value: { slides?: unknown[]; pages?: unknown[] } }).value
+          .slides ??
+          (JSON.parse(storyboardNode.outputRef) as { value: { pages?: unknown[] } }).value.pages)?.length ?? 0;
       } catch {
         pageCount = 0;
       }
     }
+    // 封面：第一页当前资产
+    const cover = runtime.assetRepo.latestForPage(run.id, 0);
     return {
       runId: run.id,
       topic: input.topic,
@@ -35,6 +42,7 @@ export function listRunItems(runtime: Runtime, limit: number): RunListItem[] {
       reviewStatus: run.reviewStatus as RunListItem["reviewStatus"],
       createdAt: run.createdAt,
       pageCount,
+      coverAssetId: cover?.id ?? undefined,
     };
   });
 }
@@ -182,12 +190,27 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
       aspectRatio: input.aspectRatio,
       platform: input.platform,
       brandKit: brandKitMeta,
-      routes: (snapshot?.routes ?? []).map((r) => ({
-        ...r,
-        kind:
-          r.kind ??
-          (/imagine|image|dall/i.test(r.model) ? "image" : /deepseek|gpt-|grok-|o[134]/.test(r.model) ? "text" : "unknown"),
-      })),
+      // 生成信息-模型：以实际调用为准（含回退与重试），快照仅兜底
+      ...(runtime.providerRepo.listUsedModels(runId).length > 0
+        ? {
+            routes: runtime.providerRepo.listUsedModels(runId).map((m) => ({
+              id: m.routeId,
+              kind: "used",
+              model: m.model,
+            })),
+          }
+        : {
+            routes: (snapshot?.routes ?? []).map((r) => ({
+              ...r,
+              kind:
+                r.kind ??
+                (/imagine|image|dall/i.test(r.model)
+                  ? "image"
+                  : /deepseek|gpt-|grok-|o[134]/.test(r.model)
+                    ? "text"
+                    : "unknown"),
+            })),
+          }),
       templateVersion: snapshot?.templateVersion ?? null,
       characterRefAssetId,
     },

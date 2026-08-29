@@ -392,6 +392,26 @@ export interface RecordAttemptInput {
 export class ProviderRepo {
   constructor(private readonly db: Db) {}
 
+  /** 某 Run 实际调用过的模型（按首次调用顺序去重，供生成信息展示） */
+  listUsedModels(runId: string): Array<{ routeId: string; model: string }> {
+    const rows = this.db
+      .select({ routeId: providerAttempts.routeId, model: providerAttempts.model })
+      .from(providerAttempts)
+      .where(eq(providerAttempts.runId, runId))
+      .orderBy(sql`${providerAttempts.startedAt} ASC`)
+      .all();
+    const seen = new Set<string>();
+    const out: Array<{ routeId: string; model: string }> = [];
+    for (const row of rows) {
+      if (!row.model) continue;
+      const key = `${row.routeId}:${row.model}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ routeId: row.routeId, model: row.model });
+    }
+    return out;
+  }
+
   recordAttempt(input: RecordAttemptInput) {
     const finishedAt = input.finishedAt ?? now();
     this.db

@@ -537,9 +537,12 @@ async function generateImageWithFallbacks(
   _reference: null,
 ) {
   void _reference;
+  // 科普漫画全部优先使用支持图生图的渠道（如 gpt-image-2），保证风格与角色一致
+  const editCapable = deps.imageRoutes.filter((route) => route.image.capabilities().imageEditSingle);
+  const routes = editCapable.length > 0 ? editCapable : deps.imageRoutes;
   let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
   const result = await withModelFallbacks({
-    routes: deps.imageRoutes,
+    routes,
     signal: ctx.signal,
     run: async (fallbackRoute) => {
       const route = deps.imageRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
