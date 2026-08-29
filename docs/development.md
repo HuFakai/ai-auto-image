@@ -81,16 +81,19 @@ pnpm dev
 pnpm dev             # 开发服务器（Next.js + 进程内 Job Runner）
 pnpm build           # 全仓构建（含 Next.js standalone 产物）
 pnpm typecheck       # 全仓类型检查
-pnpm test            # 全仓测试（vitest，58 项：单测 + 集成）
+pnpm test            # 全仓测试（vitest，59 项：单测 + 集成）
 pnpm lint            # ESLint（仓库根统一执行）
 
 pnpm fonts           # 下载中文字体（Noto Sans SC，OFL）
 pnpm db:migrate      # 创建/更新 SQLite 表结构
 pnpm db:seed         # 插入种子数据（演示项目 + Prompt 版本）
 
+pnpm eval            # 评测：6 用例双模式（Mock 零费用），输出解析/渲染成功率指标
 pnpm verify:live     # 真实渠道验证：Storyboard → 原生中文出图 → 转存 → 报告
 pnpm verify:openai   # OpenAI 官方渠道验证（需 OPENAI_API_KEY）
 pnpm verify:xai      # xAI/Grok 官方渠道验证（需 XAI_API_KEY）
+
+bash infra/verify-deployment.sh   # 服务器部署验证（见 docs/deployment-checklist.md）
 ```
 
 验证报告输出到 `fixtures/reports/*.json`，验证图片输出到 `data/assets/verify/`。
@@ -107,8 +110,13 @@ apps/web/data/
 ```
 
 重启安全：应用重启后 Job Runner 从 `jobs` 表恢复未完成任务，已成功页面不会重新生成。
+**运行中取消**：详情页「作废本次运行」即时中断进行中的模型调用（signal 贯穿到 HTTP 层，
+取消不触发重试，已成功页面保留）。
 
 ## 6. 生产部署
+
+生产部署步骤与阶段 0 验收基准见 [docs/deployment-checklist.md](./deployment-checklist.md)；
+服务器上执行 `bash infra/verify-deployment.sh` 可一键完成部署断言并输出报告。
 
 ### 6.1 本机 standalone 运行
 

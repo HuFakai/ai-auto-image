@@ -15,6 +15,8 @@ export interface TextRequest {
   prompt: string;
   maxOutputTokens?: number | undefined;
   temperature?: number | undefined;
+  /** 取消信号：中断进行中的 HTTP 调用 */
+  signal?: AbortSignal | undefined;
 }
 
 export interface TextResult {
@@ -32,6 +34,8 @@ export interface StructuredRequest<T> {
   temperature?: number | undefined;
   /** 接收本次调用的 Token 用量（generateObject 只返回值，用量经此上报成本账本） */
   onUsage?: ((usage: ModelUsage) => void) | undefined;
+  /** 取消信号：中断进行中的 HTTP 调用 */
+  signal?: AbortSignal | undefined;
 }
 
 /** 业务层统一的文本模型接口：不暴露 SDK 类型 */

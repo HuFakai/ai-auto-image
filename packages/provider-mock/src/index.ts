@@ -62,7 +62,25 @@ const MOCK_ROUTE = {
   imageConcurrencyMax: 4,
 };
 
-const delay = (ms: number) => (ms > 0 ? new Promise<void>((r) => setTimeout(r, ms)) : Promise.resolve());
+/** 可被 AbortSignal 中断的延迟：取消语义在 Mock 中与真实 HTTP 调用一致 */
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0 && !signal) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("The operation was aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("The operation was aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 /** 从 Prompt 里提取主题/比例/平台/标题（节点按约定格式拼 Prompt） */
 export function extractContext(prompt: string): {
@@ -182,7 +200,7 @@ export function createMockProvider(options: MockProviderOptions = {}): MockProvi
     capabilities: () => textCaps,
 
     async generateText(request): Promise<TextResult> {
-      await delay(options.latencyMs ?? 0);
+      await delay(options.latencyMs ?? 0, request.signal);
       controls.calls.text += 1;
       if (options.shouldFailText?.(request.prompt)) {
         throw new AiError("provider_unavailable", "mock text failure");
@@ -196,7 +214,7 @@ export function createMockProvider(options: MockProviderOptions = {}): MockProvi
     },
 
     async generateObject<T>(request: StructuredRequest<T>): Promise<T> {
-      await delay(options.latencyMs ?? 0);
+      await delay(options.latencyMs ?? 0, request.signal);
       controls.calls.object += 1;
       if (options.shouldFailText?.(request.prompt)) {
         throw new AiError("provider_unavailable", "mock object failure");
@@ -235,7 +253,7 @@ export function createMockProvider(options: MockProviderOptions = {}): MockProvi
     capabilities: () => imageCaps,
 
     async generate(request: ImageGenerateRequest) {
-      await delay(options.latencyMs ?? 0);
+      await delay(options.latencyMs ?? 0, request.signal);
       controls.calls.image += 1;
       if (options.shouldFailImage?.(request)) {
         throw new AiError("content_policy", "mock image failure");

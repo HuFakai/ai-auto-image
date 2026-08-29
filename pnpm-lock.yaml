@@ -17,6 +17,9 @@ importers:
       '@aai/provider-xai':
         specifier: workspace:*
         version: link:packages/provider-xai
+      '@aai/render-engine':
+        specifier: workspace:*
+        version: link:packages/render-engine
       '@aai/shared-schemas':
         specifier: workspace:*
         version: link:packages/shared-schemas

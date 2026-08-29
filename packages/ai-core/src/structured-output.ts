@@ -16,7 +16,12 @@ export async function generateStructured<T>(input: {
   system?: string | undefined;
   prompt: string;
   maxRepairCalls?: number | undefined;
-  callModel: (prompt: string, system?: string | undefined) => Promise<TextResult>;
+  signal?: AbortSignal | undefined;
+  callModel: (
+    prompt: string,
+    system?: string | undefined,
+    signal?: AbortSignal | undefined,
+  ) => Promise<TextResult>;
 }): Promise<{ value: T; usage: ModelUsage; providerRequestId?: string }> {
   const jsonSchema = z.toJSONSchema(input.schema, { io: "output" });
   const instruction = [
@@ -44,7 +49,7 @@ export async function generateStructured<T>(input: {
             "Fix the JSON object and respond again with corrected JSON only.",
           ].join("\n");
 
-    const result = await input.callModel(prompt, input.system);
+    const result = await input.callModel(prompt, input.system, input.signal);
     providerRequestId = result.providerRequestId ?? providerRequestId;
     usage = mergeUsageLocal(usage, result.usage);
 

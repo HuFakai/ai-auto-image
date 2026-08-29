@@ -16,7 +16,8 @@
     "db:seed": "tsx scripts/db-seed.ts",
     "verify:openai": "tsx scripts/verify-openai.mts",
     "verify:live": "tsx scripts/verify-live.mts",
-    "verify:xai": "tsx scripts/verify-xai.mts"
+    "verify:xai": "tsx scripts/verify-xai.mts",
+    "eval": "tsx scripts/eval.mts"
   },
   "devDependencies": {
     "@aai/ai-core": "workspace:*",
@@ -28,6 +29,7 @@
     "eslint": "^9.30.0",
     "turbo": "^2.5.0",
     "tsx": "^4.20.0",
-    "typescript-eslint": "^8.35.0"
+    "typescript-eslint": "^8.35.0",
+    "@aai/render-engine": "workspace:*"
   }
 }

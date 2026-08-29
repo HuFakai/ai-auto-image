@@ -96,6 +96,9 @@ export async function withModelFallbacks<T>(options: FallbackOptions<T>): Promis
         attempts.push(record);
         onAttempt?.(record);
 
+        // 用户取消：立即终止，不重试也不切换路由
+        if (signal?.aborted) throw error;
+
         const isLastAttempt = attempt >= maxAttempts;
         if (!aiError.retryable || isLastAttempt) break;
         const delay = Math.max(aiError.retryAfterMs ?? 0, backoffBase * 2 ** (attempt - 1));

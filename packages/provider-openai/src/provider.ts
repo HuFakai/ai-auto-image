@@ -38,20 +38,27 @@ export interface WireChatMessage {
   role: "system" | "user" | "assistant";
   content: string | WireChatContentPart[];
 }
+export interface WireRequestOptions {
+  signal?: AbortSignal | undefined;
+}
+
 export interface WireClient {
   chat: {
     completions: {
-      create(params: {
-        model: string;
-        messages: WireChatMessage[];
-        max_tokens?: number;
-        temperature?: number;
-      }): Promise<unknown>;
+      create(
+        params: {
+          model: string;
+          messages: WireChatMessage[];
+          max_tokens?: number;
+          temperature?: number;
+        },
+        options?: WireRequestOptions,
+      ): Promise<unknown>;
     };
   };
   images: {
-    generate(params: Record<string, unknown>): Promise<unknown>;
-    edit?(params: Record<string, unknown>): Promise<unknown>;
+    generate(params: Record<string, unknown>, options?: WireRequestOptions): Promise<unknown>;
+    edit?(params: Record<string, unknown>, options?: WireRequestOptions): Promise<unknown>;
   };
 }
 
@@ -157,12 +164,15 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
       const messages: WireChatMessage[] = [];
       if (request.system) messages.push({ role: "system", content: request.system });
       messages.push({ role: "user", content: request.prompt });
-      const response = await client.chat.completions.create({
-        model: textModelName,
-        messages,
-        max_tokens: request.maxOutputTokens,
-        temperature: request.temperature,
-      });
+      const response = await client.chat.completions.create(
+        {
+          model: textModelName,
+          messages,
+          max_tokens: request.maxOutputTokens,
+          temperature: request.temperature,
+        },
+        { signal: request.signal },
+      );
       return readChatResponse(response);
     },
 
@@ -172,18 +182,22 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
         schema: request.schema,
         system: request.system,
         prompt: request.prompt,
-        callModel: async (prompt, system) => {
+        signal: request.signal,
+        callModel: async (prompt, system, signal) => {
           const messages: WireChatMessage[] = [];
           if (system) messages.push({ role: "system", content: system });
           messages.push({ role: "user", content: prompt });
-          const response = await client.chat.completions.create({
-            model: textModelName,
-            messages,
-            // 推理类模型（如 deepseek-v4-flash）会消耗 reasoning token，
-            // 结构化 JSON 输出必须给足输出预算，避免 finish_reason=length 的空响应
-            max_tokens: request.maxOutputTokens ?? 8192,
-            temperature: request.temperature ?? 0.2,
-          });
+          const response = await client.chat.completions.create(
+            {
+              model: textModelName,
+              messages,
+              // 推理类模型（如 deepseek-v4-flash）会消耗 reasoning token，
+              // 结构化 JSON 输出必须给足输出预算，避免 finish_reason=length 的空响应
+              max_tokens: request.maxOutputTokens ?? 8192,
+              temperature: request.temperature ?? 0.2,
+            },
+            { signal },
+          );
           return readChatResponse(response);
         },
       });
@@ -221,7 +235,7 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
       if (request.quality) params.quality = request.quality;
       if (request.seed !== undefined && imageCaps.supportsSeed) params.seed = request.seed;
 
-      const response = await client.images.generate(params);
+      const response = await client.images.generate(params, { signal: request.signal });
       const images = extractGeneratedImages(response);
       if (images.length === 0) {
         throw new AiError("provider_unavailable", "image response contained no images");
@@ -252,7 +266,7 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
       if (request.maskBase64) params.mask = `data:image/png;base64,${request.maskBase64}`;
       if (request.quality) params.quality = request.quality;
 
-      const response = await client.images.edit(params);
+      const response = await client.images.edit(params, { signal: request.signal });
       const images = extractGeneratedImages(response);
       if (images.length === 0) {
         throw new AiError("provider_unavailable", "image edit response contained no images");

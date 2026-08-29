@@ -1,0 +1,86 @@
+{
+  "at": "2026-08-29T08:20:51.201Z",
+  "provider": "mock",
+  "fontsAvailable": true,
+  "cases": [
+    {
+      "topic": "三分钟看懂量子纠缠",
+      "category": "中文知识主题",
+      "mode": "native",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 259
+    },
+    {
+      "topic": "《置身事内》：为什么地方政府像公司",
+      "category": "图书推荐",
+      "mode": "deterministic",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 766
+    },
+    {
+      "topic": "保温杯怎么选：四个关键参数",
+      "category": "商品（缺价格，禁止编造）",
+      "mode": "native",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 289
+    },
+    {
+      "topic": "什么是复利",
+      "category": "概念解释",
+      "mode": "native",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 207
+    },
+    {
+      "topic": "睡眠的三个常见误区",
+      "category": "生活科普",
+      "mode": "deterministic",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 465
+    },
+    {
+      "topic": "咖啡因是如何起作用的",
+      "category": "机制科普",
+      "mode": "native",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 237
+    }
+  ],
+  "metrics": {
+    "structuredParseSuccessRate": 1,
+    "pageRenderSuccessRate": 1,
+    "runCompletionRate": 1,
+    "totalRuns": 6,
+    "totalPages": 24,
+    "avgRunDurationMs": 371
+  },
+  "thresholds": {
+    "structuredParseSuccessRate": 0.99,
+    "pageRenderSuccessRate": 0.995,
+    "runCompletionRate": 1
+  }
+}

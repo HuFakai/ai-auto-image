@@ -110,7 +110,26 @@ export function registerKnowledgeCardPipeline(runner: JobRunner, deps: WorkflowD
     const input = JSON.parse(run.inputJson) as CreateRunInput;
     deps.runRepo.updateStatus(run.id, "running");
 
-    const existingNodes = deps.runRepo.listNodeRuns(run.id) as unknown as NodeRowLike[];
+    try {
+      await executeKnowledgeCardRun(deps, ctx, run.id, input);
+    } catch (error) {
+      // 中途取消发生在节点内部时，保证 Run 不停留在 running
+      if (ctx.signal.aborted) {
+        deps.runRepo.updateStatus(run.id, "cancelled");
+      }
+      throw error;
+    }
+  });
+}
+
+/** 流水线主体（供外层取消兜底包裹） */
+async function executeKnowledgeCardRun(
+  deps: WorkflowDeps,
+  ctx: { signal: AbortSignal; onProgress: () => void },
+  runId: string,
+  input: CreateRunInput,
+): Promise<void> {
+  const existingNodes = deps.runRepo.listNodeRuns(runId) as unknown as NodeRowLike[];
     const providerMaxValues = deps.imageRoutes
       .map((route) => route.config.imageConcurrencyMax)
       .filter((value): value is number => typeof value === "number");
@@ -122,7 +141,7 @@ export function registerKnowledgeCardPipeline(runner: JobRunner, deps: WorkflowD
 
     /* parse-input */
     if (!succeededNode(existingNodes, "parse-input")) {
-      const node = deps.runRepo.createNodeRun(run.id, "parse-input");
+      const node = deps.runRepo.createNodeRun(runId, "parse-input");
       deps.runRepo.startNode(node.id);
       deps.runRepo.succeedNode(node.id, {
         outputRef: JSON.stringify({
@@ -135,7 +154,7 @@ export function registerKnowledgeCardPipeline(runner: JobRunner, deps: WorkflowD
 
     /* RunSnapshot：冻结模式、并发、路由与模板版本 */
     deps.runRepo.setSnapshot(
-      run.id,
+      runId,
       JSON.stringify({
         textRenderingMode: input.textRenderingMode,
         concurrency: {
@@ -154,16 +173,16 @@ export function registerKnowledgeCardPipeline(runner: JobRunner, deps: WorkflowD
     );
 
     /* generate-brief */
-    const brief = await runStructuredNode(deps, ctx, run.id, existingNodes, {
+    const brief = await runStructuredNode(deps, ctx, runId, existingNodes, {
       nodeName: "generate-brief",
       schemaName: "ContentBrief",
       schema: ContentBriefSchema,
       buildPrompt: () => buildBriefPrompt(input),
     });
-    throwIfAborted(deps, run.id, ctx.signal);
+    throwIfAborted(deps, runId, ctx.signal);
 
     /* generate-storyboard */
-    const storyboard = await runStructuredNode(deps, ctx, run.id, existingNodes, {
+    const storyboard = await runStructuredNode(deps, ctx, runId, existingNodes, {
       nodeName: "generate-storyboard",
       schemaName: "Storyboard",
       schema: StoryboardSchema,
@@ -173,42 +192,41 @@ export function registerKnowledgeCardPipeline(runner: JobRunner, deps: WorkflowD
     storyboard.slides.forEach((slide, index) => {
       slide.index = index;
     });
-    throwIfAborted(deps, run.id, ctx.signal);
+    throwIfAborted(deps, runId, ctx.signal);
     const pageCount = storyboard.slides.length;
 
     /* generate-images：按有效并发并行；已成功页面跳过 */
     const failedPages: number[] = [];
     const pageTasks = storyboard.slides.map((slide) => async () => {
-      if (succeededPageNode(deps.runRepo.listNodeRuns(run.id) as unknown as NodeRowLike[], slide.index)) {
+      if (succeededPageNode(deps.runRepo.listNodeRuns(runId) as unknown as NodeRowLike[], slide.index)) {
         return;
       }
-      await generatePage(deps, ctx, run.id, input, storyboard, slide, pageCount, effective, failedPages);
+      await generatePage(deps, ctx, runId, input, storyboard, slide, pageCount, effective, failedPages);
     });
     await runPool(pageTasks, effective);
-    throwIfAborted(deps, run.id, ctx.signal);
+    throwIfAborted(deps, runId, ctx.signal);
 
     /* render-slides：仅确定性模式 */
     if (input.textRenderingMode === "deterministic") {
-      await renderAllSlides(deps, run.id, input, storyboard, pageCount);
+      await renderAllSlides(deps, runId, input, storyboard, pageCount);
     }
 
     /* package-export */
-    const totals = writeExportManifest(deps, run.id, input, brief, storyboard, failedPages);
+    const totals = writeExportManifest(deps, runId, input, brief, storyboard, failedPages);
 
     if (failedPages.length > 0) {
       const summary = `pages failed: ${failedPages.join(", ")}`;
-      deps.runRepo.updateStatus(run.id, "failed", { errorSummary: summary });
+      deps.runRepo.updateStatus(runId, "failed", { errorSummary: summary });
       throw new Error(summary);
     }
-    deps.runRepo.updateStatus(run.id, "succeeded");
+    deps.runRepo.updateStatus(runId, "succeeded");
     logger.info("knowledge card run completed", {
-      runId: run.id,
+      runId: runId,
       pages: pageCount,
       mode: input.textRenderingMode,
       images: totals.images,
       costUsd: totals.costUsd,
     });
-  });
 }
 
 async function generatePage(
@@ -245,6 +263,7 @@ async function generatePage(
             prompt: plan.imagePrompt,
             aspectRatio: input.aspectRatio,
             n: 1,
+            signal: ctx.signal,
           });
           usageAcc = mergeUsageInto(usageAcc, images[0]?.usage);
           return images;
@@ -515,6 +534,7 @@ async function runStructuredNode<T>(
           prompt: spec.buildPrompt(),
           schemaName: spec.schemaName,
           schema: spec.schema,
+          signal: ctx.signal,
           onUsage: (usage) => {
             usageAcc = mergeUsageInto(usageAcc, usage);
           },
