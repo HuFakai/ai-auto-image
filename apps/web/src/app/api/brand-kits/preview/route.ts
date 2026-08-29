@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { renderSlideDeterministic, themeById } from "@aai/render-engine";
@@ -80,12 +81,23 @@ export async function POST(request: Request) {
   }
   try {
     // 确保运行时就绪（含字体校验）；渲染本身不调用任何模型
-    await getRuntime();
+    const runtime = await getRuntime();
+    // Logo 读取失败时容忍并忽略（预览样张仍渲染，只是不带 Logo）
+    let logoBase64: string | undefined;
+    if (parsed.data.logoAssetId) {
+      try {
+        const logoAsset = await runtime.assetRepo.require(parsed.data.logoAssetId);
+        logoBase64 = fs.readFileSync(runtime.assetStore.resolve(logoAsset.filePath)).toString("base64");
+      } catch {
+        logoBase64 = undefined;
+      }
+    }
     const buffer = await renderSlideDeterministic({
       theme: themeById(parsed.data.themeId),
       aspectRatio: "3:4",
       slide: sampleSlide(),
       pageCount: 1,
+      logoBase64,
       brand: toBrandConfig(parsed.data),
     });
     return new NextResponse(buffer, {

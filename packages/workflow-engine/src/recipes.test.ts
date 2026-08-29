@@ -111,6 +111,34 @@ describe("recipe storyboard prompt branches", () => {
     expect(p).toContain("生成 4–6 页");
     expect(p).not.toContain("内容类型：");
   });
+
+  it("knowledge_cards + sourceText 注入 6–10 页密度规则", () => {
+    const p = storyboardPrompt({ topic: "量子纠缠", sourceText: "要点一。要点二。" });
+    expect(p).toContain("6–10 页");
+    expect(p).toContain("参考资料正文（拆页依据");
+  });
+
+  it("quote_cards + sourceText 不注入 DENSITY_RULES（避免与 5–7 页冲突）", () => {
+    const p = storyboardPrompt({ recipe: "quote_cards", topic: "保持专注", sourceText: "金句一" });
+    expect(p).toContain("5–7 页");
+    expect(p).not.toContain("6–10 页");
+  });
+
+  it("product_showcase + sourceText 不注入 DENSITY_RULES（保持 5–7 页指令）", () => {
+    const p = storyboardPrompt({ recipe: "product_showcase", topic: "咖啡机", sourceText: "资料" });
+    expect(p).toContain("5–7 页");
+    expect(p).not.toContain("6–10 页");
+  });
+
+  it("article_digest + sourceText 只注入自身的 3–8 页规则，不重复注入密度规则", () => {
+    const p = storyboardPrompt({
+      recipe: "article_digest",
+      topic: "复利思维",
+      sourceText: "第一，复利需要时间。第二，收益率不是全部。",
+    });
+    expect(p).toContain("3–8 页");
+    expect(p).not.toContain("6–10 页");
+  });
 });
 
 describe("recipe brief prompt branches", () => {

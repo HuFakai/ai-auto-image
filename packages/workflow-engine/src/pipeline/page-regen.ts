@@ -137,12 +137,14 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
         const visualRel = path.join("runs", ctx.runId, "pages", `page-${payload.pageIndex}-v${version}-visual.png`);
         const visualSaved = await deps.assetStore.saveGeneratedImage(image, visualRel);
         const visualBase64 = fs.readFileSync(visualSaved.filePath).toString("base64");
+        const logoBase64 = await readLogoBase64(deps, input);
         const composite = await renderSlideDeterministic({
           theme: themeById(input.brandKit?.themeId),
           aspectRatio: input.aspectRatio,
           slide,
           pageCount: storyboard.slides.length,
           visualImageBase64: visualBase64,
+          logoBase64,
           brand: input.brandKit,
         });
         await finishRegen(deps, ctx, {
@@ -218,6 +220,18 @@ async function overlayGeneratedImage(
     return { ...image, base64: overlaid.toString("base64") };
   } catch {
     return image;
+  }
+}
+
+/** 读取 Brand Kit Logo（缺失或读取失败时返回 undefined，不阻塞渲染） */
+async function readLogoBase64(deps: PageRegenDeps, input: CreateRunInput): Promise<string | undefined> {
+  const logoAssetId = input.brandKit?.logoAssetId;
+  if (!logoAssetId) return undefined;
+  try {
+    const asset = await deps.assetRepo.require(logoAssetId);
+    return fs.readFileSync(deps.assetStore.resolve(asset.filePath)).toString("base64");
+  } catch {
+    return undefined;
   }
 }
 

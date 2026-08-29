@@ -140,7 +140,7 @@ export function Workbench({ initial, brandKits }: Props) {
           aspectRatio,
           textRenderingMode: TextRenderingModeSchema.parse(mode),
           requestedImageConcurrency: concurrency,
-          ...(recipe === "comic_story" && castDescription.trim()
+          ...(isComicRecipe && castDescription.trim()
             ? { castDescription: castDescription.trim().slice(0, 2000) }
             : {}),
           ...(recipe === "comparison_cards" && comparisonTarget.trim()
@@ -320,7 +320,7 @@ export function Workbench({ initial, brandKits }: Props) {
                   </div>
                 </div>
 
-                {recipe === "comic_story" && (
+                {isComicRecipe && (
                   <div>
                     <span className="field-label">主角设定（可选）</span>
                     <textarea

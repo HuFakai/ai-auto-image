@@ -55,7 +55,10 @@ export const workflowRuns = pgTable(
     startedAt: epochColumn("started_at"),
     finishedAt: epochColumn("finished_at"),
   },
-  (t) => [index("idx_workflow_runs_project").on(t.projectId)],
+  (t) => [
+    index("idx_workflow_runs_project").on(t.projectId),
+    index("idx_workflow_runs_user").on(t.userId, t.createdAt),
+  ],
 );
 
 /** 单节点执行记录：输入输出、尝试次数、Provider、成本与错误 */
@@ -319,7 +322,7 @@ export const users = pgTable(
   },
   (t) => [
     uniqueIndex("uq_users_username").on(t.username),
-    uniqueIndex("uq_users_provider_subject").on(t.providerSubject),
+    uniqueIndex("uq_users_provider_subject").on(t.authProvider, t.providerSubject),
   ],
 );
 

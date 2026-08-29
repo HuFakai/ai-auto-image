@@ -95,6 +95,8 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
   // 页面状态以「每页当前资产」为准（返修后取最新版本，旧版本计入 Revision 链）
   const pageNodes = nodes.filter((n) => n.nodeName === "generate-images");
   const comicSlides = comicStoryboard?.pages ?? [];
+  // 该 Run 全量资产提前取一次（回调内内存查找，避免每页重复 listByRun）
+  const allAssets = await runtime.assetRepo.listByRun(runId);
   const pages: RunDetailPayload["pages"] = await Promise.all(
     (storyboard?.slides ?? comicSlides.map((comicPage) => ({
       index: comicPage.index,
@@ -112,8 +114,7 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
         if (typeof metadata.model === "string" && metadata.model) {
           pageModelFromMeta = metadata.model;
         } else {
-          const assets = await runtime.assetRepo.listByRun(runId);
-          const generatedAsset = assets
+          const generatedAsset = allAssets
             .filter((a) => a.pageIndex === slide.index && a.kind === "generated")
             .sort((a, b) => b.createdAt - a.createdAt)[0];
           const genMeta = generatedAsset?.metadataJson
@@ -162,7 +163,7 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
     }),
   );
 
-  const job = (await runtime.jobRepo.list(200)).find((j) => j.runId === runId);
+  const job = await runtime.jobRepo.findByRunId(runId);
   const totals = await runtime.runRepo.runTotals(runId);
 
   // 生成信息：输入 + 冻结快照 + 漫画定妆图

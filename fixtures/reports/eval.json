@@ -1,5 +1,5 @@
 {
-  "at": "2026-08-29T19:40:29.686Z",
+  "at": "2026-08-29T20:57:17.883Z",
   "provider": "mock",
   "fontsAvailable": true,
   "cases": [
@@ -7,98 +7,154 @@
       "topic": "三分钟看懂量子纠缠",
       "category": "中文知识主题",
       "mode": "native",
+      "recipe": "knowledge_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 360
+      "durationMs": 456
     },
     {
       "topic": "《置身事内》：为什么地方政府像公司",
       "category": "图书推荐",
       "mode": "deterministic",
+      "recipe": "knowledge_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 777
+      "durationMs": 938
     },
     {
       "topic": "保温杯怎么选：四个关键参数",
       "category": "商品（缺价格，禁止编造）",
       "mode": "native",
+      "recipe": "knowledge_cards",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 402
+    },
+    {
+      "topic": "什么是复利",
+      "category": "概念解释",
+      "mode": "native",
+      "recipe": "knowledge_cards",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 311
+    },
+    {
+      "topic": "睡眠的三个常见误区",
+      "category": "生活科普",
+      "mode": "deterministic",
+      "recipe": "knowledge_cards",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 678
+    },
+    {
+      "topic": "咖啡因是如何起作用的",
+      "category": "机制科普",
+      "mode": "native",
+      "recipe": "knowledge_cards",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 354
+    },
+    {
+      "topic": "保持专注的三句话",
+      "category": "金句卡",
+      "mode": "native",
+      "recipe": "quote_cards",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 403
+    },
+    {
+      "topic": "搬家必做的五件事",
+      "category": "清单卡",
+      "mode": "deterministic",
+      "recipe": "checklist_cards",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 1120
+    },
+    {
+      "topic": "骑自行车还是坐地铁通勤",
+      "category": "对比卡",
+      "mode": "deterministic",
+      "recipe": "comparison_cards",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 1548
+    },
+    {
+      "topic": "这款便携咖啡机值得买吗",
+      "category": "产品种草",
+      "mode": "native",
+      "recipe": "product_showcase",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 742
+    },
+    {
+      "topic": "《置身事内》为什么值得读",
+      "category": "图书推荐",
+      "mode": "deterministic",
+      "recipe": "book_recommendations",
+      "runStatus": "succeeded",
+      "briefOk": true,
+      "storyboardOk": true,
+      "pagesExpected": 4,
+      "pagesSucceeded": 4,
+      "durationMs": 801
+    },
+    {
+      "topic": "复利思维入门",
+      "category": "长文拆解",
+      "mode": "native",
+      "recipe": "article_digest",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
       "durationMs": 346
-    },
-    {
-      "topic": "什么是复利",
-      "category": "概念解释",
-      "mode": "native",
-      "runStatus": "succeeded",
-      "briefOk": true,
-      "storyboardOk": true,
-      "pagesExpected": 4,
-      "pagesSucceeded": 4,
-      "durationMs": 404
-    },
-    {
-      "topic": "睡眠的三个常见误区",
-      "category": "生活科普",
-      "mode": "deterministic",
-      "runStatus": "succeeded",
-      "briefOk": true,
-      "storyboardOk": true,
-      "pagesExpected": 4,
-      "pagesSucceeded": 4,
-      "durationMs": 670
-    },
-    {
-      "topic": "咖啡因是如何起作用的",
-      "category": "机制科普",
-      "mode": "native",
-      "runStatus": "succeeded",
-      "briefOk": true,
-      "storyboardOk": true,
-      "pagesExpected": 4,
-      "pagesSucceeded": 4,
-      "durationMs": 295
-    },
-    {
-      "topic": "保持专注的三句话",
-      "category": "金句卡",
-      "mode": "native",
-      "runStatus": "succeeded",
-      "briefOk": true,
-      "storyboardOk": true,
-      "pagesExpected": 4,
-      "pagesSucceeded": 4,
-      "durationMs": 378
-    },
-    {
-      "topic": "搬家必做的五件事",
-      "category": "清单卡",
-      "mode": "deterministic",
-      "runStatus": "succeeded",
-      "briefOk": true,
-      "storyboardOk": true,
-      "pagesExpected": 4,
-      "pagesSucceeded": 4,
-      "durationMs": 619
     }
   ],
   "metrics": {
     "structuredParseSuccessRate": 1,
     "pageRenderSuccessRate": 1,
     "runCompletionRate": 1,
-    "totalRuns": 8,
-    "totalPages": 32,
-    "avgRunDurationMs": 481
+    "totalRuns": 12,
+    "totalPages": 48,
+    "avgRunDurationMs": 675
   },
   "thresholds": {
     "structuredParseSuccessRate": 0.99,

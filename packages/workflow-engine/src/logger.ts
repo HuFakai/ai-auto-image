@@ -9,11 +9,14 @@ export function setLogLevel(level: Level): void {
 }
 
 /** 结构化 JSON 日志：一行一条，字段直接可查询；禁止打印密钥与完整请求头 */
+const SENSITIVE_KEY_PATTERN =
+  /token|secret|password|passwd|authorization|cookie|api[_-]?key|(^|[^a-z])key([^a-z]|$)/i;
+
 export function log(level: Level, message: string, fields: Record<string, unknown> = {}): void {
   if (LEVEL_ORDER[level] < LEVEL_ORDER[minLevel]) return;
   const entry = { ts: new Date().toISOString(), level, msg: message, ...fields };
   const line = JSON.stringify(entry, (_key, value) =>
-    typeof value === "string" && /api[_-]?key|cookie|authorization/i.test(_key)
+    typeof value === "string" && SENSITIVE_KEY_PATTERN.test(_key)
       ? "[REDACTED]"
       : value,
   );

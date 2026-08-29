@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { JOB_TERMINAL_STATUSES, type JobStatus } from "@aai/shared-schemas";
 import type { JobRepo } from "@aai/storage";
 import { logger } from "./logger";
 
@@ -69,9 +70,13 @@ export class JobRunner {
   start(): void {
     if (!this.stopped) return;
     this.stopped = false;
-    void this.recoverOrphans();
-    this.timer = setInterval(() => void this.tick(), this.pollIntervalMs);
-    this.watchdogTimer = setInterval(() => void this.runWatchdog(), this.watchdogIntervalMs);
+    // 先完成孤儿回收再启动 tick/watchdog：若 fire-and-forget 且首个 tick 早于
+    // 回收完成，可能先 claim 到同批 running（占租约）后又被 recover 释放，造成双执行。
+    void this.recoverOrphans().then(() => {
+      if (this.stopped) return;
+      this.timer = setInterval(() => void this.tick(), this.pollIntervalMs);
+      this.watchdogTimer = setInterval(() => void this.runWatchdog(), this.watchdogIntervalMs);
+    });
     logger.info("job runner started", { holder: this.holder, maxConcurrent: this.maxConcurrent });
   }
 
@@ -89,20 +94,17 @@ export class JobRunner {
     logger.info("job runner stopped", { holder: this.holder });
   }
 
-  /** 阶段 0 单实例：启动时把遗留 running 释放回队列，claim 时计入 recoveries */
+  /** 阶段 0 单实例：启动时把遗留 running 释放回队列（JobRepo 单条原子 UPDATE），claim 时计入 recoveries */
   async recoverOrphans(): Promise<number> {
-    const orphans = await this.jobRepo.listByStatus(["running"]);
-    let count = 0;
-    for (const job of orphans) {
-      await this.jobRepo.updateStatus(job.id, "queued");
-      await this.jobRepo.appendEvent(job.id, "orphan_recovered", "released stale running lease on boot");
-      count += 1;
-    }
+    const count = await this.jobRepo.releaseStaleRunning();
     if (count > 0) logger.info("recovered orphan jobs", { count });
     return count;
   }
 
   async cancel(jobId: string): Promise<boolean> {
+    const existing = await this.jobRepo.require(jobId);
+    // 已终态：不写事件、不 abort，直接返回 false（调用方据此保持 run 终态不覆盖）
+    if (JOB_TERMINAL_STATUSES.has(existing.status as JobStatus)) return false;
     const entry = this.running.get(jobId);
     const job = await this.jobRepo.updateStatus(jobId, "cancelled");
     await this.jobRepo.appendEvent(jobId, "cancelled", "by user");
@@ -172,6 +174,15 @@ export class JobRunner {
       const message = error instanceof Error ? error.message : String(error);
       // 用户取消：终态已在 cancel() 中写入，这里不覆盖
       if (controller.signal.aborted && job.status === "cancelled") return;
+      // watchdog（failStalled）已回收：看门狗已写 retry_waiting/failed 与 stalled 事件，
+      // 这里不再重复写状态/事件，避免覆盖 lastError（stalled 语义保持）。
+      if (
+        (job.status === "retry_waiting" || job.status === "failed") &&
+        job.lastError?.startsWith("stalled")
+      ) {
+        logger.warn("job already recycled by watchdog; skipping state write", { jobId });
+        return;
+      }
       const retry = job.attempts < job.maxAttempts;
       await this.jobRepo.updateStatus(jobId, retry ? "retry_waiting" : "failed", { lastError: message.slice(0, 500) });
       await this.jobRepo.appendEvent(jobId, retry ? "retry_scheduled" : "failed", message.slice(0, 500));

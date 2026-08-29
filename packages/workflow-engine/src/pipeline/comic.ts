@@ -49,7 +49,7 @@ function check(name: string, status: "pass" | "warn" | "fail", detail: string) {
 /** 一致性规则检查：对白归属、页数、出场角色必须在角色锚点中 */
 export function runComicConsistencyChecks(
   storyboard: ComicStoryboard,
-  expectedPages: [number, number] = [3, 8],
+  expectedPages: [number, number] = [3, 6],
 ): Array<{ name: string; status: "pass" | "warn" | "fail"; detail: string }> {
   const checks = [];
   const castNames = new Set(storyboard.cast.map((member) => member.name));
@@ -280,7 +280,7 @@ async function executeComicRun(
     storyboard.pages.forEach((page, index) => {
       page.index = index;
     });
-    checks = runComicConsistencyChecks(storyboard, input.recipe === "strip_comic" ? [1, 2] : [3, 8]);
+    checks = runComicConsistencyChecks(storyboard, input.recipe === "strip_comic" ? [1, 2] : [3, 6]);
     await deps.runRepo.setNodeOutput(result.nodeId, JSON.stringify({ value: storyboard, checks }));
     const failed = checks.filter((c) => c.status === "fail");
     if (failed.length > 0) {
@@ -311,18 +311,32 @@ async function executeComicRun(
   await runPool(tasks, effectiveConcurrency(deps, input));
   await throwIfAborted(deps, runId, ctx.signal);
 
-  /* render-comic-bubbles：对白气泡程序渲染（确定性模式或统一渲染页脚） */
-  const bubblesDone = (await deps.runRepo.listNodeRuns(runId)).find(
+  /* render-comic-bubbles：对白气泡程序渲染（确定性模式或统一渲染页脚）。
+   *
+   * 幂等语义（逐页级）：以「该页是否存在 kind='composite' 且未 superseded 的资产」为准。
+   * 不按「节点已 succeeded」整段跳过——某页在重试中可能重新生成了裸 generated
+   * （无气泡合成），必须为其补合成，否则该页会缺对白气泡。
+   * 快速路径：节点已 succeeded 且全部页面都有 composite 时直接跳过（不重复 createNodeRun）。
+   * succeedNode 只在本次实际执行了合成时调用；若节点已 succeeded 但某页缺 composite，
+   * 复用现有节点 id 补合成（setNodeOutput 记录），不再新建节点。 */
+  const bubblesNode = (await deps.runRepo.listNodeRuns(runId)).find(
     (n) => n.nodeName === "render-comic-bubbles" && n.status === "succeeded",
   );
-  if (!bubblesDone) {
-    const bubblesNode = await deps.runRepo.createNodeRun(runId, "render-comic-bubbles");
-    await deps.runRepo.startNode(bubblesNode.id);
+  const rowsByRun = await deps.assetRepo.listByRun(runId);
+  const pageHasComposite = (pageIndex: number) =>
+    rowsByRun.some((row) => row.pageIndex === pageIndex && row.kind === "composite" && row.supersededAt === null);
+  const pagesNeedingComposite = storyboard.pages.filter((page) => !pageHasComposite(page.index));
+
+  if (!(bubblesNode && pagesNeedingComposite.length === 0)) {
+    // 需要补合成：复用已 succeeded 节点（不重复创建）；否则新建节点
+    const node = bubblesNode ?? (await deps.runRepo.createNodeRun(runId, "render-comic-bubbles"));
+    const created = !bubblesNode;
+    if (created) await deps.runRepo.startNode(node.id);
     try {
-      for (const page of storyboard.pages) {
+      for (const page of pagesNeedingComposite) {
         const generated = await deps.assetRepo.latestForPage(runId, page.index);
         if (!generated) continue;
-        if (generated.kind === "composite") continue; // 已合成
+        if (generated.kind === "composite") continue; // 该页已合成，幂等跳过
         const panelBase64 = fs.readFileSync(deps.assetStore.resolve(generated.filePath)).toString("base64");
         const buffer = await renderComicSlide({
           theme: themeById(input.brandKit?.themeId),
@@ -343,7 +357,7 @@ async function executeComicRun(
         await deps.assetRepo.supersedePage(runId, page.index);
         await deps.assetRepo.create({
           runId,
-          nodeRunId: bubblesNode.id,
+          nodeRunId: node.id,
           pageIndex: page.index,
           kind: "composite",
           filePath: saved.filePath,
@@ -357,10 +371,17 @@ async function executeComicRun(
           }),
         });
       }
-      await deps.runRepo.succeedNode(bubblesNode.id, { outputRef: JSON.stringify({ templateVersion: "comic-bubbles@1" }) });
+      if (created) {
+        await deps.runRepo.succeedNode(node.id, { outputRef: JSON.stringify({ templateVersion: "comic-bubbles@1" }) });
+      } else {
+        // 复用已 succeeded 节点：仅更新 output 记录本次补合成，不改状态
+        await deps.runRepo.setNodeOutput(node.id, JSON.stringify({ templateVersion: "comic-bubbles@1" }));
+      }
     } catch (error) {
       const aiError = toAiError(error);
-      await deps.runRepo.failNode(bubblesNode.id, aiError.category, aiError.message.slice(0, 400));
+      if (created) {
+        await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
+      }
       throw error;
     }
   }

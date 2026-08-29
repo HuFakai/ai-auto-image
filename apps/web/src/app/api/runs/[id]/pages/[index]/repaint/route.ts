@@ -100,11 +100,18 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "没有可用图生图路由" }, { status: 409 });
   }
 
-  const images = await route.image.edit!({
-    prompt: `${parsed.data.prompt}。只修改 Mask 指示的区域，区域外内容必须保持原样。`,
-    aspectRatio: input.aspectRatio,
-    baseImage: { base64: sourceBuffer.toString("base64") },
-    maskBase64: mask.toString("base64"),
+  // 与管线一致：图片编辑调用必须套 imageApiSemaphore 并发信号量（防止绕过并发上限），
+  // 并加 120s 超时与请求取消信号组合（Node ≥ 20 支持 AbortSignal.any）
+  const images = await runtime.imageApiSemaphore.run(async () => {
+    const timeoutSignal = AbortSignal.timeout(120_000);
+    const signal = request.signal ? AbortSignal.any([request.signal, timeoutSignal]) : timeoutSignal;
+    return route.image.edit!({
+      prompt: `${parsed.data.prompt}。只修改 Mask 指示的区域，区域外内容必须保持原样。`,
+      aspectRatio: input.aspectRatio,
+      baseImage: { base64: sourceBuffer.toString("base64") },
+      maskBase64: mask.toString("base64"),
+      signal,
+    });
   });
   const image = images[0]!;
 

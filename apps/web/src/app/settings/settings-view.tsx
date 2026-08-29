@@ -556,27 +556,47 @@ function KitForm({
       .filter(Boolean)
       .slice(0, 10);
 
-  /** 组装完整 Kit 配置（预览与保存共用；空字段不提交，服务端按默认处理） */
-  const kitPayload = () => {
-    const paletteEntries = Object.entries(palette).filter((entry) => entry[1]?.trim());
-    return {
-      name,
-      themeId,
-      styleKeywords: splitKeywords(styleKeywords),
-      negativeKeywords: splitKeywords(negativeKeywords),
-      ...(logoAssetId ? { logoAssetId } : {}),
-      ...(brandName.trim() ? { brandName: brandName.trim() } : {}),
-      ...(slogan.trim() ? { slogan: slogan.trim() } : {}),
-      ...(footerSignature.trim() ? { footerSignature: footerSignature.trim() } : {}),
-      ...(watermarkText.trim() ? { watermarkText: watermarkText.trim() } : {}),
-      watermarkPosition,
-      watermarkOpacity,
-      titleFont,
-      coverLayout,
-      ...(paletteEntries.length > 0
-        ? { paletteJson: Object.fromEntries(paletteEntries) }
-        : {}),
-    };
+  /** 组装完整 Kit 配置（预览与保存共用；空字符串字段发 null，服务端据此清除，而不是省略） */
+  const kitPayload = () => ({
+    name,
+    themeId,
+    styleKeywords: splitKeywords(styleKeywords),
+    negativeKeywords: splitKeywords(negativeKeywords),
+    logoAssetId: logoAssetId ?? null,
+    brandName: brandName.trim() || null,
+    slogan: slogan.trim() || null,
+    footerSignature: footerSignature.trim() || null,
+    watermarkText: watermarkText.trim() || null,
+    watermarkPosition,
+    watermarkOpacity,
+    titleFont,
+    coverLayout,
+    paletteJson: {
+      primary: palette.primary?.trim() || null,
+      accent: palette.accent?.trim() || null,
+      background: palette.background?.trim() || null,
+      ink: palette.ink?.trim() || null,
+    },
+  });
+
+  /** 预览入参：显式 null（清除语义）在样张中与省略等价，剥离后发送（预览接口按可选字段处理） */
+  const previewPayload = () => {
+    const payload = kitPayload();
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(payload)) {
+      if (value === null || value === undefined) continue;
+      if (key === "paletteJson") {
+        const kept = Object.fromEntries(
+          Object.entries(value as Record<string, string | null | undefined>).filter(
+            ([, color]) => Boolean(color?.trim()),
+          ),
+        );
+        if (Object.keys(kept).length > 0) out[key] = kept;
+        continue;
+      }
+      out[key] = value;
+    }
+    return out;
   };
 
   async function runPreview() {
@@ -586,7 +606,7 @@ function KitForm({
       const response = await fetch("/api/brand-kits/preview", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(kitPayload()),
+        body: JSON.stringify(previewPayload()),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { error?: string };

@@ -47,7 +47,7 @@ export const RunStatusSchema = z.enum([
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
 /** Job 类型：阶段 0 只有一条 Spike 流水线 */
-export const JobKindSchema = z.enum(["knowledge_card_run"]);
+export const JobKindSchema = z.enum(["knowledge_card_run", "comic_story_run", "page_regen"]);
 export type JobKind = z.infer<typeof JobKindSchema>;
 
 /** Spike DAG 节点名（docs/phases/00 §7） */

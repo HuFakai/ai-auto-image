@@ -11,7 +11,8 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       provider: runtime.config.providerLabel,
-      database: process.env.DATABASE_URL ? new URL(process.env.DATABASE_URL).host : "pglite(内存)",
+      // 布尔语义字符串，不回显数据库 host（公网反代下防信息泄漏）
+      database: "ok",
       concurrency: {
         default: runtime.config.defaultConcurrency,
         serverMax: runtime.config.serverMaxConcurrency,
@@ -20,8 +21,10 @@ export async function GET() {
       time: new Date().toISOString(),
     });
   } catch (error) {
+    // 失败不回显内部错误信息（防信息泄漏），细节只进服务端日志
+    console.error("health check failed:", error);
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : String(error) },
+      { ok: false, database: "error", error: "unhealthy" },
       { status: 500 },
     );
   }

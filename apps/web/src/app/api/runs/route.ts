@@ -4,7 +4,7 @@ import { CreateRunInputSchema } from "@aai/shared-schemas";
 import { brandKitConfigFromRow } from "@/server/brand-kit-views";
 import { getRuntime } from "@/server/runtime";
 import { listRunItems } from "@/server/run-views";
-import { requireApiUser } from "@/server/auth";
+import { requireApiUser, userActionLimit } from "@/server/auth";
 import type { RunListItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +12,14 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   const user = await requireApiUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  // 创建 run 会产生真实推理/图片费用：每用户每分钟最多 10 次
+  if (!userActionLimit(`create-run:${user.id}`, 10, 60_000)) {
+    return NextResponse.json(
+      { error: "操作过于频繁，请稍后再试" },
+      { status: 429, headers: { "Retry-After": "60" } },
+    );
+  }
 
   let body: Record<string, unknown>;
   try {

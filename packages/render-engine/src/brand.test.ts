@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import sharp from "sharp";
 import { knowledgeCardTheme } from "./theme";
-import { fontsPresent } from "./fonts";
-import { renderSlideDeterministic } from "./render";
-import { applyBrandOverlays } from "./brand-overlays";
+import { fontsPresent, serifAvailable } from "./fonts";
+import { buildSlideTree, renderSlideDeterministic } from "./render";
+import { applyBrandOverlays, shrinkTextToFit } from "./brand-overlays";
 import type { StoryboardSlide } from "@aai/shared-schemas";
 
 const slide: StoryboardSlide = {
@@ -62,6 +62,37 @@ describe("applyBrandOverlays", () => {
     expect(meta.format).toBe("png");
     expect(meta.width).toBe(200);
     expect(meta.height).toBe(300);
+  });
+
+  it("renders valid PNGs for very long signatures and corner watermarks (no overflow throw)", async () => {
+    const base = await sampleImage();
+    const longSignature = await applyBrandOverlays(base, {
+      footerSignature: "@非常非常非常非常非常非常非常非常非常长的账号签名",
+      watermarkText: "极其极其极其极其极其极其极其极其极其极其长的水印文字",
+      watermarkPosition: "corner",
+    });
+    const meta = await sharp(longSignature).metadata();
+    expect(meta.format).toBe("png");
+    expect(meta.width).toBe(200);
+    expect(meta.height).toBe(300);
+  });
+});
+
+describe("shrinkTextToFit", () => {
+  it("keeps short text unchanged at start size", () => {
+    expect(shrinkTextToFit("短签名", 32, 12, 1000)).toEqual({ text: "短签名", fontSize: 32 });
+  });
+
+  it("reduces font size until it fits without truncating", () => {
+    const fit = shrinkTextToFit("超".repeat(40), 32, 12, 640);
+    expect(fit.text).toBe("超".repeat(40));
+    expect(fit.fontSize).toBeLessThan(32);
+  });
+
+  it("truncates with ellipsis when the text cannot fit at minimum size", () => {
+    const fit = shrinkTextToFit("超".repeat(200), 32, 12, 300);
+    expect(fit.text.endsWith("…")).toBe(true);
+    expect(fit.text.length).toBeLessThan(200);
   });
 });
 
@@ -182,6 +213,34 @@ describe.skipIf(!fontsPresent())("brand render injection (needs fonts)", () => {
       brand: { titleFont: "sans" },
     });
     expect(serif.equals(serifAgain)).toBe(true);
-    expect(serif.equals(sans)).toBe(false);
+    // 仅当 Serif 字体实际可用时才断言 serif 与 sans 渲染不同（缺失时 serif 回退 Sans）
+    if (serifAvailable()) {
+      expect(serif.equals(sans)).toBe(false);
+    }
+  });
+
+  it("titleFont 只作用于 headline 元素，封面正文保持默认字体", () => {
+    // 遍历布局树收集所有 fontFamily；big-center 下只有 headline 带 titleFont
+    const collect = (node: unknown, acc: string[] = []): string[] => {
+      if (!node || typeof node !== "object") return acc;
+      const obj = node as { type?: unknown; props?: { style?: Record<string, unknown>; children?: unknown } };
+      const style = obj.props?.style;
+      if (style && typeof style.fontFamily === "string") acc.push(style.fontFamily);
+      if (Array.isArray(obj.props?.children)) {
+        for (const child of obj.props.children) collect(child, acc);
+      } else if (obj.props?.children && typeof obj.props.children === "object") {
+        collect(obj.props.children, acc);
+      }
+      return acc;
+    };
+    const tree = buildSlideTree({
+      theme: knowledgeCardTheme,
+      aspectRatio: "3:4",
+      slide,
+      pageCount: 1,
+      brand: { titleFont: "serif", coverLayout: "big-center" },
+    });
+    const expected = serifAvailable() ? "Noto Serif SC" : "Noto Sans SC";
+    expect(collect(tree)).toEqual([expected]);
   });
 });

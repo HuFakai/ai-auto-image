@@ -123,11 +123,11 @@ export function themeById(themeId: string | undefined): CardTheme {
 /**
  * 应用 Brand Kit 色板覆盖（全部可选；未命中任何键时原样返回）。
  * 映射：primary→accent（主品牌色，用于强调），accent→muted（次要文字），background→background，ink→ink。
- * 纯函数：不修改传入主题。
+ * 纯函数：不修改传入主题。null 键与 undefined 等价（视为未提供）。
  */
 export function applyPaletteOverrides(
   theme: CardTheme,
-  palette: PaletteOverrides | undefined,
+  palette: PaletteOverrides | null | undefined,
 ): CardTheme {
   if (!palette) return theme;
   const colors = { ...theme.colors };

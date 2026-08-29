@@ -23,7 +23,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const url = assertPublicHttpUrl(parsed.data.url);
+    const url = await assertPublicHttpUrl(parsed.data.url);
     const result = await fetchReadable(url);
     return NextResponse.json(result);
   } catch (error) {

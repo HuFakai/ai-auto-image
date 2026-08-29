@@ -118,6 +118,11 @@ declare global {
   var __aaiRuntimePromise: Promise<Runtime> | undefined;
 }
 
+/** 过期会话清理周期（低频，unref 不阻塞进程退出） */
+const SESSION_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/** 模块级句柄：buildRuntime 进程内仅执行一次，天然不会重复创建 */
+let sessionCleanupTimer: NodeJS.Timeout | null = null;
+
 export function getRuntime(): Promise<Runtime> {
   if (!globalThis.__aaiRuntimePromise) {
     // 初始化失败（如远程 PG 短暂不可达）时重置缓存，允许下一次调用重试
@@ -132,14 +137,38 @@ export function getRuntime(): Promise<Runtime> {
 async function initRuntime(): Promise<Runtime> {
   loadRootEnvFile();
   const dataDir = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
-  const sqlitePath = process.env.SQLITE_PATH ?? path.join(dataDir, "db", "app.db");
-  const assetsDir = process.env.ASSETS_DIR ?? path.join(dataDir, "assets");
-  const exportsDir = process.env.EXPORTS_DIR ?? path.join(dataDir, "exports");
-  const serverMaxConcurrency = envInt("IMAGE_GENERATION_CONCURRENCY_MAX", 4);
-  const defaultConcurrency = envInt("IMAGE_GENERATION_CONCURRENCY_DEFAULT", 1);
-  const postprocessMax = envInt("IMAGE_POSTPROCESS_CONCURRENCY_MAX", 1);
+  const paths: RuntimePaths = {
+    dataDir,
+    sqlitePath: process.env.SQLITE_PATH ?? path.join(dataDir, "db", "app.db"),
+    assetsDir: process.env.ASSETS_DIR ?? path.join(dataDir, "assets"),
+    exportsDir: process.env.EXPORTS_DIR ?? path.join(dataDir, "exports"),
+    serverMaxConcurrency: envInt("IMAGE_GENERATION_CONCURRENCY_MAX", 4),
+    defaultConcurrency: envInt("IMAGE_GENERATION_CONCURRENCY_DEFAULT", 1),
+    postprocessMax: envInt("IMAGE_POSTPROCESS_CONCURRENCY_MAX", 1),
+  };
 
   const db = await openDatabase({ url: process.env.DATABASE_URL, migrationsFolder: resolveMigrationsDir() });
+  try {
+    return await buildRuntime(db, paths);
+  } catch (error) {
+    // 初始化失败：关闭连接防泄漏，再向上抛（getRuntime 会重置缓存允许重试）
+    await db.close().catch(() => {});
+    throw error;
+  }
+}
+
+interface RuntimePaths {
+  dataDir: string;
+  sqlitePath: string;
+  assetsDir: string;
+  exportsDir: string;
+  serverMaxConcurrency: number;
+  defaultConcurrency: number;
+  postprocessMax: number;
+}
+
+async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runtime> {
+  const { dataDir, sqlitePath, assetsDir, exportsDir, serverMaxConcurrency, defaultConcurrency, postprocessMax } = paths;
   const channelService = new ChannelService(new ChannelRepo(db.db), dataDir);
   const brandKitRepo = new BrandKitRepo(db.db);
   const seededKits = await brandKitRepo.seedBuiltIns();
@@ -278,8 +307,14 @@ async function initRuntime(): Promise<Runtime> {
     set imageRoutes(routes) {
       pipelineDeps.imageRoutes = routes;
     },
+    // 与 knowledge-cards 一致：绑定 get/set 存取器，渠道热更新时读取最新值
+    get visualQuality() {
+      return pipelineDeps.visualQuality;
+    },
+    set visualQuality(model: PipelineDeps["visualQuality"]) {
+      pipelineDeps.visualQuality = model;
+    },
     imageApiSemaphore: runtime.imageApiSemaphore,
-    visualQuality: pipelineDeps.visualQuality,
     assetsDir,
     exportsDir,
     serverMaxConcurrency,
@@ -310,6 +345,24 @@ async function initRuntime(): Promise<Runtime> {
   });
 
   await runtime.refreshChannels();
+
+  // 低频清理过期会话（unref 不阻塞进程退出；模块级句柄，进程内仅创建一次）
+  if (!sessionCleanupTimer) {
+    sessionCleanupTimer = setInterval(() => {
+      runtime.sessionRepo.deleteExpired().catch((error) => {
+        console.log(
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            level: "error",
+            msg: "session cleanup failed",
+            error: String(error),
+          }),
+        );
+      });
+    }, SESSION_CLEANUP_INTERVAL_MS);
+    sessionCleanupTimer.unref();
+  }
+
   return runtime;
 }
 

@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
 import {
   JOB_TERMINAL_STATUSES,
   type JobStatus,
@@ -42,6 +42,13 @@ import {
 } from "./schema";
 
 const now = () => Date.now();
+
+/**
+ * 顶层运行（workflow_runs）终态：succeeded/cancelled 不可被后续状态覆盖。
+ * 注意：failed 不是终态 —— 两条流水线在页失败时都会把 run 置 failed，随后 Job 重试会
+ * 再流转回 running → succeeded（见 pipeline.test.ts「retries only the failed page」）。
+ */
+const RUN_TERMINAL_STATUSES = ["succeeded", "cancelled"] as const;
 
 /** 按主键/唯一键取单行：统一 limit(1) + rows[0]（SQLite 的 .get() 已随方言退役） */
 async function one<TRow>(query: Promise<TRow[]>): Promise<TRow | undefined> {
@@ -130,14 +137,27 @@ export class RunRepo {
     return filtered.orderBy(sql`${workflowRuns.createdAt} DESC`).limit(limit);
   }
 
-  async updateStatus(id: string, status: string, extra: { errorSummary?: string } = {}) {
+  /**
+   * 顶层运行状态流转；succeeded/cancelled 终态不可被覆盖（failed 是页失败→重试的瞬态，允许回流转）。
+   * 终态保护下沉到 UPDATE 条件（原子）：终态行 returning 为空，不产生任何写入。
+   * 返回是否实际写入了状态（终态保护 no-op 时为 false）。
+   */
+  async updateStatus(id: string, status: string, extra: { errorSummary?: string } = {}): Promise<boolean> {
     const patch: Record<string, unknown> = { status, updatedAt: now() };
-    if (status === "running" && !(await this.require(id)).startedAt) patch.startedAt = now();
+    if (status === "running") {
+      const existing = await this.require(id);
+      if (!existing.startedAt) patch.startedAt = now();
+    }
     if (status === "succeeded" || status === "failed" || status === "cancelled") {
       patch.finishedAt = now();
     }
     if (extra.errorSummary) patch.errorSummary = extra.errorSummary;
-    await this.client.update(workflowRuns).set(patch).where(eq(workflowRuns.id, id));
+    const updated = await this.client
+      .update(workflowRuns)
+      .set(patch)
+      .where(and(eq(workflowRuns.id, id), notInArray(workflowRuns.status, [...RUN_TERMINAL_STATUSES])))
+      .returning({ id: workflowRuns.id });
+    return updated.length > 0;
   }
 
   async setSnapshot(id: string, snapshotJson: string) {
@@ -595,8 +615,17 @@ export class JobRepo {
         lastProgressAt: ts,
         updatedAt: ts,
       })
-      // returning 保证乐观抢占：已被其他持有者改走时返回空
-      .where(and(eq(jobs.id, candidate.id), sql`${jobs.status} = ${candidate.status}`))
+      // returning 保证乐观抢占：已被其他持有者改走时返回空。
+      // running 候选（租约过期遗留）必须同时原子比较租约旧值：若另一 worker 已续租/抢占，
+      // 状态仍为 running（running→running 状态未变），仅靠 status 条件两个 worker 都会命中；
+      // 追加租约比较后，被抢先的行 returning 为空，避免同一任务双执行。
+      .where(
+        and(
+          eq(jobs.id, candidate.id),
+          sql`${jobs.status} = ${candidate.status}`,
+          recovered ? sql`(${jobs.leaseExpiresAt} IS NULL OR ${jobs.leaseExpiresAt} < ${ts})` : undefined,
+        ),
+      )
       .returning({ id: jobs.id });
     if (updated.length === 0) return null;
 
@@ -612,18 +641,19 @@ export class JobRepo {
       .where(and(eq(jobs.id, id), eq(jobs.leaseHolder, holder)));
   }
 
-  /** 状态迁移只允许合法转换，终态不可再变更 */
+  /** 状态迁移只允许合法转换，终态不可再变更（原子：终态判断下沉到 UPDATE 条件，防止竞态覆盖） */
   async updateStatus(id: string, status: JobStatus, extra: { lastError?: string } = {}) {
-    const job = await this.require(id);
-    if (JOB_TERMINAL_STATUSES.has(job.status as JobStatus)) return job;
-    await this.client
+    const updated = await this.client
       .update(jobs)
       .set({
         status,
-        lastError: extra.lastError ?? job.lastError,
+        ...(extra.lastError !== undefined ? { lastError: extra.lastError } : {}),
         updatedAt: now(),
       })
-      .where(eq(jobs.id, id));
+      .where(and(eq(jobs.id, id), notInArray(jobs.status, [...JOB_TERMINAL_STATUSES])))
+      .returning();
+    if (updated.length > 0) return updated[0]!;
+    // 终态：未写入，返回当前（不变）行
     return this.require(id);
   }
 
@@ -636,18 +666,28 @@ export class JobRepo {
       .where(
         sql`${jobs.status} = 'running' AND ${jobs.lastProgressAt} IS NOT NULL AND ${jobs.lastProgressAt} < ${ts - stallMs}`,
       );
+    // 仅更新仍处于停滞的行：SELECT 后任务可能已被心跳续租/抢占，避免误标活任务
+    const recycled: Array<(typeof stalled)[number]> = [];
     for (const job of stalled) {
-      await this.client
+      const updated = await this.client
         .update(jobs)
         .set({
           status: job.attempts < job.maxAttempts ? "retry_waiting" : "failed",
           lastError: "stalled: no progress within timeout",
           updatedAt: ts,
         })
-        .where(eq(jobs.id, job.id));
+        .where(
+          and(
+            eq(jobs.id, job.id),
+            sql`${jobs.status} = 'running' AND ${jobs.lastProgressAt} IS NOT NULL AND ${jobs.lastProgressAt} < ${ts - stallMs}`,
+          ),
+        )
+        .returning({ id: jobs.id });
+      if (updated.length === 0) continue;
       await this.appendEvent(job.id, "stalled", "no progress within timeout");
+      recycled.push(job);
     }
-    return stalled;
+    return recycled;
   }
 
   async list(limit = 100) {
@@ -656,6 +696,33 @@ export class JobRepo {
 
   async listByStatus(statuses: JobStatus[]) {
     return this.client.select().from(jobs).where(inArray(jobs.status, [...statuses]));
+  }
+
+  /** 启动回收：把全部 running（进程崩溃遗留）原子释放回 queued，并逐个写 orphan_recovered 事件 */
+  async releaseStaleRunning(): Promise<number> {
+    const ts = now();
+    const released = await this.client
+      .update(jobs)
+      .set({ status: "queued", updatedAt: ts })
+      .where(sql`${jobs.status} = 'running'`)
+      .returning({ id: jobs.id });
+    for (const row of released) {
+      await this.appendEvent(row.id, "orphan_recovered", "released stale running lease on boot");
+    }
+    return released.length;
+  }
+
+  /** 某 Run 最近一次创建的作业（供详情/取消复用，替代 list(200).find）；无则返回 null */
+  async findByRunId(runId: string): Promise<typeof jobs.$inferSelect | null> {
+    const row = await one(
+      this.client
+        .select()
+        .from(jobs)
+        .where(eq(jobs.runId, runId))
+        .orderBy(sql`${jobs.createdAt} DESC`)
+        .limit(1),
+    );
+    return row ?? null;
   }
 
   async appendEvent(jobId: string, event: string, detail?: string) {
@@ -912,16 +979,18 @@ export class BrandKitRepo {
     if (patch.themeId !== undefined) set.themeId = patch.themeId;
     if (patch.styleKeywords !== undefined) set.styleKeywordsJson = JSON.stringify(patch.styleKeywords);
     if (patch.negativeKeywords !== undefined) set.negativeKeywordsJson = JSON.stringify(patch.negativeKeywords);
-    if (patch.logoAssetId !== undefined) set.logoAssetId = patch.logoAssetId;
-    if (patch.brandName !== undefined) set.brandName = patch.brandName;
-    if (patch.slogan !== undefined) set.slogan = patch.slogan;
-    if (patch.footerSignature !== undefined) set.footerSignature = patch.footerSignature;
-    if (patch.watermarkText !== undefined) set.watermarkText = patch.watermarkText;
+    // 可空字段：undefined（未提交）保持不变，null（显式清空）置 NULL
+    if (patch.logoAssetId !== undefined) set.logoAssetId = patch.logoAssetId ?? null;
+    if (patch.brandName !== undefined) set.brandName = patch.brandName ?? null;
+    if (patch.slogan !== undefined) set.slogan = patch.slogan ?? null;
+    if (patch.footerSignature !== undefined) set.footerSignature = patch.footerSignature ?? null;
+    if (patch.watermarkText !== undefined) set.watermarkText = patch.watermarkText ?? null;
     if (patch.watermarkPosition !== undefined) set.watermarkPosition = patch.watermarkPosition;
     if (patch.watermarkOpacity !== undefined) set.watermarkOpacity = patch.watermarkOpacity;
     if (patch.titleFont !== undefined) set.titleFont = patch.titleFont;
+    // paletteJson：null → 整块清空（置 NULL）；对象 → 序列化落库（键值可为 null，表示清除该色）
     if (patch.paletteJson !== undefined) {
-      set.paletteJson = patch.paletteJson ? JSON.stringify(patch.paletteJson) : null;
+      set.paletteJson = patch.paletteJson !== null ? JSON.stringify(patch.paletteJson) : null;
     }
     if (patch.coverLayout !== undefined) set.coverLayout = patch.coverLayout;
     await this.client.update(brandKits).set(set).where(eq(brandKits.id, id));

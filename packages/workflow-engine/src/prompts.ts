@@ -165,8 +165,11 @@ export function buildStoryboardPrompt(input: CreateRunInput, brief: ContentBrief
     );
   }
   if (input.sourceText) {
-    // 密度驱动拆页：长文按要点密度拆为 6–10 页；article_digest 走忠实原文的 3–8 页拆解
-    lines.push(input.recipe === "article_digest" ? ARTICLE_DIGEST_RULES : DENSITY_RULES);
+    // 密度驱动拆页：DENSITY_RULES（6–10 页）仅注入 knowledge_cards；
+    // article_digest 走自身 ARTICLE_DIGEST_RULES（已含 3–8 页，不重复注入）；
+    // 其余 recipe（quote/checklist/comparison/product/book）已有各自的页数指令，不注入避免冲突
+    if (input.recipe === "knowledge_cards") lines.push(DENSITY_RULES);
+    else if (input.recipe === "article_digest") lines.push(ARTICLE_DIGEST_RULES);
     lines.push(
       "参考资料正文（拆页依据：按资料的自然论点顺序拆页，覆盖全部要点，不得遗漏核心论点）：",
       "<<<资料开始>>>",

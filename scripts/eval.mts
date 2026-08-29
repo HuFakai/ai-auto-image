@@ -13,7 +13,7 @@ import {
   startEvalRunner,
   waitUntil,
 } from "@aai/workflow-engine";
-import type { Recipe, TextRenderingMode } from "@aai/shared-schemas";
+import type { CreateRunInput, Recipe, TextRenderingMode } from "@aai/shared-schemas";
 import { loadDotEnv } from "./lib/env.js";
 
 loadDotEnv();
@@ -23,6 +23,9 @@ interface EvalCase {
   mode: TextRenderingMode;
   category: string;
   recipe?: Recipe;
+  productInfo?: CreateRunInput["productInfo"];
+  bookInfo?: CreateRunInput["bookInfo"];
+  sourceText?: string;
 }
 
 const CASES: EvalCase[] = [
@@ -34,7 +37,32 @@ const CASES: EvalCase[] = [
   { topic: "咖啡因是如何起作用的", mode: "native", category: "机制科普" },
   { topic: "保持专注的三句话", mode: "native", category: "金句卡", recipe: "quote_cards" },
   { topic: "搬家必做的五件事", mode: "deterministic", category: "清单卡", recipe: "checklist_cards" },
+  { topic: "骑自行车还是坐地铁通勤", mode: "deterministic", category: "对比卡", recipe: "comparison_cards" },
+  {
+    topic: "这款便携咖啡机值得买吗",
+    mode: "native",
+    category: "产品种草",
+    recipe: "product_showcase",
+    productInfo: { name: "便携咖啡机", sellingPoints: ["小巧", "出杯快", "好清洗"] },
+  },
+  {
+    topic: "《置身事内》为什么值得读",
+    mode: "deterministic",
+    category: "图书推荐",
+    recipe: "book_recommendations",
+    bookInfo: { title: "置身事内", author: "兰小欢" },
+  },
+  {
+    topic: "复利思维入门",
+    mode: "native",
+    category: "长文拆解",
+    recipe: "article_digest",
+    sourceText: "第一，复利需要时间。第二，收益率不是全部。第三，越早开始越好。",
+  },
 ];
+
+// 注意：strip_comic 不加入用例——Mock Provider 恒产 4 页，无法通过 strip_comic
+// 的 [1,2] 页一致性检查（runComicConsistencyChecks fail 即整单失败），会拉低完成率。
 
 const root = path.resolve(import.meta.dirname, "..");
 
@@ -42,6 +70,7 @@ interface CaseResult {
   topic: string;
   category: string;
   mode: TextRenderingMode;
+  recipe: string;
   runStatus: string;
   briefOk: boolean;
   storyboardOk: boolean;
@@ -59,6 +88,9 @@ async function runCase(evaluationCase: EvalCase): Promise<CaseResult> {
       topic: evaluationCase.topic,
       textRenderingMode: evaluationCase.mode,
       ...(evaluationCase.recipe ? { recipe: evaluationCase.recipe } : {}),
+      ...(evaluationCase.productInfo ? { productInfo: evaluationCase.productInfo } : {}),
+      ...(evaluationCase.bookInfo ? { bookInfo: evaluationCase.bookInfo } : {}),
+      ...(evaluationCase.sourceText ? { sourceText: evaluationCase.sourceText } : {}),
     });
 
     await waitUntil(async () => {
@@ -77,6 +109,7 @@ async function runCase(evaluationCase: EvalCase): Promise<CaseResult> {
       topic: evaluationCase.topic,
       category: evaluationCase.category,
       mode: evaluationCase.mode,
+      recipe: evaluationCase.recipe ?? "knowledge_cards",
       runStatus: (await harness.runRepo.require(runId)).status,
       briefOk,
       storyboardOk,

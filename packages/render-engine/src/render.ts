@@ -1,7 +1,7 @@
 import satori from "satori";
 import sharp from "sharp";
 import { CANVAS_SIZES, type AspectRatio, type BrandKitConfig, type StoryboardSlide } from "@aai/shared-schemas";
-import { loadCardFonts, type LoadedFont } from "./fonts";
+import { loadCardFonts, serifAvailable, type LoadedFont } from "./fonts";
 import { applyPaletteOverrides, type CardTheme } from "./theme";
 import { applyBrandOverlays } from "./brand-overlays";
 
@@ -66,9 +66,9 @@ function text(text: string, style: Record<string, unknown>): Element {
   return { type: "div", props: { style, children: text } };
 }
 
-/** titleFont → Satori 字体族；default 跟随主题（无衬线） */
+/** titleFont → Satori 字体族；default 跟随主题（无衬线）；serif 不可用时回退 Sans（不 throw） */
 function titleFontFamily(titleFont: string | undefined, fallback: string): string {
-  if (titleFont === "serif") return "Noto Serif SC";
+  if (titleFont === "serif") return serifAvailable() ? "Noto Serif SC" : "Noto Sans SC";
   if (titleFont === "sans") return "Noto Sans SC";
   return fallback;
 }
@@ -88,6 +88,7 @@ export function buildSlideTree(input: RenderSlideInput): Element {
   const isCover = slide.role === "cover";
   const coverLayout = isCover ? input.brand?.coverLayout ?? "default" : "default";
   // 仅显式设置 serif/sans 时切换标题字体；default/未设置不写 fontFamily，输出与旧版一致
+  // titleFamilyStyle 只作用于 headline 元素；封面正文/副标题统一默认字体（以 split 布局行为为准）
   const useTitleFont = input.brand?.titleFont === "serif" || input.brand?.titleFont === "sans";
   const titleFamily = titleFontFamily(input.brand?.titleFont, theme.fontFamily);
   const titleFamilyStyle = useTitleFont ? { fontFamily: titleFamily } : {};
@@ -138,7 +139,6 @@ export function buildSlideTree(input: RenderSlideInput): Element {
             fontSize: Math.max(30, Math.round(width * 0.046)),
             color: c.accent,
             fontWeight: 700,
-            ...titleFamilyStyle,
           }),
         );
       }
@@ -200,7 +200,6 @@ export function buildSlideTree(input: RenderSlideInput): Element {
             fontSize: Math.max(30, Math.round(width * 0.042)),
             color: c.accent,
             fontWeight: 700,
-            ...titleFamilyStyle,
           }),
         );
       }
@@ -324,7 +323,8 @@ export function buildSlideTree(input: RenderSlideInput): Element {
 
 function footer(input: RenderSlideInput, pageCount: number): Element {
   const { width } = CANVAS_SIZES[input.aspectRatio];
-  const c = input.theme.colors;
+  // 页脚与正文一致使用 palette 覆盖后的主题色（而非未覆盖的 input.theme）
+  const c = applyPaletteOverrides(input.theme, input.brand?.paletteJson).colors;
   const padding = Math.round(width * 0.08);
   return {
     type: "div",

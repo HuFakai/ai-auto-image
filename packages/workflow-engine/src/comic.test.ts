@@ -109,6 +109,41 @@ describe("comic pipeline (mock, edit-capable route)", () => {
     const generated = (await harness.assetRepo.listByRun(runId)).find((a) => a.kind === "generated");
     expect(JSON.parse(generated!.metadataJson ?? "{}")).toMatchObject({ usedEdit: true });
   });
+
+  it("bubble 阶段逐页幂等：页面重试生成裸图后补合成，且不重复创建节点", async () => {
+    const harness = await makeHarness({ mock: { latencyMs: 1 } });
+    const { runId, jobId } = await createRunWith(harness, { recipe: "comic_story", topic: "什么是复利" });
+
+    let runner = startEvalRunner(harness);
+    await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "succeeded", 20_000);
+    await runner.stop();
+
+    const bubblesBefore = (await harness.runRepo.listNodeRuns(runId)).filter(
+      (n) => n.nodeName === "render-comic-bubbles",
+    );
+    expect(bubblesBefore).toHaveLength(1);
+    expect(bubblesBefore[0]!.status).toBe("succeeded");
+
+    // 模拟重试：页面 0 的全部资产（含 composite）被 supersede，下一轮会重新生成裸图
+    await harness.assetRepo.supersedePage(runId, 0);
+
+    const { job: retryJob } = await harness.jobRepo.createOrReuse({ kind: "comic_story_run", runId });
+    runner = startEvalRunner(harness);
+    await waitUntil(async () => (await harness.jobRepo.require(retryJob.id)).status === "succeeded", 20_000);
+    await runner.stop();
+
+    // 页面 0 重新生成后补回 composite；bubbles 节点不重复创建（仍 1 个，output 被更新）
+    const liveComposites = (await harness.assetRepo.listByRun(runId)).filter(
+      (a) => a.kind === "composite" && a.supersededAt === null,
+    );
+    expect(liveComposites.map((a) => a.pageIndex).sort()).toEqual([0, 1, 2, 3]);
+    const bubblesAfter = (await harness.runRepo.listNodeRuns(runId)).filter(
+      (n) => n.nodeName === "render-comic-bubbles",
+    );
+    expect(bubblesAfter).toHaveLength(1);
+    expect(bubblesAfter[0]!.status).toBe("succeeded");
+    expect(bubblesAfter[0]!.outputRef).toContain("comic-bubbles@1");
+  });
 });
 
 describe("renderComicSlide (needs fonts)", () => {

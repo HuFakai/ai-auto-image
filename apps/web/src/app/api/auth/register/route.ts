@@ -40,11 +40,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "用户名已被使用" }, { status: 409 });
   }
 
-  const user = await runtime.userRepo.create({
-    username,
-    passwordHash: await hashPassword(password),
-    role: policy.role,
-  });
+  const passwordHash = await hashPassword(password);
+  let user;
+  try {
+    user = await runtime.userRepo.create({
+      username,
+      passwordHash,
+      role: policy.role,
+    });
+  } catch (error) {
+    // 并发注册可能绕过上面的 findByUsername 预检查，直接撞唯一约束（postgres 23505 / sqlite "duplicate key"）
+    const message = error instanceof Error ? error.message : String(error);
+    if (/23505|duplicate key|unique/i.test(message)) {
+      return NextResponse.json({ error: "用户名已被使用" }, { status: 409 });
+    }
+    throw error;
+  }
+  // 注：首个用户自动 admin 的竞态窗口（并发 count==0 时可能产生双 admin）由部署策略兜底——
+  // 上线后立即完成首个管理员注册并关闭 REGISTER_ENABLED，注册路径即为收敛的。
   const token = await issueSession(user.id);
   const response = NextResponse.json(
     { userId: user.id, username: user.username, role: user.role },

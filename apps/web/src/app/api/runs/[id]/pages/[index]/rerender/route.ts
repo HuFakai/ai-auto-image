@@ -54,6 +54,22 @@ export async function POST(
     );
   }
 
+  // Brand Kit Logo 归属校验：logoAssetId 对应资产存在时，必须是上传素材
+  // （runId 为空）或属于当前用户（资产→run→userId）；admin 放行，否则 403
+  if (input.brandKit?.logoAssetId) {
+    const logoAsset = await runtime.assetRepo.require(input.brandKit.logoAssetId).catch(() => null);
+    if (logoAsset) {
+      let owned = logoAsset.runId === null;
+      if (!owned && logoAsset.runId) {
+        const ownerRun = await runtime.runRepo.require(logoAsset.runId).catch(() => null);
+        owned = Boolean(ownerRun?.userId && ownerRun.userId === user.id);
+      }
+      if (!owned && user.role !== "admin") {
+        return NextResponse.json({ error: "forbidden" }, { status: 403 });
+      }
+    }
+  }
+
   // Storyboard 与页面
   const storyboardNode = (await runtime.runRepo.listNodeRuns(id)).find(
     (n) => n.nodeName === "generate-storyboard" && n.status === "succeeded",
@@ -65,9 +81,23 @@ export async function POST(
 
   const slide: StoryboardSlide = { ...original, headline: parsed.data.headline, body: parsed.data.body };
 
-  // 视觉层沿用当前版本，文字重排
-  const visualAsset = await runtime.assetRepo.latestForPage(id, pageIndex);
-  if (!visualAsset) return NextResponse.json({ error: "page asset missing" }, { status: 409 });
+  // 视觉层沿用当前版本，文字重排。
+  // latestForPage 可能返回 composite（deterministic 合成本身未 supersede 时是"最新"），
+  // 二次排版必须基于无文字的 generated 视觉层，否则新文案会叠在旧文案已渲染的图上。
+  let visualAsset = await runtime.assetRepo.latestForPage(id, pageIndex);
+  if (!visualAsset || visualAsset.kind !== "generated") {
+    const rows = await runtime.assetRepo.listByRun(id);
+    const live = rows
+      .filter((row) => row.pageIndex === pageIndex && row.kind === "generated" && row.supersededAt === null)
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+    visualAsset = live
+      ?? rows
+        // 连续多次 rerender 时：supersedePage 会把整页资产（含 generated 视觉层）置为 superseded，
+        // 视觉层本身从未变化，回退到该页最新 generated 资产，避免二次重排 404
+        .filter((row) => row.pageIndex === pageIndex && row.kind === "generated")
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+  }
+  if (!visualAsset) return NextResponse.json({ error: "visual asset not found" }, { status: 404 });
   const visualBase64 = fs
     .readFileSync(runtime.assetStore.resolve(visualAsset.filePath))
     .toString("base64");
@@ -92,6 +122,7 @@ export async function POST(
     pageCount: storyboard.slides.length,
     visualImageBase64: visualBase64,
     logoBase64,
+    brand: input.brandKit,
   });
 
   // 同步回写 Storyboard，保证详情/导出与新文案一致
