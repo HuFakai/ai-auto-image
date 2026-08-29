@@ -1,7 +1,7 @@
 # 开发进度文档
 
 > 更新时间：2026-08-30
-> 对照基准：[总体开发规划](./02-master-development-plan.md) · [阶段文档 00–04](./README.md) · [迭代路线图](./03-implementation-review-and-roadmap.md)
+> 对照基准：[总体开发规划](./02-master-development-plan.md) · [阶段文档 00–04](./README.md) · [迭代路线图](./03-implementation-review-and-roadmap.md) · [功能升级方案](./06-feature-upgrade-plan.md)
 
 ## 一、总览
 

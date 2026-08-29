@@ -16,6 +16,8 @@
 7. [阶段 2：漫画与高级视觉](./phases/02-comic-and-advanced-visuals.md)
 8. [阶段 3：工作流与平台发布](./phases/03-workflow-and-publishing.md)
 9. [阶段 4：运营闭环与平台化](./phases/04-growth-and-platformization.md)
+10. [接下来的开发方案（迭代 4–5 执行计划）](./05-next-development-plan.md)
+11. [下一阶段功能升级方案（对标竞品）](./06-feature-upgrade-plan.md)
 
 ## 阅读顺序
 
