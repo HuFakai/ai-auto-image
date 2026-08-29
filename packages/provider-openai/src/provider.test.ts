@@ -84,7 +84,7 @@ describe("createOpenAICompatProvider image model", () => {
     expect(images).toHaveLength(1);
     expect(images[0]?.usage?.images).toBe(1);
     const call = (client.images.generate as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
-    expect(call.size).toBe("1024x1536");
+    expect(call.size).toBe("768x1024"); // 3:4 → 1k 像素串
   });
 
   it("reports no edit support when the wire client lacks edit", async () => {
@@ -93,5 +93,25 @@ describe("createOpenAICompatProvider image model", () => {
     await expect(
       provider.image!.edit!({ prompt: "x", aspectRatio: "1:1", baseImage: { base64: "QUJD" } }),
     ).rejects.toThrow(/does not support image edit/);
+  });
+
+  it("sends edit as multipart with a file reference (gpt-image gateway protocol)", async () => {
+    const client = fakeClient();
+    client.images.edit = vi.fn(async () => ({
+      data: [{ b64_json: "REVG" }],
+    }));
+    const provider = createOpenAICompatProvider({ config: route, apiKey: "k", client });
+    const images = await provider.image!.edit!({
+      prompt: "把背景换成雪山",
+      aspectRatio: "3:4",
+      baseImage: { base64: "QUJD" },
+    });
+    expect(images).toHaveLength(1);
+    const call = (client.images.edit as ReturnType<typeof vi.fn>).mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(call.model).toBe("image-1");
+    // image 是文件对象（multipart Uploadable），size 不传沿用参考图
+    expect(call.image).toBeTruthy();
+    expect(call.size).toBeUndefined();
+    expect(call.prompt).toBeTruthy();
   });
 });

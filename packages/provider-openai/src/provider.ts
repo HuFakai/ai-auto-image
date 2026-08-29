@@ -45,15 +45,8 @@ export interface WireRequestOptions {
 export interface WireClient {
   chat: {
     completions: {
-      create(
-        params: {
-          model: string;
-          messages: WireChatMessage[];
-          max_tokens?: number;
-          temperature?: number;
-        },
-        options?: WireRequestOptions,
-      ): Promise<unknown>;
+      /** 参数透传（含 stream/stream_options）；返回整体响应或 chunk 异步流 */
+      create(params: Record<string, unknown>, options?: WireRequestOptions): Promise<unknown>;
     };
   };
   images: {
@@ -88,10 +81,10 @@ export interface CompatCapabilities {
 }
 
 const DEFAULT_ASPECT_SIZE_MAP: Required<AspectSizeMap> = {
-  "3:4": "1024x1536",
-  "9:16": "1024x1536",
+  "3:4": "768x1024",
+  "9:16": "768x1360",
   "1:1": "1024x1024",
-  "16:9": "1536x1024",
+  "16:9": "1360x768",
 };
 
 const DEFAULT_IMAGE_CAPABILITIES: ImageCapabilities = {
@@ -155,6 +148,47 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
     };
   };
 
+  /**
+   * 流式调用 chat/completions：网关对长推理请求会在 ~2 分钟主动断连，
+   * 流式的持续数据流动可避免断连；同时聚合 reasoning 后的 content 与 usage。
+   * 返回值不可迭代时（测试 fake / 非 stream 实现）退回整体响应解析。
+   */
+  const readChatStream = async (response: unknown): Promise<TextResult> => {
+    const iterable = response as AsyncIterable<unknown> | undefined;
+    if (!iterable || typeof (iterable as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] !== "function") {
+      return readChatResponse(response);
+    }
+    let text = "";
+    let providerRequestId: string | undefined;
+    let usage: ModelUsage | undefined;
+    for await (const raw of iterable) {
+      const chunk = raw as {
+        id?: string;
+        choices?: Array<{ delta?: { content?: string | null } }>;
+        usage?: Parameters<typeof usageFromOpenAI>[0];
+      };
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (delta) text += delta;
+      if (chunk.id) providerRequestId = chunk.id;
+      if (chunk.usage) usage = usageFromOpenAI(chunk.usage);
+    }
+    if (!text.trim()) {
+      throw new AiError("provider_unavailable", "empty response from text model (stream)");
+    }
+    return { text, usage: usage ?? usageFromOpenAI(undefined), providerRequestId };
+  };
+
+  const chatCall = async (
+    body: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ): Promise<TextResult> => {
+    const response = await client.chat.completions.create(
+      { ...body, stream: true, stream_options: { include_usage: true } },
+      options,
+    );
+    return readChatStream(response);
+  };
+
   const textModel: TextModel = {
     routeId: config.id,
     model: textModelName,
@@ -164,7 +198,7 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
       const messages: WireChatMessage[] = [];
       if (request.system) messages.push({ role: "system", content: request.system });
       messages.push({ role: "user", content: request.prompt });
-      const response = await client.chat.completions.create(
+      return chatCall(
         {
           model: textModelName,
           messages,
@@ -173,7 +207,6 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
         },
         { signal: request.signal },
       );
-      return readChatResponse(response);
     },
 
     async generateObject<T>(request: StructuredRequest<T>): Promise<T> {
@@ -187,7 +220,7 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
           const messages: WireChatMessage[] = [];
           if (system) messages.push({ role: "system", content: system });
           messages.push({ role: "user", content: prompt });
-          const response = await client.chat.completions.create(
+          return chatCall(
             {
               model: textModelName,
               messages,
@@ -198,7 +231,6 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
             },
             { signal },
           );
-          return readChatResponse(response);
         },
       });
       request.onUsage?.(result.usage);
@@ -251,20 +283,27 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
       if (!client.images.edit) {
         throw new AiError("invalid_request", `route ${config.id} does not support image edit`);
       }
-      const imageData = request.baseImage.base64 ?? request.baseImage.url ?? "";
+      const imageData = request.baseImage.base64 ?? "";
+      if (!imageData) {
+        throw new AiError("invalid_request", "image edit requires base64 reference image");
+      }
+      // gpt-image 系网关（doc.yunfei.best）：/v1/images/edits 为 multipart 文件上传，
+      // image 为文件字段（可多图），size 不传则沿用参考图尺寸；不支持 JSON {url} 传法
+      const { toFile } = await import("openai");
+      const imageFile = await toFile(Buffer.from(imageData.replace(/^data:[^,]+,/, ""), "base64"), "reference.png", {
+        type: "image/png",
+      });
       const params: Record<string, unknown> = {
         model: imageModelName,
         prompt: request.prompt,
         n: request.n ?? 1,
-        // compatible 服务普遍接受 data URL 或裸 Base64；官方 SDK 场景由上层转 File
-        image: imageData.startsWith("http")
-          ? imageData
-          : imageData.startsWith("data:")
-            ? imageData
-            : `data:image/png;base64,${imageData}`,
+        image: imageFile,
       };
-      if (request.maskBase64) params.mask = `data:image/png;base64,${request.maskBase64}`;
-      if (request.quality) params.quality = request.quality;
+      if (request.maskBase64) {
+        params.mask = await toFile(Buffer.from(request.maskBase64.replace(/^data:[^,]+,/, ""), "base64"), "mask.png", {
+          type: "image/png",
+        });
+      }
 
       const response = await client.images.edit(params, { signal: request.signal });
       const images = extractGeneratedImages(response);
@@ -316,21 +355,22 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
         schema: VisualInspectionSchema,
         prompt,
         callModel: async (fullPrompt) => {
-          const response = await client.chat.completions.create({
-            model: textModelName,
-            messages: [
-              {
-                role: "user",
-                content: [
-                  { type: "text", text: fullPrompt },
-                  { type: "image_url", image_url: { url: imageUrl } },
-                ],
-              },
-            ],
-            max_tokens: 1024,
-            temperature: 0,
-          });
-          return readChatResponse(response);
+          return chatCall(
+            {
+              model: textModelName,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    { type: "text", text: fullPrompt },
+                    { type: "image_url", image_url: { url: imageUrl } },
+                  ],
+                },
+              ],
+              max_tokens: 1024,
+              temperature: 0,
+            },
+          );
         },
       });
 

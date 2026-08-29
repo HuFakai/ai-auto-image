@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { Storyboard } from "@aai/shared-schemas";
+import type { ComicStoryboard, Storyboard } from "@aai/shared-schemas";
 import type { Runtime } from "./runtime";
 import type { RunDetailPayload, RunListItem } from "@/lib/types";
 
@@ -52,12 +52,20 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
     ? (JSON.parse(run.snapshotJson) as { concurrency?: RunDetailPayload["concurrency"] })
     : null;
 
-  // Storyboard 与页面状态
-  const storyboardNode = nodes.find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded");
+  // Storyboard 与页面状态（知识卡片 / 科普漫画两种节点名）
+  const storyboardNode =
+    nodes.find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded") ??
+    nodes.find((n) => n.nodeName === "generate-comic-storyboard" && n.status === "succeeded");
   let storyboard: Storyboard | null = null;
+  let comicStoryboard: ComicStoryboard | null = null;
   if (storyboardNode?.outputRef) {
     try {
-      storyboard = (JSON.parse(storyboardNode.outputRef) as { value: Storyboard }).value;
+      const value = (JSON.parse(storyboardNode.outputRef) as { value: unknown }).value;
+      if (Array.isArray((value as { cast?: unknown }).cast)) {
+        comicStoryboard = value as ComicStoryboard;
+      } else {
+        storyboard = value as Storyboard;
+      }
     } catch {
       storyboard = null;
     }
@@ -65,7 +73,17 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
 
   // 页面状态以「每页当前资产」为准（返修后取最新版本，旧版本计入 Revision 链）
   const pageNodes = nodes.filter((n) => n.nodeName === "generate-images");
-  const pages: RunDetailPayload["pages"] = (storyboard?.slides ?? []).map((slide) => {
+  const comicSlides = comicStoryboard?.pages ?? [];
+  const pages: RunDetailPayload["pages"] = (
+    storyboard?.slides ?? comicSlides.map((comicPage) => ({
+      index: comicPage.index,
+      role: "comic" as const,
+      headline: comicPage.scene.slice(0, 24),
+      body: comicPage.dialogues.map((d) => `${d.speaker}：${d.text}`),
+      visualIntent: comicPage.visualPrompt,
+      layoutHint: "",
+    }))
+  ).map((slide) => {
     const current = runtime.assetRepo.latestForPage(runId, slide.index);
     if (current) {
       const metadata = current.metadataJson ? (JSON.parse(current.metadataJson) as Record<string, unknown>) : {};
@@ -118,7 +136,7 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
       ? { id: job.id, status: job.status, attempts: job.attempts, recoveries: job.recoveries }
       : null,
     nodes: nodes.map((n) => ({ nodeName: n.nodeName, status: n.status, attempt: n.attempt })),
-    storyboardTitle: storyboard?.title ?? null,
+    storyboardTitle: storyboard?.title ?? comicStoryboard?.title ?? null,
     pages,
   };
 }

@@ -25,6 +25,7 @@ export interface ChannelView {
   enabled: boolean;
   maxAttempts: number;
   imageConcurrencyMax: number | null;
+  imageEditSupport: boolean;
   lastTestOk: boolean | null;
   lastTestAt: number | null;
   lastTestDetail: string | null;

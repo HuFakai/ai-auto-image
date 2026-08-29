@@ -45,10 +45,11 @@ export async function POST(request: Request) {
   const effective = runtime.effectiveConcurrency(input.requestedImageConcurrency);
   const project = runtime.projectRepo.create({ title: input.topic.slice(0, 60) });
   const run = runtime.runRepo.create({ projectId: project.id, inputJson: JSON.stringify(input) });
+  const jobKind = input.recipe === "comic_story" ? "comic_story_run" : "knowledge_card_run";
   const { job } = runtime.jobRepo.createOrReuse({
-    kind: "knowledge_card_run",
+    kind: jobKind,
     runId: run.id,
-    idempotencyKey: `knowledge_card:${run.id}`,
+    idempotencyKey: `${jobKind}:${run.id}`,
     maxAttempts: 3,
   });
   runtime.jobRepo.appendEvent(job.id, "created", `run=${run.id}`);

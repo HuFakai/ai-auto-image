@@ -24,6 +24,8 @@ export const ChannelInputSchema = z.object({
   resolution: z.string().max(20).optional(),
   maxAttempts: z.number().int().min(1).max(5).default(3),
   imageConcurrencyMax: z.number().int().min(1).max(16).optional(),
+  /** 该渠道支持图片编辑（图生图）：gpt-image 等 */
+  imageEditSupport: z.boolean().default(false),
 });
 export type ChannelInput = z.infer<typeof ChannelInputSchema>;
 
@@ -48,6 +50,7 @@ function toView(row: Channel): ChannelView {
     enabled: row.enabled === 1,
     maxAttempts: row.maxAttempts,
     imageConcurrencyMax: row.imageConcurrencyMax,
+    imageEditSupport: row.imageEditSupport === 1,
     lastTestOk: row.lastTestOk === null ? null : row.lastTestOk === 1,
     lastTestAt: row.lastTestAt,
     lastTestDetail: row.lastTestDetail,
@@ -88,6 +91,7 @@ export class ChannelService {
       resolution: input.resolution ?? null,
       maxAttempts: input.maxAttempts,
       imageConcurrencyMax: input.imageConcurrencyMax ?? null,
+      imageEditSupport: input.type === "image" && input.imageEditSupport ? 1 : 0,
     });
     return toView(row);
   }
@@ -108,6 +112,7 @@ export class ChannelService {
     if (patch.enabled !== undefined) row.enabled = patch.enabled ? 1 : 0;
     if (patch.maxAttempts !== undefined) row.maxAttempts = patch.maxAttempts;
     if (patch.imageConcurrencyMax !== undefined) row.imageConcurrencyMax = patch.imageConcurrencyMax;
+    if (patch.imageEditSupport !== undefined) row.imageEditSupport = patch.imageEditSupport ? 1 : 0;
     return toView(this.repo.update(id, row));
   }
 
@@ -173,6 +178,8 @@ export class ChannelService {
           apiKeyRef: `channel:${row.id}`,
           textModel: row.textModel,
           maxAttempts: row.maxAttempts,
+          // 推理类模型生成长 JSON（如漫画分镜）可能超过 2 分钟，文本路由放宽超时
+          timeoutMs: 300_000,
         });
         const bundle = createOpenAICompatProvider({
           config,
@@ -204,8 +211,8 @@ export class ChannelService {
             },
             image: {
               textToImage: true,
-              imageEditSingle: false,
-              imageEditMulti: false,
+              imageEditSingle: row.imageEditSupport === 1,
+              imageEditMulti: row.imageEditSupport === 1,
               maskEdit: false,
               returns: ["url", "base64"],
             },
@@ -247,6 +254,7 @@ export function autoImportFromEnv(service: ChannelService): number {
       aspectRatioParam: "aspect_ratio",
       responseFormat: "b64_json",
       maxAttempts: 3,
+      imageEditSupport: false,
     });
     imported += 1;
   }
@@ -261,6 +269,7 @@ export function autoImportFromEnv(service: ChannelService): number {
       responseFormat: (process.env.IMAGE_RESPONSE_FORMAT as "url" | "b64_json") ?? "b64_json",
       resolution: process.env.IMAGE_RESOLUTION,
       maxAttempts: 3,
+      imageEditSupport: false,
     });
     imported += 1;
   }

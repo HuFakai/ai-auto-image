@@ -215,6 +215,7 @@ export const channels = sqliteTable(
     sortOrder: integer("sort_order").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(3),
     imageConcurrencyMax: integer("image_concurrency_max"),
+    imageEditSupport: integer("image_edit_support").notNull().default(0),
     lastTestOk: integer("last_test_ok"),
     lastTestAt: integer("last_test_at"),
     lastTestDetail: text("last_test_detail"),

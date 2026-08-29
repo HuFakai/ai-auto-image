@@ -3,5 +3,6 @@ export * from "./job-runner";
 export * from "./prompts";
 export * from "./pipeline/knowledge-cards";
 export * from "./pipeline/page-regen";
+export * from "./pipeline/comic";
 export * from "./export";
 export * from "./testkit";

@@ -631,6 +631,7 @@ export interface CreateChannelRow {
   resolution?: string | null;
   maxAttempts?: number;
   imageConcurrencyMax?: number | null;
+  imageEditSupport?: number;
 }
 
 export interface UpdateChannelRow {
@@ -646,6 +647,7 @@ export interface UpdateChannelRow {
   enabled?: number;
   maxAttempts?: number;
   imageConcurrencyMax?: number | null;
+  imageEditSupport?: number;
   lastTestOk?: number | null;
   lastTestAt?: number | null;
   lastTestDetail?: string | null;
@@ -675,6 +677,7 @@ export class ChannelRepo {
         sortOrder: ts,
         maxAttempts: input.maxAttempts ?? 3,
         imageConcurrencyMax: input.imageConcurrencyMax ?? null,
+        imageEditSupport: input.imageEditSupport ?? 0,
         createdAt: ts,
         updatedAt: ts,
       })

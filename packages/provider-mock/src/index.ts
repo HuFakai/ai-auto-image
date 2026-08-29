@@ -234,6 +234,67 @@ export function createMockProvider(options: MockProviderOptions = {}): MockProvi
             context.platform ?? "xiaohongshu",
           )) as unknown as T;
       }
+      if (request.schemaName === "ComicCast") {
+        request.onUsage?.(mockUsage);
+        return [
+          {
+            name: "小知",
+            appearance: "圆脸短发少年，戴一副圆框眼镜，额前一撮呆毛",
+            outfit: "蓝色连帽衫、牛仔裤、白色运动鞋，胸前挂一枚铜色放大镜徽章",
+            refImagePrompt: `${context.topic}科普向导小知的正面全身立绘，纯浅色背景，清晰勾线漫画风`,
+            forbiddenChanges: ["发型", "眼镜", "连帽衫颜色", "放大镜徽章"],
+          },
+        ] as unknown as T;
+      }
+      if (request.schemaName === "ComicStoryboard") {
+        request.onUsage?.(mockUsage);
+        const base = context.topic;
+        return {
+          title: `${base}（科普漫画）`,
+          cast: [
+            {
+              name: "小知",
+              appearance: "圆脸短发少年，戴圆框眼镜，额前一撮呆毛",
+              outfit: "蓝色连帽衫、牛仔裤，胸前放大镜徽章",
+              refImagePrompt: "参考图",
+              forbiddenChanges: ["发型", "眼镜"],
+            },
+          ],
+          pages: [
+            {
+              index: 0,
+              scene: "少年在书桌前翻开一本发光的书",
+              visualPrompt: `${base}：小知在书桌前翻开一本发光的书，好奇地凑近`,
+              cast: ["小知"],
+              dialogues: [{ speaker: "小知", text: `关于${base}，你真的了解吗？`, type: "speech" }],
+            },
+            {
+              index: 1,
+              scene: "黑板前讲解核心概念",
+              visualPrompt: `${base}：小知站在小黑板前，用指示棒讲解核心概念`,
+              cast: ["小知"],
+              dialogues: [
+                { speaker: "小知", text: "先记住一个关键判断。", type: "speech" },
+                { speaker: "旁白", text: "核心概念拆开看其实很简单。", type: "narration" },
+              ],
+            },
+            {
+              index: 2,
+              scene: "生活场景举例",
+              visualPrompt: `${base}：小知在日常生活场景中举例说明，配简单示意图`,
+              cast: ["小知"],
+              dialogues: [{ speaker: "小知", text: "生活里到处都是例子。", type: "speech" }],
+            },
+            {
+              index: 3,
+              scene: "总结收尾",
+              visualPrompt: `${base}：小知竖起大拇指做总结，身后是知识点列表`,
+              cast: ["小知"],
+              dialogues: [{ speaker: "小知", text: "记住这句就够了！", type: "speech" }],
+            },
+          ],
+        } as unknown as T;
+      }
       if (request.schemaName === "PlatformCopy") {
         request.onUsage?.(mockUsage);
         return {

@@ -37,6 +37,8 @@ export function Workbench({ initial, brandKits }: Props) {
   const [concurrency, setConcurrency] = useState<number>(initial.defaultConcurrency);
   const [sourceText, setSourceText] = useState("");
   const [brandKitId, setBrandKitId] = useState("");
+  const [recipe, setRecipe] = useState<"knowledge_cards" | "comic_story">("knowledge_cards");
+  const [castDescription, setCastDescription] = useState("");
   const [urlImporting, setUrlImporting] = useState(false);
   const [url, setUrl] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
@@ -92,11 +94,13 @@ export function Workbench({ initial, brandKits }: Props) {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
+          recipe,
           topic: topic.trim(),
           aspectRatio,
           textRenderingMode: TextRenderingModeSchema.parse(mode),
           requestedImageConcurrency: concurrency,
-          ...(sourceText.trim() ? { sourceText: sourceText.trim().slice(0, 20000) } : {}),
+          ...(recipe === "comic_story" && castDescription.trim() ? { castDescription: castDescription.trim().slice(0, 2000) } : {}),
+          ...(recipe !== "comic_story" && sourceText.trim() ? { sourceText: sourceText.trim().slice(0, 20000) } : {}),
           ...(brandKitId ? { brandKitId } : {}),
         }),
       });
@@ -167,6 +171,17 @@ export function Workbench({ initial, brandKits }: Props) {
 
         <div className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-4">
           <div>
+            <span className="field-label">内容类型</span>
+            <select
+              className="field-input mt-1"
+              value={recipe}
+              onChange={(event) => setRecipe(event.target.value as "knowledge_cards" | "comic_story")}
+            >
+              <option value="knowledge_cards">知识卡片</option>
+              <option value="comic_story">科普漫画</option>
+            </select>
+          </div>
+          <div>
             <span className="field-label">比例 · 平台</span>
             <select className="field-input mt-1" value={aspectRatio} onChange={(event) => setAspectRatio(event.target.value)}>
               <option value="3:4">3:4 · 小红书</option>
@@ -209,7 +224,24 @@ export function Workbench({ initial, brandKits }: Props) {
           </div>
         </div>
 
+        {recipe === "comic_story" && (
+          <div className="mt-8">
+            <span className="field-label">主角设定（可选 · 空缺时自动设计科普向导角色）</span>
+            <textarea
+              className="field-input mt-1 min-h-[56px] resize-y !text-[13px] leading-relaxed"
+              placeholder="例如：圆脸短发少女「阿科」，戴红色贝雷帽和圆框眼镜，穿白色实验服，背一个黄铜色小背包"
+              value={castDescription}
+              maxLength={2000}
+              onChange={(event) => setCastDescription(event.target.value)}
+            />
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+              科普漫画流程：角色锚点与定妆图 → 分镜（对白归属一致性检查）→ 逐页生成（渠道支持图生图时引用定妆图保持角色一致）→ 对白气泡程序渲染。3–6 页。
+            </p>
+          </div>
+        )}
+
         {/* 参考资料：长文 / URL 导入（密度拆页） */}
+        {recipe !== "comic_story" && (
         <div className="mt-8">
           <div className="flex items-baseline justify-between">
             <span className="field-label">参考资料（可选 · 粘贴长文将按要点密度拆为 6–10 页）</span>
@@ -234,6 +266,7 @@ export function Workbench({ initial, brandKits }: Props) {
             </button>
           </div>
         </div>
+        )}
       </section>
 
       {/* 运行目录 */}

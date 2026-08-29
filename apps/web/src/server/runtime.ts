@@ -17,6 +17,7 @@ import {
 } from "@aai/storage";
 import {
   JobRunner,
+  registerComicPipeline,
   registerKnowledgeCardPipeline,
   registerPageRegenPipeline,
   type ImageRoute,
@@ -241,6 +242,32 @@ export function getRuntime(): Runtime {
     assetsDir,
     exportsDir,
     templateVersion: "darkroom-knowledge@1",
+  });
+
+  registerComicPipeline(runtime.runner, {
+    runRepo: runtime.runRepo,
+    jobRepo: runtime.jobRepo,
+    assetRepo: runtime.assetRepo,
+    providerRepo: runtime.providerRepo,
+    revisionRepo: runtime.revisionRepo,
+    assetStore: runtime.assetStore,
+    get textRoutes() {
+      return pipelineDeps.textRoutes;
+    },
+    set textRoutes(routes) {
+      pipelineDeps.textRoutes = routes;
+    },
+    get imageRoutes() {
+      return pipelineDeps.imageRoutes;
+    },
+    set imageRoutes(routes) {
+      pipelineDeps.imageRoutes = routes;
+    },
+    imageApiSemaphore: runtime.imageApiSemaphore,
+    visualQuality: pipelineDeps.visualQuality,
+    assetsDir,
+    exportsDir,
+    serverMaxConcurrency,
   });
 
   registerPageRegenPipeline(runtime.runner, {

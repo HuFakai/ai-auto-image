@@ -139,6 +139,9 @@ export function SettingsView({
                       {channel.baseUrl.replace(/^https?:\/\//, "")}
                     </span>
                     <span className="font-mono text-[11px] text-ink-faint">{channel.apiKeyHint}</span>
+                    {channel.type === "image" && channel.imageEditSupport && (
+                      <span className="stamp stamp-quiet text-[10px] text-seal">图生图</span>
+                    )}
                     <div className="flex items-center gap-2">
                       <button
                         className="btn-ghost px-2.5 py-1 font-mono text-[11px]"
@@ -313,6 +316,9 @@ function ChannelForm({
     isNew ? "b64_json" : (editing as ChannelView).responseFormat,
   );
   const [resolution, setResolution] = useState(isNew ? "" : ((editing as ChannelView).resolution ?? ""));
+  const [imageEditSupport, setImageEditSupport] = useState(
+    isNew ? false : (editing as ChannelView).imageEditSupport,
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -331,6 +337,7 @@ function ChannelForm({
       if (type === "image") {
         payload.aspectRatioParam = aspectRatioParam;
         payload.responseFormat = responseFormat;
+        payload.imageEditSupport = imageEditSupport;
         if (resolution) payload.resolution = resolution;
       }
       const response = isNew
@@ -428,6 +435,16 @@ function ChannelForm({
           </div>
 
           {type === "image" && (
+            <>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={imageEditSupport}
+                onChange={(event) => setImageEditSupport(event.target.checked)}
+                className="accent-[#b5382d]"
+              />
+              支持图片编辑（图生图）——漫画角色一致性、参考图生成将优先使用该渠道
+            </label>
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <span className="field-label">比例参数风格</span>
@@ -461,6 +478,7 @@ function ChannelForm({
                 />
               </div>
             </div>
+            </>
           )}
 
           {error && <p className="font-mono text-xs text-seal">⚠ {error}</p>}

@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { AspectRatioSchema, PlatformSchema } from "./content";
 import { BrandKitConfigSchema } from "./brand-kit";
+import { RecipeSchema } from "./comic";
 
 export * from "./brand-kit";
+export * from "./comic";
 
 /**
  * 双文字渲染模式（docs/02 §9.1）：
@@ -42,6 +44,9 @@ export function effectiveImageConcurrency(input: {
 
 /** Studio 发起一次生成运行的输入 */
 export const CreateRunInputSchema = z.object({
+  recipe: RecipeSchema.default("knowledge_cards"),
+  /** 科普漫画：主角设定（外貌/服装/性格），LLM 会在此基础上生成角色锚点 */
+  castDescription: z.string().max(2000).optional(),
   topic: z.string().min(1).max(4000),
   platform: PlatformSchema.default("xiaohongshu"),
   aspectRatio: AspectRatioSchema.default("3:4"),
