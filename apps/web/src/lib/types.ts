@@ -52,6 +52,8 @@ export interface RunDetailPage {
   visualCheckPassed?: boolean | undefined;
   /** 当前版本号（返修后 >1） */
   revision?: number | undefined;
+  /** 生成该页使用的模型 */
+  model?: string | undefined;
 }
 
 export interface RunDetailPayload {
@@ -67,6 +69,17 @@ export interface RunDetailPayload {
   job: { id: string; status: string; attempts: number; recoveries: number } | null;
   nodes: Array<{ nodeName: string; status: string; attempt: number }>;
   storyboardTitle: string | null;
+  /** 生成信息（来自冻结的 RunSnapshot 与输入），详情页完整呈现 */
+  generation: {
+    recipe: string;
+    textRenderingMode: string;
+    aspectRatio: string;
+    platform: string;
+    brandKit: { name: string; themeId: string; styleKeywords: string[] } | null;
+    routes: Array<{ id: string; kind: string; model: string }>;
+    templateVersion: string | null;
+    characterRefAssetId: string | null;
+  };
   pages: RunDetailPage[];
 }
 

@@ -169,7 +169,11 @@ async function executeComicRun(
     JSON.stringify({
       recipe: "comic_story",
       textRenderingMode: input.textRenderingMode,
-      routes: [...deps.textRoutes, ...deps.imageRoutes].map((route) => ({ id: route.config.id, model: route.model })),
+      routes: [...deps.textRoutes, ...deps.imageRoutes].map((route) => ({
+        id: route.config.id,
+        kind: route.config.kind,
+        model: route.model,
+      })),
       templateVersion: "comic-bubbles@1",
     }),
   );
@@ -409,6 +413,7 @@ async function generateComicPage(
 
   try {
     let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
+    let usedModel: string | null = null;
     const result = await withModelFallbacks({
       routes: args.editCapableRoutes.length > 0 ? args.editCapableRoutes : deps.imageRoutes,
       signal: ctx.signal,
@@ -418,18 +423,20 @@ async function generateComicPage(
         )!;
         return deps.imageApiSemaphore.run(async () => {
           ctx.onProgress();
+          let images;
           // 渠道支持图生图时，以角色定妆图为参考（身份锚定）
           if (route.image.capabilities().imageEditSingle && args.characterRefBase64) {
-            const images = await route.image.edit!({
+            images = await route.image.edit!({
               prompt,
               aspectRatio: input.aspectRatio,
               baseImage: { base64: args.characterRefBase64 },
               signal: ctx.signal,
             });
-            usageAcc = mergeUsageLocal(usageAcc, images[0]?.usage);
-            return images;
+            usedModel = route.model;
+          } else {
+            images = await route.image.generate({ prompt, aspectRatio: input.aspectRatio, n: 1, signal: ctx.signal });
+            usedModel = route.model;
           }
-          const images = await route.image.generate({ prompt, aspectRatio: input.aspectRatio, n: 1, signal: ctx.signal });
           usageAcc = mergeUsageLocal(usageAcc, images[0]?.usage);
           return images;
         });
@@ -469,11 +476,13 @@ async function generateComicPage(
       metadataJson: JSON.stringify({
         mode: "comic",
         usedEdit: Boolean(args.characterRefBase64 && deps.imageRoutes.some((r) => r.image.capabilities().imageEditSingle)),
+        model: usedModel,
       }),
     });
     deps.runRepo.succeedNode(node.id, {
       outputRef: JSON.stringify({ pageIndex, assetId: asset.id }),
       images: 1,
+      model: usedModel ?? undefined,
       promptTokens: usageAcc.promptTokens,
       completionTokens: usageAcc.completionTokens,
       costUsd: usageAcc.costUsd,
@@ -588,6 +597,7 @@ async function runStructured<T>(
   });
   try {
     let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
+    let usedModel: string | null = null;
     const value = await withModelFallbacks({
       routes: deps.textRoutes.map((route) => ({ config: route.config, model: route.model })),
       signal: ctx.signal,

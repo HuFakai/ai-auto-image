@@ -12,15 +12,6 @@ const nodeLabels: Record<string, string> = {
   "package-export": "装订导出",
 };
 
-const nodeOrder = [
-  "parse-input",
-  "generate-brief",
-  "generate-storyboard",
-  "generate-images",
-  "render-slides",
-  "package-export",
-];
-
 function runStamp(status: string): { text: string; className: string } {
   switch (status) {
     case "succeeded":
@@ -165,19 +156,21 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           <h2 className="font-display text-lg font-bold">工序</h2>
         </div>
         <div className="grid grid-cols-2 gap-x-8 gap-y-0 sm:grid-cols-3">
-          {nodeOrder
-            .filter((name) => name !== "render-slides" || isDeterministic)
-            .map((name, index) => {
-              const node = detail.nodes.find((n) => n.nodeName === name);
-              const status = node?.status ?? "pending";
+          {detail.nodes
+            .filter((node, index, all) => all.findIndex((n) => n.nodeName === node.nodeName) === index)
+            .map((node, index) => {
+              const status = node.status;
               return (
-                <div key={name} className="flex items-baseline justify-between border-b border-line py-2.5">
+                <div
+                  key={node.nodeName}
+                  className="flex items-baseline justify-between border-b border-line py-2.5"
+                >
                   <span className="text-sm">
                     <span className="mr-2 font-mono text-[11px] text-ink-faint">
                       {String(index + 1).padStart(2, "0")}
                     </span>
-                    {nodeLabels[name] ?? name}
-                    {node && node.attempt > 1 ? (
+                    {nodeLabels[node.nodeName] ?? node.nodeName}
+                    {node.attempt > 1 ? (
                       <span className="ml-1 font-mono text-[10px] text-seal">×{node.attempt}</span>
                     ) : null}
                   </span>
@@ -238,9 +231,74 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         </div>
       </section>
 
-      {/* 版权页 */}
+      {/* 生成信息（全部参数可追溯） */}
       <section className="rise border-t-2 border-ink pt-5" style={{ animationDelay: "180ms" }}>
-        <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
+        <div className="mb-4 flex items-baseline justify-between">
+          <h2 className="font-display text-lg font-bold">生成信息</h2>
+          <span className="kicker">COLOPHON · 全参数可追溯</span>
+        </div>
+        <div className="grid grid-cols-2 gap-x-8 gap-y-0 sm:grid-cols-3">
+          <InfoRow label="内容类型" value={detail.generation.recipe === "comic_story" ? "科普漫画" : "知识卡片"} />
+          <InfoRow label="文字模式" value={detail.generation.textRenderingMode === "native" ? "原生中文（模型出图）" : "确定性排版（程序合成）"} />
+          <InfoRow label="比例 · 平台" value={`${detail.generation.aspectRatio} · ${detail.generation.platform}`} />
+          <InfoRow
+            label="Brand Kit"
+            value={
+              detail.generation.brandKit
+                ? `${detail.generation.brandKit.name}（${detail.generation.brandKit.themeId}）${
+                    detail.generation.brandKit.styleKeywords.length
+                      ? ` · ${detail.generation.brandKit.styleKeywords.join("、")}`
+                      : ""
+                  }`
+                : "未使用"
+            }
+          />
+          <InfoRow
+            label="文本模型"
+            value={detail.generation.routes.filter((r) => r.kind !== "mock" && (r.model.includes("deepseek") || r.model.includes("gpt-") || r.model.includes("grok-4") || r.model.includes("o"))).length > 0
+              ? detail.generation.routes
+                  .filter((r) => r.model.includes("deepseek") || /gpt-[45o]/.test(r.model) || /grok-[234]/.test(r.model))
+                  .map((r) => `${r.model}（${r.kind}）`)
+                  .join(" → ") || "—"
+              : "—"}
+          />
+          <InfoRow
+            label="图片模型"
+            value={
+              detail.generation.routes
+                .filter((r) => /imagine|image|dall/i.test(r.model))
+                .map((r) => `${r.model}（${r.kind}${/imagine-image-2|gpt-image/.test(r.model) ? ", 图生图" : ""}）`)
+                .join(" → ") || "—"
+            }
+          />
+          <InfoRow
+            label="并发（请求/生效/上限）"
+            value={
+              detail.concurrency
+                ? `${detail.concurrency.requested} / ${detail.concurrency.effective} / ${detail.concurrency.serverMax}`
+                : "—"
+            }
+          />
+          <InfoRow label="排版模板" value={detail.generation.templateVersion ?? "—"} />
+          <InfoRow
+            label="角色定妆图"
+            value={
+              detail.generation.characterRefAssetId ? (
+                <a
+                  href={`/api/assets/${detail.generation.characterRefAssetId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-seal underline"
+                >
+                  查看参考图
+                </a>
+              ) : (
+                "—"
+              )
+            }
+          />
+        </div>
+        <div className="mt-4 grid grid-cols-2 gap-5 border-t border-line pt-4 sm:grid-cols-4">
           <Metric label="TOKENS" value={detail.totals.totalTokens.toLocaleString()} />
           <Metric label="IMAGES" value={String(detail.totals.images)} />
           <Metric label="COST (USD)" value={`$${detail.totals.costUsd.toFixed(4)}`} />
@@ -250,6 +308,15 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           />
         </div>
       </section>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 border-b border-line py-2">
+      <span className="shrink-0 text-xs text-ink-soft">{label}</span>
+      <span className="truncate text-right font-mono text-[12px] text-ink">{value}</span>
     </div>
   );
 }
@@ -290,9 +357,10 @@ function PageFrame({
           />
         </div>
         <figcaption className="flex items-center justify-between px-1 py-2.5">
-          <span className="font-mono text-[10px] text-ink-faint">
+          <span className="font-mono text-[10px] text-ink-faint" title={page.model ? `生成模型：${page.model}` : undefined}>
             图{String(no).padStart(2, "0")} · {page.role}
             {revised ? ` · 第${page.revision}版` : ""}
+            {page.model ? ` · ${page.model}` : ""}
           </span>
           <span className="truncate px-2 text-xs text-ink-soft">{page.headline}</span>
           <button className="btn-ghost shrink-0 px-2 py-0.5 font-mono text-[10px]" onClick={onToggleEdit}>

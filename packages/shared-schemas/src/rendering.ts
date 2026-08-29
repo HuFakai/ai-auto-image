@@ -57,5 +57,7 @@ export const CreateRunInputSchema = z.object({
   sourceUrl: z.string().max(500).optional(),
   /** Brand Kit 配置快照（创建时由服务端从 brand_kits 表解析冻结） */
   brandKit: BrandKitConfigSchema.optional(),
+  /** 创建时提交的 Brand Kit id（运行详情展示用） */
+  brandKitId: z.string().optional(),
 });
 export type CreateRunInput = z.infer<typeof CreateRunInputSchema>;

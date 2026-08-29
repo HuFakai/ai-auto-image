@@ -29,6 +29,9 @@ importers:
       '@aai/workflow-engine':
         specifier: workspace:*
         version: link:packages/workflow-engine
+      better-sqlite3:
+        specifier: ^12.2.0
+        version: 12.11.1
       eslint:
         specifier: ^9.30.0
         version: 9.39.5(jiti@2.7.0)

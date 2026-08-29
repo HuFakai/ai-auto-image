@@ -164,6 +164,8 @@ export class RunRepo {
       completionTokens?: number;
       images?: number;
       costUsd?: number;
+      /** 实际使用的模型（多路由回退后与 startNode 记录的首选可能不同） */
+      model?: string;
     } = {},
   ) {
     this.db
@@ -176,6 +178,7 @@ export class RunRepo {
         completionTokens: extra.completionTokens ?? 0,
         images: extra.images ?? 0,
         costUsd: extra.costUsd ?? null,
+        ...(extra.model ? { model: extra.model } : {}),
       })
       .where(eq(nodeRuns.id, id))
       .run();

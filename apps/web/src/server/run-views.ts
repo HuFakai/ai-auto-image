@@ -10,6 +10,7 @@ interface NodeRow {
   attempt: number;
   outputRef: string | null;
   errorSummary: string | null;
+  model: string | null;
 }
 
 /** 从持久化状态推导运行列表（供 SSR 与 GET /api/runs 复用） */
@@ -46,10 +47,14 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
   } catch {
     return null;
   }
-  const input = JSON.parse(run.inputJson) as RunDetailPayload["input"];
+  const input = JSON.parse(run.inputJson) as RunDetailPayload["input"] & { brandKitId?: string };
   const nodes = runtime.runRepo.listNodeRuns(runId) as unknown as NodeRow[];
   const snapshot = run.snapshotJson
-    ? (JSON.parse(run.snapshotJson) as { concurrency?: RunDetailPayload["concurrency"] })
+    ? (JSON.parse(run.snapshotJson) as {
+        concurrency?: RunDetailPayload["concurrency"];
+        routes?: Array<{ id: string; kind?: string; model: string }>;
+        templateVersion?: string;
+      })
     : null;
 
   // Storyboard 与页面状态（知识卡片 / 科普漫画两种节点名）
@@ -87,6 +92,24 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
     const current = runtime.assetRepo.latestForPage(runId, slide.index);
     if (current) {
       const metadata = current.metadataJson ? (JSON.parse(current.metadataJson) as Record<string, unknown>) : {};
+      // 页面模型优先读资产 metadata（回退链：合成节点 → 同页出图节点）
+      const pageModelFromMeta =
+        typeof metadata.model === "string" && metadata.model
+          ? metadata.model
+          : (() => {
+              const generatedAsset = runtime
+                .assetRepo.listByRun(runId)
+                .filter((a) => a.pageIndex === slide.index && a.kind === "generated")
+                .sort((a, b) => b.createdAt - a.createdAt)[0];
+              const genMeta = generatedAsset?.metadataJson
+                ? (JSON.parse(generatedAsset.metadataJson) as Record<string, unknown>)
+                : {};
+              if (typeof genMeta.model === "string" && genMeta.model) return genMeta.model;
+              const genNode = generatedAsset?.nodeRunId
+                ? nodes.find((n) => n.id === generatedAsset.nodeRunId)
+                : undefined;
+              return genNode?.model ?? undefined;
+            })();
       return {
         index: slide.index,
         role: slide.role,
@@ -98,6 +121,7 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
         visualCheckPassed:
           typeof metadata.visualCheckPassed === "boolean" ? metadata.visualCheckPassed : undefined,
         revision: typeof metadata.revision === "number" ? metadata.revision : undefined,
+        model: pageModelFromMeta,
       };
     }
     // 尚无当前资产：看是否有失败的页面节点（可重试）
@@ -122,6 +146,21 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
   const job = runtime.jobRepo.list(200).find((j) => j.runId === runId);
   const totals = runtime.runRepo.runTotals(runId);
 
+  // 生成信息：输入 + 冻结快照 + 漫画定妆图
+  const brandKitMeta = input.brandKit
+    ? {
+        name: input.brandKitId ? (runtime.brandKitRepo.list().find((k) => k.id === input.brandKitId)?.name ?? "已删除") : "自定义",
+        themeId: input.brandKit.themeId,
+        styleKeywords: input.brandKit.styleKeywords,
+      }
+    : null;
+  const characterRefNode = nodes.find(
+    (n) => n.nodeName === "generate-character-ref" && n.status === "succeeded",
+  );
+  const characterRefAssetId = characterRefNode?.outputRef
+    ? (JSON.parse(characterRefNode.outputRef) as { assetId?: string }).assetId ?? null
+    : null;
+
   return {
     runId,
     status: run.status as RunDetailPayload["status"],
@@ -137,6 +176,21 @@ export function buildRunDetail(runtime: Runtime, runId: string): RunDetailPayloa
       : null,
     nodes: nodes.map((n) => ({ nodeName: n.nodeName, status: n.status, attempt: n.attempt })),
     storyboardTitle: storyboard?.title ?? comicStoryboard?.title ?? null,
+    generation: {
+      recipe: input.recipe ?? "knowledge_cards",
+      textRenderingMode: input.textRenderingMode,
+      aspectRatio: input.aspectRatio,
+      platform: input.platform,
+      brandKit: brandKitMeta,
+      routes: (snapshot?.routes ?? []).map((r) => ({
+        ...r,
+        kind:
+          r.kind ??
+          (/imagine|image|dall/i.test(r.model) ? "image" : /deepseek|gpt-|grok-|o[134]/.test(r.model) ? "text" : "unknown"),
+      })),
+      templateVersion: snapshot?.templateVersion ?? null,
+      characterRefAssetId,
+    },
     pages,
   };
 }

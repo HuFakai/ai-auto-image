@@ -251,6 +251,7 @@ async function generatePage(
   try {
     const startedAt = Date.now();
     let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
+    let usedModel: string | null = null;
 
     const result = await withModelFallbacks({
       routes: deps.imageRoutes.map((route) => ({ config: route.config, model: route.model })),
@@ -265,6 +266,7 @@ async function generatePage(
             n: 1,
             signal: ctx.signal,
           });
+          usedModel = route.model;
           usageAcc = mergeUsageInto(usageAcc, images[0]?.usage);
           return images;
         });
@@ -327,7 +329,7 @@ async function generatePage(
       mimeType: saved.mimeType,
       bytes: saved.bytes,
       checksum: saved.checksum,
-      metadataJson: JSON.stringify(metadata),
+      metadataJson: JSON.stringify({ ...metadata, model: usedModel }),
     });
 
     deps.runRepo.succeedNode(node.id, {
@@ -340,6 +342,7 @@ async function generatePage(
         visualIntent: slide.visualIntent,
       }),
       images: 1,
+        model: usedModel ?? undefined,
       promptTokens: usageAcc.promptTokens,
       completionTokens: usageAcc.completionTokens,
       costUsd: usageAcc.costUsd,
