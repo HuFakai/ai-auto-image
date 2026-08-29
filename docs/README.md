@@ -6,6 +6,7 @@
 
 1. [GitHub 项目与 Skills 调研报告](./01-research-and-reference.md)
 2. [总体开发规划方案](./02-master-development-plan.md)
+3. [实现评审与下一步开发路线图](./03-implementation-review-and-roadmap.md)
 3. [阶段 0：工程基础与技术验证](./phases/00-foundation-and-validation.md)
 4. [阶段 1：图文生成 MVP](./phases/01-mvp-carousel-generation.md)
 5. [阶段 2：漫画与高级视觉](./phases/02-comic-and-advanced-visuals.md)
