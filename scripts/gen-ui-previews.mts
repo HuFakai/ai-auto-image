@@ -1,7 +1,7 @@
 /** 开发脚本:解密 gpt 渠道密钥并调用 gpt-image-2 生成 UI 预览效果图(密钥不打印) */
 import fs from "node:fs";
 import path from "node:path";
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from "node:crypto";
+import { createDecipheriv, scryptSync } from "node:crypto";
 import postgres from "postgres";
 
 const root = path.resolve(import.meta.dirname, "..");

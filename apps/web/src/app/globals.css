@@ -1,26 +1,27 @@
 @import "tailwindcss";
 
 @theme {
-  /* ── 纸感印刷色板 ─────────────────────────────────────── */
-  --color-paper: #faf7f2;
-  --color-paper-deep: #f1eade;
-  --color-paper-card: #fffdf9;
-  --color-ink: #1c1814;
-  --color-ink-soft: #6e675c;
-  --color-ink-faint: #a39b8b;
-  --color-seal: #b5382d;
-  --color-seal-deep: #8e2b22;
-  --color-line: #e3dccb;
-  --color-line-dark: #c9c0aa;
+  /* ── 暗室暗房色板(方案 A)──────────────────────────────
+     底:暖炭三阶 / 字:纸白三阶 / 强调:小红书红 FF2442 ── */
+  --color-paper: #141210; /* 页面底色 */
+  --color-paper-deep: #1c1916; /* 面板 / 侧栏 */
+  --color-paper-card: #211d19; /* 卡片 */
+  --color-ink: #ede7da; /* 主文字(纸白) */
+  --color-ink-soft: #9a9184; /* 次级 */
+  --color-ink-faint: #6b6459; /* 弱化 */
+  --color-seal: #ff2442; /* 小红书红 */
+  --color-seal-deep: #b81c34;
+  --color-line: #35302a; /* 边线 */
+  --color-line-dark: #4a4239; /* 强边线 / 输入底线 */
 
-  --font-display: var(--font-noto-serif-sc), "Noto Serif SC", serif;
-  --font-body: var(--font-noto-sans-sc), "Noto Sans SC", sans-serif;
-  --font-mono: var(--font-plex-mono), "IBM Plex Mono", monospace;
+  --font-display: -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-body: -apple-system, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
 }
 
 html {
   background: var(--color-paper);
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 body {
@@ -30,64 +31,38 @@ body {
 }
 
 ::selection {
-  background: rgba(181, 56, 45, 0.18);
+  background: rgba(255, 36, 66, 0.28);
 }
 
-/* ── 纸张肌理：极轻噪点 ─────────────────────────────────── */
-.grain::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 50;
-  opacity: 0.028;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-/* ── 印章 ───────────────────────────────────────────────── */
+/* ── 印章 logo:小红书红圆角方块 ─────────────────────────── */
 .seal {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: var(--color-seal);
-  color: var(--color-paper);
-  font-family: var(--font-display);
-  font-weight: 900;
-  transform: rotate(-3deg);
-  border-radius: 2px;
-  box-shadow: inset 0 0 0 1.5px rgba(250, 247, 242, 0.55), inset 0 0 0 3px var(--color-seal);
+  color: #fff;
+  font-weight: 800;
+  border-radius: 8px;
 }
 
-/* 状态章：完成盖「已讫」 */
+/* ── 状态章:mono 小圆角章 ───────────────────────────────── */
 .stamp {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1.5px solid currentColor;
-  border-radius: 2px;
-  font-family: var(--font-display);
-  font-weight: 900;
-  transform: rotate(-6deg);
-  padding: 1px 6px;
-  animation: stampIn 0.45s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 1px 7px;
 }
 .stamp-quiet {
   border-style: dashed;
-  transform: rotate(0deg);
   animation: none;
 }
-@keyframes stampIn {
-  from {
-    opacity: 0;
-    transform: rotate(-6deg) scale(1.7);
-  }
-  to {
-    opacity: 1;
-    transform: rotate(-6deg) scale(1);
-  }
-}
 
-/* ── 载入显影 ───────────────────────────────────────────── */
+/* ── 载入升起 ───────────────────────────────────────────── */
 @keyframes riseIn {
   from {
     opacity: 0;
@@ -99,10 +74,10 @@ body {
   }
 }
 .rise {
-  animation: riseIn 0.55s cubic-bezier(0.22, 0.9, 0.3, 1) both;
+  animation: riseIn 0.5s cubic-bezier(0.22, 0.9, 0.3, 1) both;
 }
 
-/* ── kicker：栏首小标 ───────────────────────────────────── */
+/* ── kicker:mono 栏首小标 ───────────────────────────────── */
 .kicker {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -111,9 +86,9 @@ body {
   text-transform: uppercase;
 }
 
-/* ── 杂志双细线分隔 ─────────────────────────────────────── */
+/* ── 分隔(顶部墨线保留语义)────────────────────────────── */
 .rule-double {
-  border-top: 1px solid var(--color-ink);
+  border-top: 1px solid var(--color-line-dark);
   position: relative;
 }
 .rule-double::after {
@@ -122,10 +97,10 @@ body {
   left: 0;
   right: 0;
   top: 2px;
-  border-top: 1px solid var(--color-line-dark);
+  border-top: 1px solid var(--color-line);
 }
 
-/* ── 输入：纸面刻线 ─────────────────────────────────────── */
+/* ── 输入:暗色底线 ─────────────────────────────────────── */
 .field-input {
   width: 100%;
   background: transparent;
@@ -138,7 +113,7 @@ body {
   transition: border-color 0.2s;
 }
 .field-input:focus {
-  border-bottom-color: var(--color-ink);
+  border-bottom-color: var(--color-seal);
 }
 .field-input::placeholder {
   color: var(--color-ink-faint);
@@ -146,6 +121,10 @@ body {
 select.field-input {
   appearance: none;
   cursor: pointer;
+}
+select.field-input option {
+  background: var(--color-paper-deep);
+  color: var(--color-ink);
 }
 .field-label {
   font-family: var(--font-mono);
@@ -155,16 +134,16 @@ select.field-input {
   text-transform: uppercase;
 }
 
-/* ── 按钮：墨块 / 红章 ──────────────────────────────────── */
+/* ── 按钮:主红 / 幽灵 ──────────────────────────────────── */
 .btn-ink {
-  background: var(--color-ink);
-  color: var(--color-paper);
+  background: var(--color-seal);
+  color: #fff;
   font-weight: 600;
-  border-radius: 2px;
+  border-radius: 9px;
   transition: background 0.18s, transform 0.15s;
 }
 .btn-ink:hover:not(:disabled) {
-  background: var(--color-seal);
+  background: #ff3b55;
   transform: translateY(-1px);
 }
 .btn-ink:disabled {
@@ -173,18 +152,40 @@ select.field-input {
   transform: none;
 }
 .btn-ghost {
-  border: 1px solid var(--color-line-dark);
+  border: 1px solid var(--color-line);
   color: var(--color-ink-soft);
-  border-radius: 2px;
+  border-radius: 7px;
   transition: border-color 0.15s, color 0.15s;
 }
 .btn-ghost:hover:not(:disabled) {
-  border-color: var(--color-ink);
+  border-color: var(--color-ink-soft);
   color: var(--color-ink);
 }
 .btn-ghost:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ── 筛选 chips(mono 胶囊)────────────────────────────── */
+.chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 5px 14px;
+  border-radius: 99px;
+  border: 1px solid var(--color-line);
+  color: var(--color-ink-soft);
+  cursor: pointer;
+  transition: 0.15s;
+  background: transparent;
+}
+.chip:hover {
+  color: var(--color-ink);
+  border-color: var(--color-ink-faint);
+}
+.chip.on {
+  background: var(--color-seal);
+  border-color: var(--color-seal);
+  color: #fff;
 }
 
 /* ── 运行目录行 ─────────────────────────────────────────── */
@@ -197,16 +198,15 @@ select.field-input {
   box-shadow: inset 3px 0 0 var(--color-seal);
 }
 
-/* ── 相纸页帧 ───────────────────────────────────────────── */
+/* ── 相纸页帧:暗房显影 ─────────────────────────────────── */
 .photo-frame {
   background: var(--color-paper-card);
   border: 1px solid var(--color-line);
-  box-shadow: 0 1px 2px rgba(28, 24, 20, 0.06), 0 8px 24px -12px rgba(28, 24, 20, 0.18);
 }
 @keyframes develop {
   from {
     opacity: 0;
-    filter: contrast(0.4) brightness(1.5);
+    filter: contrast(0.4) brightness(1.6);
   }
   to {
     opacity: 1;
@@ -219,7 +219,7 @@ select.field-input {
 @keyframes breathe {
   0%,
   100% {
-    border-color: var(--color-line-dark);
+    border-color: var(--color-line);
   }
   50% {
     border-color: var(--color-seal);
@@ -227,4 +227,150 @@ select.field-input {
 }
 .frame-pending {
   animation: breathe 2.2s ease-in-out infinite;
+}
+
+/* ── 显影网格卡(工作台作品卡)────────────────────────── */
+.develop-card {
+  background: var(--color-paper-card);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: 0.2s;
+}
+.develop-card:hover {
+  border-color: var(--color-seal-deep);
+  transform: translateY(-2px);
+}
+.develop-card .cover-img {
+  transition: filter 0.45s ease, transform 0.45s ease;
+}
+.develop-card:hover .cover-img {
+  transform: scale(1.03);
+}
+
+/* ── 底部悬浮创作条 ─────────────────────────────────────── */
+.createbar-shell {
+  position: fixed;
+  bottom: 20px;
+  left: calc(64px + (100% - 64px) / 2);
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 112px));
+  z-index: 30;
+}
+.createbar {
+  background: var(--color-paper-deep);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+/* ── 效果图预览托盘(类型/品牌选择)────────────────────── */
+.tray {
+  display: none;
+  border-top: 1px solid var(--color-line);
+  padding: 12px 14px 14px;
+}
+.tray.open {
+  display: block;
+  animation: trayIn 0.22s ease;
+}
+@keyframes trayIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.tray-hint {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--color-ink-faint);
+  margin-bottom: 9px;
+}
+.tray-row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+.tray-card {
+  flex: none;
+  width: 92px;
+  cursor: pointer;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--color-paper-card);
+  transition: 0.15s;
+  position: relative;
+}
+.tray-card:hover {
+  border-color: var(--color-ink-faint);
+  transform: translateY(-2px);
+}
+.tray-card.sel {
+  border-color: var(--color-seal);
+  box-shadow: 0 0 0 1px var(--color-seal);
+}
+.tray-card img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  display: block;
+}
+.tray-card .tray-name {
+  font-size: 10.5px;
+  color: var(--color-ink-soft);
+  text-align: center;
+  padding: 5px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tray-card.sel .tray-name {
+  color: var(--color-seal);
+}
+.tray-card.sel::after {
+  content: "✓";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--color-seal);
+  color: #fff;
+  font-size: 11px;
+  display: grid;
+  place-items: center;
+}
+
+/* ── 大图 lightbox ──────────────────────────────────────── */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 7, 6, 0.88);
+  z-index: 60;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  backdrop-filter: blur(6px);
+}
+.lightbox.open {
+  display: flex;
+}
+.lightbox img {
+  max-height: 76vh;
+  max-width: 86vw;
+  border-radius: 12px;
+  border: 1px solid var(--color-line);
 }

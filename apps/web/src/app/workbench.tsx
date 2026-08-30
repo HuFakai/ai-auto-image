@@ -1,14 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TextRenderingModeSchema } from "@aai/shared-schemas";
 import type { Recipe } from "@aai/shared-schemas";
 import { RECIPE_LABELS } from "@/lib/types";
 import type { BrandKitView, RunListItem, RunsListPayload } from "@/lib/types";
 
+/* ── 视图类型：运行列表条目补充内容类型（供类型筛选与卡片 meta）── */
+export interface WorkbenchRun extends RunListItem {
+  recipe?: Recipe | undefined;
+}
+export interface WorkbenchInitial extends RunsListPayload {
+  runs: WorkbenchRun[];
+}
+
 interface Props {
-  initial: RunsListPayload;
+  initial: WorkbenchInitial;
   brandKits: BrandKitView[];
+  stats: { total: number; pending: number; images: number };
 }
 
 /** 编辑部状态章：状态 → 章文与色 */
@@ -29,8 +38,6 @@ export function statusStamp(status: string): { text: string; className: string }
   }
 }
 
-const reviewLabel: Record<string, string> = { pending: "待审", approved: "过审", rejected: "驳回" };
-
 /** 主题输入框占位文案（按内容类型给出示例） */
 const TOPIC_PLACEHOLDERS: Record<Recipe, string> = {
   knowledge_cards: "主题，例如：三分钟看懂量子纠缠",
@@ -44,13 +51,65 @@ const TOPIC_PLACEHOLDERS: Record<Recipe, string> = {
   strip_comic: "漫画主题，例如：没带伞的一天",
 };
 
-export function Workbench({ initial, brandKits }: Props) {
-  const [data, setData] = useState<RunsListPayload>(initial);
+/* ── 类型 / 品牌预览托盘数据（效果图存于 public/previews/）── */
+const TYPE_PREVIEWS: Array<{ id: Recipe; name: string; img: string }> = (
+  Object.keys(RECIPE_LABELS) as Recipe[]
+).map((id) => ({ id, name: RECIPE_LABELS[id], img: `/previews/types/${id}.png` }));
+
+const BRAND_PREVIEWS: Array<{ id: string; name: string; img: string }> = [
+  { id: "darkroom", name: "暗房工作室", img: "/previews/brands/darkroom.png" },
+  { id: "paper_minimal", name: "纸感极简", img: "/previews/brands/paper_minimal.png" },
+  { id: "high_contrast", name: "高对比营销", img: "/previews/brands/high_contrast.png" },
+  { id: "morandi", name: "莫兰迪生活", img: "/previews/brands/morandi.png" },
+  { id: "tech_dark", name: "科技深色", img: "/previews/brands/tech_dark.png" },
+  { id: "book_paper", name: "图书纸张", img: "/previews/brands/book_paper.png" },
+];
+
+/** 无封面作品：按类型给渐变占位（参照静态稿 .ph-*） */
+const RECIPE_GRADIENTS: Record<Recipe, string> = {
+  knowledge_cards: "radial-gradient(120% 90% at 20% 15%, #2e4a8f 0%, #101a33 58%, #0a0f1e 100%)",
+  comic_story: "linear-gradient(200deg, #20302b 0%, #0e1613 60%, #080b0a 100%)",
+  quote_cards: "radial-gradient(130% 100% at 50% 0%, #4a3f6b 0%, #241e38 55%, #0e0b18 100%)",
+  checklist_cards: "linear-gradient(180deg, #1e3a34 0%, #0c1714 100%)",
+  comparison_cards: "linear-gradient(140deg, #dde4ea 0%, #9fb2c4 50%, #4e6072 100%)",
+  product_showcase: "radial-gradient(110% 100% at 75% 20%, #e8834a 0%, #b4402a 55%, #3e120c 100%)",
+  book_recommendations: "linear-gradient(160deg, #f2e8d5 0%, #d8c9a8 45%, #8a6f45 100%)",
+  article_digest: "linear-gradient(180deg, #3a2f22 0%, #171008 100%)",
+  strip_comic: "radial-gradient(120% 100% at 30% 80%, #c8b7d9 0%, #7e6a99 45%, #2e2440 100%)",
+};
+
+/** 相对时间（挂载后渲染，避免 SSR/客户端水合不一致） */
+function relativeTime(ts: number): string {
+  const minutes = Math.floor((Date.now() - ts) / 60000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return "昨天";
+  if (days < 30) return `${days} 天前`;
+  return new Date(ts).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+}
+
+function absoluteTime(ts: number): string {
+  return new Date(ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+const REVIEW_FILTERS = [
+  { value: "all", label: "全部" },
+  { value: "pending", label: "待评审" },
+  { value: "approved", label: "已完成" },
+  { value: "rejected", label: "驳回" },
+] as const;
+
+export function Workbench({ initial, brandKits, stats }: Props) {
+  const [data, setData] = useState<WorkbenchInitial>(initial);
   const [topic, setTopic] = useState("");
   const [aspectRatio, setAspectRatio] = useState("3:4");
   const [mode, setMode] = useState<string>("native");
   const [sourceText, setSourceText] = useState("");
   const [brandKitId, setBrandKitId] = useState("");
+  const [brandTheme, setBrandTheme] = useState(""); // 托盘选中的品牌主题 id（"" = 不使用）
   const [recipe, setRecipe] = useState<Recipe>("knowledge_cards");
   const [castDescription, setCastDescription] = useState("");
   const [comparisonTarget, setComparisonTarget] = useState("");
@@ -69,8 +128,36 @@ export function Workbench({ initial, brandKits }: Props) {
   const [requireApproval, setRequireApproval] = useState(false);
   const [generateCovers, setGenerateCovers] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [typeFilter, setTypeFilter] = useState<Recipe | "all">("all");
+
+  /* 托盘与 lightbox */
+  const [trayGroup, setTrayGroup] = useState<"type" | "brand" | null>(null);
+  const [lightbox, setLightbox] = useState<{ img: string; name: string } | null>(null);
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /* 内容类型映射（轮询刷新不携带 recipe，用首屏解析结果回填） */
+  const recipeMap = useRef<Map<string, Recipe | undefined>>(
+    new Map(initial.runs.map((run) => [run.runId, run.recipe])),
+  );
 
   const isComicRecipe = recipe === "comic_story" || recipe === "strip_comic";
+  const brandName = BRAND_PREVIEWS.find((item) => item.id === brandTheme)?.name ?? "不使用";
+
+  /* Esc 关闭大图 / 托盘；卸载时清理计时器 */
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setLightbox(null);
+      setTrayGroup(null);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      if (clickTimer.current) clearTimeout(clickTimer.current);
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     const active = data.runs.some((run) => run.status === "running" || run.status === "queued");
@@ -78,7 +165,12 @@ export function Workbench({ initial, brandKits }: Props) {
       async () => {
         try {
           const response = await fetch("/api/runs", { cache: "no-store" });
-          if (response.ok) setData((await response.json()) as RunsListPayload);
+          if (!response.ok) return;
+          const payload = (await response.json()) as RunsListPayload;
+          setData({
+            ...payload,
+            runs: payload.runs.map((run) => ({ ...run, recipe: recipeMap.current.get(run.runId) })),
+          });
         } catch {
           /* 下一轮再取 */
         }
@@ -167,346 +259,483 @@ export function Workbench({ initial, brandKits }: Props) {
     }
   }
 
-  const filteredRuns =
-    reviewFilter === "all" ? data.runs : data.runs.filter((run) => run.reviewStatus === reviewFilter);
+  /* 托盘交互：单击 = 选中（260ms 后收起），双击 = 大图 */
+  function openTray(group: "type" | "brand") {
+    setTrayGroup((current) => (current === group ? null : group));
+  }
+  function selectTrayCard(group: "type" | "brand", id: string) {
+    if (group === "type") {
+      setRecipe(id as Recipe);
+    } else {
+      setBrandTheme(id);
+      setBrandKitId(brandKits.find((kit) => kit.themeId === id)?.id ?? "");
+    }
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => setTrayGroup(null), 260);
+  }
+  function onTrayCardClick(group: "type" | "brand", id: string) {
+    if (clickTimer.current) clearTimeout(clickTimer.current);
+    clickTimer.current = setTimeout(() => selectTrayCard(group, id), 260);
+  }
+  function onTrayCardDoubleClick(group: "type" | "brand", item: { name: string; img?: string }) {
+    if (clickTimer.current) clearTimeout(clickTimer.current);
+    if (item.img) setLightbox({ img: item.img, name: item.name });
+  }
+
+  const filteredRuns = data.runs.filter(
+    (run) =>
+      (reviewFilter === "all" || run.reviewStatus === reviewFilter) &&
+      (typeFilter === "all" || run.recipe === typeFilter),
+  );
+
+  const trayItems =
+    trayGroup === "type"
+      ? TYPE_PREVIEWS
+      : trayGroup === "brand"
+        ? [{ id: "", name: "不使用", img: "" }, ...BRAND_PREVIEWS]
+        : [];
+  const traySelectedId = trayGroup === "type" ? recipe : trayGroup === "brand" ? brandTheme : "";
 
   return (
-    <div className="pb-56">
-      {/* 刊首 */}
-      <section className="rise pt-10">
-        <p className="kicker">
-          VOL.01 · {new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "long" })} ·{" "}
-          {data.providerMode === "real" ? "真实渠道" : data.providerMode === "partial" ? "部分真实渠道" : "演示渠道"}
-        </p>
-        <h1 className="mt-3 font-display text-3xl font-black sm:text-4xl">
-          作品集<span className="text-seal">。</span>
-        </h1>
-      </section>
-
-      {/* 运行卡片网格 */}
-      <section className="rise mt-8" style={{ animationDelay: "80ms" }}>
-        <div className="rule-double mb-5 flex items-baseline justify-between pt-2">
-          <h2 className="font-display text-lg font-bold">最近运行</h2>
-          <div className="flex items-center gap-1">
-            {(["all", "pending", "approved", "rejected"] as const).map((value) => (
-              <button
-                key={value}
-                className={`px-2.5 py-1 font-mono text-[11px] transition-colors ${
-                  reviewFilter === value ? "bg-ink text-paper" : "text-ink-soft hover:text-ink"
-                }`}
-                onClick={() => setReviewFilter(value)}
-              >
-                {value === "all" ? "全部" : reviewLabel[value]}
-              </button>
-            ))}
-          </div>
+    <div className="px-[26px] pb-[190px] pt-[22px] max-md:px-4">
+      {/* 统计行 */}
+      <div className="mb-5 flex flex-wrap gap-[26px] max-md:gap-4">
+        <div>
+          <div className="font-mono text-[22px] font-bold leading-tight">{stats.total}</div>
+          <div className="text-xs text-ink-faint">作品总数</div>
         </div>
-        {filteredRuns.length === 0 ? (
-          <p className="border border-dashed border-line-dark px-6 py-14 text-center text-sm text-ink-faint">
-            {data.runs.length === 0 ? "版面还是空的 —— 在下方写下第一个主题。" : "该评审状态下暂无运行。"}
-          </p>
-        ) : (
-          <div className="grid grid-cols-2 gap-6 md:grid-cols-3">
-            {filteredRuns.map((run) => (
-              <RunCard key={run.runId} run={run} />
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* 底部悬浮创作条 */}
-      <div className="fixed inset-x-0 bottom-0 z-40">
-        <div className="mx-auto max-w-5xl px-4 pb-4">
-          <div className="photo-frame border-2 border-ink p-4 shadow-[0_-8px_40px_-12px_rgba(28,24,20,0.35)]">
-            {error && <p className="mb-2 font-mono text-xs text-seal">⚠ {error}</p>}
-            {notice && <p className="mb-2 font-mono text-xs text-ink-soft">✓ {notice}</p>}
-            <div className="flex items-center gap-3">
-              <input
-                id="topic"
-                className="field-input !border-b-0 font-display !text-lg"
-                placeholder={TOPIC_PLACEHOLDERS[recipe]}
-                value={topic}
-                maxLength={120}
-                onChange={(event) => setTopic(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") void submit();
-                }}
-              />
-              <button
-                className="btn-ink shrink-0 px-6 py-2.5 font-mono text-sm tracking-[0.15em]"
-                onClick={() => void submit()}
-                disabled={submitting || !topic.trim()}
-              >
-                {submitting ? "排字中…" : "开始创作"}
-              </button>
-              <button
-                className="btn-ghost shrink-0 px-3 py-2.5 font-mono text-sm"
-                onClick={() => setMoreOpen(!moreOpen)}
-                title="更多输入与参数"
-              >
-                {moreOpen ? "收起 ▾" : "展开 ▸"}
-              </button>
-            </div>
-
-            {moreOpen && (
-              <div className="mt-4 space-y-4 border-t border-line pt-4">
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-5">
-                  <div>
-                    <span className="field-label">内容类型</span>
-                    <select
-                      className="field-input mt-1 !py-1.5 !text-[13px]"
-                      value={recipe}
-                      onChange={(event) => setRecipe(event.target.value as Recipe)}
-                    >
-                      {(Object.keys(RECIPE_LABELS) as Recipe[]).map((value) => (
-                        <option key={value} value={value}>
-                          {RECIPE_LABELS[value]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <span className="field-label">文字模式</span>
-                    <select
-                      className="field-input mt-1 !py-1.5 !text-[13px]"
-                      value={mode}
-                      onChange={(event) => setMode(event.target.value)}
-                    >
-                      <option value="native">原生中文</option>
-                      <option value="deterministic">确定性排版</option>
-                    </select>
-                  </div>
-                  <div>
-                    <span className="field-label">比例</span>
-                    <select
-                      className="field-input mt-1 !py-1.5 !text-[13px]"
-                      value={aspectRatio}
-                      onChange={(event) => setAspectRatio(event.target.value)}
-                    >
-                      <option value="3:4">3:4</option>
-                      <option value="9:16">9:16</option>
-                      <option value="1:1">1:1</option>
-                      <option value="16:9">16:9</option>
-                    </select>
-                  </div>
-                  <div>
-                    <span className="field-label">品牌手册</span>
-                    <select
-                      className="field-input mt-1 !py-1.5 !text-[13px]"
-                      value={brandKitId}
-                      onChange={(event) => setBrandKitId(event.target.value)}
-                    >
-                      <option value="">不使用</option>
-                      {brandKits.map((kit) => (
-                        <option key={kit.id} value={kit.id}>
-                          {kit.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                {isComicRecipe && (
-                  <div>
-                    <span className="field-label">主角设定（可选）</span>
-                    <textarea
-                      className="field-input mt-1 min-h-[48px] resize-y font-mono !text-[12px]"
-                      placeholder="例如：科普向导少女「阿晕」，扎双马尾，戴圆框眼镜，穿薄荷绿实验服"
-                      value={castDescription}
-                      maxLength={2000}
-                      onChange={(event) => setCastDescription(event.target.value)}
-                    />
-                  </div>
-                )}
-
-                {recipe === "comparison_cards" && (
-                  <div>
-                    <span className="field-label">对比对象 B（可选 · 留空则由模型从主题语境确定）</span>
-                    <input
-                      className="field-input mt-1 font-mono !text-[12px]"
-                      placeholder="例如：骑自行车（A） vs 坐地铁（B）中的「坐地铁」"
-                      value={comparisonTarget}
-                      maxLength={400}
-                      onChange={(event) => setComparisonTarget(event.target.value)}
-                    />
-                  </div>
-                )}
-
-                {recipe === "product_showcase" && (
-                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-2">
-                    <div>
-                      <span className="field-label">产品名称（可选）</span>
-                      <input
-                        className="field-input mt-1 font-mono !text-[12px]"
-                        placeholder="例如：摩卡壶"
-                        value={productName}
-                        maxLength={200}
-                        onChange={(event) => setProductName(event.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <span className="field-label">目标人群（可选）</span>
-                      <input
-                        className="field-input mt-1 font-mono !text-[12px]"
-                        placeholder="例如：租房白领"
-                        value={productAudience}
-                        maxLength={400}
-                        onChange={(event) => setProductAudience(event.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <span className="field-label">价格说明（可选）</span>
-                      <input
-                        className="field-input mt-1 font-mono !text-[12px]"
-                        placeholder="例如：200 元档，双十一有优惠"
-                        value={productPriceNote}
-                        maxLength={200}
-                        onChange={(event) => setProductPriceNote(event.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <span className="field-label">卖点（可选 · 逗号分隔）</span>
-                      <input
-                        className="field-input mt-1 font-mono !text-[12px]"
-                        placeholder="例如：小巧、出杯快、好清洗"
-                        value={productSellingPoints}
-                        maxLength={500}
-                        onChange={(event) => setProductSellingPoints(event.target.value)}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {recipe === "book_recommendations" && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <span className="field-label">书名（可选）</span>
-                      <input
-                        className="field-input mt-1 font-mono !text-[12px]"
-                        placeholder="例如：置身事内"
-                        value={bookTitle}
-                        maxLength={300}
-                        onChange={(event) => setBookTitle(event.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <span className="field-label">作者（可选）</span>
-                      <input
-                        className="field-input mt-1 font-mono !text-[12px]"
-                        placeholder="例如：兰小欢"
-                        value={bookAuthor}
-                        maxLength={200}
-                        onChange={(event) => setBookAuthor(event.target.value)}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {!isComicRecipe && (
-                  <label className="flex cursor-pointer items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={generateCovers}
-                      onChange={(event) => setGenerateCovers(event.target.checked)}
-                      className="accent-[#b5382d]"
-                    />
-                    生成 3 个封面候选供挑选（额外消耗 3 次图片额度；漫画不适用）
-                  </label>
-                )}
-
-                <label className="flex cursor-pointer items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={requireApproval}
-                    onChange={(event) => setRequireApproval(event.target.checked)}
-                    className="accent-[#b5382d]"
-                  />
-                  完成后需人工确认终稿（审批门：确认前不可导出）
-                </label>
-
-                {!isComicRecipe && (
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="field-label">
-                        {recipe === "article_digest"
-                          ? "参考资料（必填 · 长文拆解需要原文）"
-                          : recipe === "product_showcase"
-                            ? "产品资料正文（可选 · 有则作为产品资料唯一事实来源）"
-                            : "参考资料（可选 · 长文按要点密度拆为 6–10 页）"}
-                      </span>
-                      <span className="font-mono text-[10px] text-ink-faint">{sourceText.length}/20000</span>
-                    </div>
-                    <textarea
-                      className="field-input mt-1 min-h-[48px] resize-y font-mono !text-[12px]"
-                      placeholder="粘贴文章 / Markdown / 资料正文"
-                      value={sourceText}
-                      maxLength={20000}
-                      onChange={(event) => setSourceText(event.target.value)}
-                    />
-                    <div className="mt-2 flex items-center gap-2">
-                      <input
-                        className="field-input !py-1 font-mono !text-xs"
-                        placeholder="https://example.com/article（实验能力）"
-                        value={url}
-                        onChange={(event) => setUrl(event.target.value)}
-                      />
-                      <button
-                        className="btn-ghost shrink-0 px-3 py-1 font-mono text-[11px]"
-                        onClick={() => void importUrl()}
-                        disabled={urlImporting || !url.trim()}
-                      >
-                        {urlImporting ? "抓取中…" : "从 URL 导入"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+        <div>
+          <div className="font-mono text-[22px] font-bold leading-tight text-seal">{stats.pending}</div>
+          <div className="text-xs text-ink-faint">待评审</div>
+        </div>
+        <div>
+          <div className="font-mono text-[22px] font-bold leading-tight">{stats.images}</div>
+          <div className="text-xs text-ink-faint">已生成图片</div>
         </div>
       </div>
+
+      {/* 筛选 chips */}
+      <div className="mb-4 flex flex-wrap gap-2">
+        {REVIEW_FILTERS.map((item) => {
+          const on =
+            item.value === "all"
+              ? reviewFilter === "all" && typeFilter === "all"
+              : reviewFilter === item.value;
+          return (
+            <button
+              key={item.value}
+              className={`chip ${on ? "on" : ""}`}
+              onClick={() => {
+                if (item.value === "all") setTypeFilter("all");
+                setReviewFilter(item.value);
+              }}
+            >
+              {item.label}
+            </button>
+          );
+        })}
+        {(Object.keys(RECIPE_LABELS) as Recipe[]).map((value) => (
+          <button
+            key={value}
+            className={`chip ${typeFilter === value ? "on" : ""}`}
+            onClick={() => setTypeFilter((current) => (current === value ? "all" : value))}
+          >
+            {RECIPE_LABELS[value]}
+          </button>
+        ))}
+      </div>
+
+      {/* 作品网格：显影卡 */}
+      {filteredRuns.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-line-dark px-6 py-14 text-center text-sm text-ink-faint">
+          {data.runs.length === 0 ? "版面还是空的 —— 在下方写下第一个主题。" : "该筛选条件下暂无作品。"}
+        </p>
+      ) : (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(215px,1fr))] gap-[18px]">
+          {filteredRuns.map((run, index) => (
+            <DevelopCard key={run.runId} run={run} delay={Math.min(index, 7) * 0.05} />
+          ))}
+        </div>
+      )}
+
+      {/* 底部悬浮创作条 */}
+      <div className="createbar-shell">
+        <div className="createbar">
+          {error && <p className="px-4 pt-2.5 font-mono text-xs text-seal">⚠ {error}</p>}
+          {notice && <p className="px-4 pt-2.5 font-mono text-xs text-ink-soft">✓ {notice}</p>}
+
+          {/* row1：主题 + 开始创作 */}
+          <div className="flex items-center gap-2.5 px-3.5 pb-1 pt-3 max-sm:px-3">
+            <input
+              className="min-w-0 flex-1 bg-transparent py-2.5 text-[15px] text-ink outline-none placeholder:text-ink-faint"
+              placeholder={TOPIC_PLACEHOLDERS[recipe]}
+              value={topic}
+              maxLength={120}
+              onChange={(event) => setTopic(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") void submit();
+              }}
+            />
+            <button
+              className="btn-ink shrink-0 px-5 py-2.5 text-sm"
+              onClick={() => void submit()}
+              disabled={submitting || !topic.trim()}
+            >
+              {submitting ? "排字中…" : "开始创作"}
+            </button>
+          </div>
+
+          {/* 类型 / 品牌预览托盘 */}
+          <div className={`tray ${trayGroup ? "open" : ""}`}>
+            <p className="tray-hint">
+              {(trayGroup === "type" ? "内容类型" : "品牌手册") + " · 单击卡片 = 选中 · 双击 = 查看大图"}
+            </p>
+            <div className="tray-row">
+              {trayItems.map((item) => (
+                <div
+                  key={item.id || "none"}
+                  className={`tray-card ${traySelectedId === item.id ? "sel" : ""}`}
+                  onClick={() => onTrayCardClick(trayGroup!, item.id)}
+                  onDoubleClick={() => onTrayCardDoubleClick(trayGroup!, item)}
+                >
+                  {item.img ? (
+                    <img src={item.img} alt={item.name} />
+                  ) : (
+                    <div className="grid aspect-[3/4] place-items-center font-mono text-[10px] tracking-[0.2em] text-ink-faint">
+                      无
+                    </div>
+                  )}
+                  <div className="tray-name">{item.name}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* row2：参数 chips */}
+          <div className="flex flex-wrap items-center gap-1.5 px-3 pb-3 pt-2 max-sm:px-2.5">
+            <Param label="类型" value={RECIPE_LABELS[recipe]} onClick={() => openTray("type")} />
+            <Param
+              label="文字"
+              value={mode === "native" ? "原生中文" : "确定性排版"}
+              onClick={() => setMode((current) => (current === "native" ? "deterministic" : "native"))}
+              title="单击切换文字模式"
+            />
+            <Param
+              label="比例"
+              value={aspectRatio}
+              onClick={() =>
+                setAspectRatio((current) => {
+                  const order = ["3:4", "9:16", "1:1", "16:9"];
+                  return order[(order.indexOf(current) + 1) % order.length] ?? "3:4";
+                })
+              }
+              title="单击切换比例"
+            />
+            <Param label="品牌" value={brandName} onClick={() => openTray("brand")} />
+            {!isComicRecipe && (
+              <ToggleParam
+                label="封面候选"
+                on={generateCovers}
+                onClick={() => setGenerateCovers(!generateCovers)}
+                title="生成 3 个封面候选供挑选（额外消耗 3 次图片额度）"
+              />
+            )}
+            <ToggleParam
+              label="审批门"
+              on={requireApproval}
+              onClick={() => setRequireApproval(!requireApproval)}
+              title="完成后需人工确认终稿（确认前不可导出）"
+            />
+            <button
+              className="ml-auto bg-none font-mono text-[11px] text-ink-faint transition-colors hover:text-ink"
+              onClick={() => setMoreOpen(!moreOpen)}
+            >
+              {moreOpen ? "收起长文 ▴" : "粘贴长文 · 从 URL 导入 ▾"}
+            </button>
+          </div>
+
+          {/* 展开区：长文 / 类型专属字段 */}
+          {moreOpen && (
+            <div className="space-y-3.5 border-t border-line px-3.5 pb-4 pt-3.5 max-sm:px-3">
+              {isComicRecipe && (
+                <div>
+                  <span className="field-label">主角设定（可选）</span>
+                  <textarea
+                    className="field-input mt-1 min-h-[48px] resize-y font-mono !text-[12px]"
+                    placeholder="例如：科普向导少女「阿晕」，扎双马尾，戴圆框眼镜，穿薄荷绿实验服"
+                    value={castDescription}
+                    maxLength={2000}
+                    onChange={(event) => setCastDescription(event.target.value)}
+                  />
+                </div>
+              )}
+
+              {recipe === "comparison_cards" && (
+                <div>
+                  <span className="field-label">对比对象 B（可选 · 留空则由模型从主题语境确定）</span>
+                  <input
+                    className="field-input mt-1 font-mono !text-[12px]"
+                    placeholder="例如：骑自行车（A） vs 坐地铁（B）中的「坐地铁」"
+                    value={comparisonTarget}
+                    maxLength={400}
+                    onChange={(event) => setComparisonTarget(event.target.value)}
+                  />
+                </div>
+              )}
+
+              {recipe === "product_showcase" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <span className="field-label">产品名称（可选）</span>
+                    <input
+                      className="field-input mt-1 font-mono !text-[12px]"
+                      placeholder="例如：摩卡壶"
+                      value={productName}
+                      maxLength={200}
+                      onChange={(event) => setProductName(event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <span className="field-label">目标人群（可选）</span>
+                    <input
+                      className="field-input mt-1 font-mono !text-[12px]"
+                      placeholder="例如：租房白领"
+                      value={productAudience}
+                      maxLength={400}
+                      onChange={(event) => setProductAudience(event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <span className="field-label">价格说明（可选）</span>
+                    <input
+                      className="field-input mt-1 font-mono !text-[12px]"
+                      placeholder="例如：200 元档，双十一有优惠"
+                      value={productPriceNote}
+                      maxLength={200}
+                      onChange={(event) => setProductPriceNote(event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <span className="field-label">卖点（可选 · 逗号分隔）</span>
+                    <input
+                      className="field-input mt-1 font-mono !text-[12px]"
+                      placeholder="例如：小巧、出杯快、好清洗"
+                      value={productSellingPoints}
+                      maxLength={500}
+                      onChange={(event) => setProductSellingPoints(event.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {recipe === "book_recommendations" && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <span className="field-label">书名（可选）</span>
+                    <input
+                      className="field-input mt-1 font-mono !text-[12px]"
+                      placeholder="例如：置身事内"
+                      value={bookTitle}
+                      maxLength={300}
+                      onChange={(event) => setBookTitle(event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <span className="field-label">作者（可选）</span>
+                    <input
+                      className="field-input mt-1 font-mono !text-[12px]"
+                      placeholder="例如：兰小欢"
+                      value={bookAuthor}
+                      maxLength={200}
+                      onChange={(event) => setBookAuthor(event.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {!isComicRecipe && (
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="field-label">
+                      {recipe === "article_digest"
+                        ? "参考资料（必填 · 长文拆解需要原文）"
+                        : recipe === "product_showcase"
+                          ? "产品资料正文（可选 · 有则作为产品资料唯一事实来源）"
+                          : "参考资料（可选 · 长文按要点密度拆为 6–10 页）"}
+                    </span>
+                    <span className="font-mono text-[10px] text-ink-faint">{sourceText.length}/20000</span>
+                  </div>
+                  <textarea
+                    className="field-input mt-1 min-h-[48px] resize-y font-mono !text-[12px]"
+                    placeholder="粘贴文章 / Markdown / 资料正文"
+                    value={sourceText}
+                    maxLength={20000}
+                    onChange={(event) => setSourceText(event.target.value)}
+                  />
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      className="field-input !py-1 font-mono !text-xs"
+                      placeholder="https://example.com/article（实验能力）"
+                      value={url}
+                      onChange={(event) => setUrl(event.target.value)}
+                    />
+                    <button
+                      className="btn-ghost shrink-0 px-3 py-1 font-mono text-[11px]"
+                      onClick={() => void importUrl()}
+                      disabled={urlImporting || !url.trim()}
+                    >
+                      {urlImporting ? "抓取中…" : "从 URL 导入"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 大图 lightbox */}
+      {lightbox && (
+        <div className="lightbox open" onClick={() => setLightbox(null)}>
+          <img src={lightbox.img} alt={lightbox.name} />
+          <div className="text-sm text-ink">
+            {lightbox.name}
+            <small className="mt-1 block text-center font-mono text-[11px] text-ink-faint">单击任意处关闭</small>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function RunCard({ run }: { run: RunListItem }) {
-  const stamp = statusStamp(run.status);
-  const date = new Date(run.createdAt).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+/* ── row2 参数小按钮（mono）── */
+function Param({
+  label,
+  value,
+  onClick,
+  title,
+}: {
+  label: string;
+  value: string;
+  onClick: () => void;
+  title?: string;
+}) {
   return (
     <button
-      className="photo-frame group relative overflow-hidden p-2.5 pb-0 text-left transition-transform hover:-translate-y-0.5"
+      type="button"
+      title={title}
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-[7px] border border-line px-2.5 py-1 font-mono text-[11.5px] text-ink-soft transition-colors hover:border-ink-faint hover:text-ink"
+    >
+      {label}
+      <b className="font-semibold text-ink">{value}</b>
+      {(label === "类型" || label === "品牌") && <span className="text-ink-faint">▾</span>}
+    </button>
+  );
+}
+
+/* ── row2 开关小按钮（封面候选 / 审批门）── */
+function ToggleParam({
+  label,
+  on,
+  onClick,
+  title,
+}: {
+  label: string;
+  on: boolean;
+  onClick: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-[7px] border border-line px-2.5 py-1 font-mono text-[11.5px] transition-colors hover:border-ink-faint ${
+        on ? "text-ink" : "text-ink-soft"
+      }`}
+    >
+      <span
+        className="relative inline-block h-2 w-3.5 rounded-full transition-colors"
+        style={{ background: on ? "var(--color-seal-deep)" : "#3a342e" }}
+      >
+        <span
+          className="absolute top-[3px] h-[6px] w-[6px] rounded-full transition-all"
+          style={{ left: on ? "8px" : "2px", background: on ? "#fff" : "var(--color-ink-soft)" }}
+        />
+      </span>
+      {label}
+    </button>
+  );
+}
+
+/* ── 作品显影卡：封面 hover 显影 + 状态章 + mono meta ── */
+function DevelopCard({ run, delay }: { run: WorkbenchRun; delay: number }) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  const isSucceeded = run.status === "succeeded";
+  const pendingReview = isSucceeded && run.reviewStatus === "pending";
+  const stampText = isSucceeded
+    ? pendingReview
+      ? "待评审"
+      : "已生成"
+    : statusStamp(run.status).text;
+  const stampClass = pendingReview
+    ? "border-[#f0b429]/40 bg-[#0a0908]/66 text-[#f0b429]"
+    : "border-white/15 bg-[#0a0908]/66 text-[#e8e2d6]";
+  const recipeName = run.recipe ? RECIPE_LABELS[run.recipe] : "图文作品";
+
+  return (
+    <button
+      className="develop-card group rise text-left"
+      style={{ animationDelay: `${delay}s` }}
       onClick={() => window.location.assign(`/runs/${run.runId}`)}
     >
       {/* 封面 */}
-      <div className="relative aspect-[3/4] overflow-hidden border border-line/60 bg-paper-deep">
+      <div className="relative aspect-[3/4] overflow-hidden">
         {run.coverAssetId ? (
           <img
             src={`/api/assets/${run.coverAssetId}`}
             alt={`《${run.topic}》封面`}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+            className="cover-img absolute inset-0 h-full w-full object-cover brightness-[.42] saturate-[.9] group-hover:brightness-100 group-hover:saturate-105"
           />
         ) : (
-          <div className="flex h-full w-full flex-col items-center justify-center gap-2">
-            <span className="font-display text-4xl font-black text-ink-faint/30">印</span>
-            <span className="font-mono text-[10px] tracking-[0.3em] text-ink-faint">
-              {run.status === "running" ? "制中…" : "待排"}
+          <div
+            className="cover-img absolute inset-0 brightness-[.42] saturate-[.9] transition-[filter] duration-500 group-hover:brightness-100 group-hover:saturate-100"
+            style={{ background: RECIPE_GRADIENTS[run.recipe ?? "knowledge_cards"] }}
+          >
+            <span className="absolute top-[16%] left-0 right-0 text-center font-display text-[44px] font-black text-white">
+              {run.topic.slice(0, 1) || "印"}
+              <small className="mt-1.5 block text-[13px] font-normal tracking-[0.3em] opacity-75">
+                {run.status === "running" ? "显影中" : "待显影"}
+              </small>
             </span>
           </div>
         )}
-        <span className={`absolute right-2 top-2 bg-paper/80 px-1 text-[11px] ${stamp.className}`}>{stamp.text}</span>
+        {/* 渐变叠加标题 */}
+        <div className="absolute inset-0 flex items-end bg-gradient-to-b from-transparent from-55% to-[#0a0908]/70 p-3.5 transition-opacity duration-300">
+          <p className="line-clamp-2 text-[15px] font-bold leading-snug text-white [text-shadow:0_1px_8px_rgba(0,0,0,.5)]">
+            {run.topic}
+          </p>
+        </div>
+        {/* 状态章 */}
+        <span
+          className={`absolute left-2.5 top-2.5 rounded-[5px] border px-2 py-[3px] font-mono text-[10px] tracking-[0.1em] backdrop-blur-[4px] ${stampClass} ${
+            run.status === "running" ? "animate-pulse" : ""
+          }`}
+        >
+          {stampText}
+        </span>
       </div>
-      {/* 文字区 */}
-      <div className="px-1 pb-2.5 pt-2.5">
-        <p className="truncate font-display text-base font-semibold">{run.topic}</p>
-        <p className="mt-1 font-mono text-[10px] text-ink-faint">
-          {run.pageCount > 0 ? `${run.pageCount} 页` : "—"} · {run.mode === "native" ? "原生" : "确定性"} · {date}
-          {run.status === "succeeded" ? ` · ${reviewLabel[run.reviewStatus]}` : ""}
-        </p>
+      {/* meta 行 */}
+      <div className="flex items-center justify-between px-3 py-2 font-mono text-[11px] text-ink-faint">
+        <span className="truncate">
+          {recipeName} · {run.pageCount > 0 ? `${run.pageCount}P` : "—"}
+        </span>
+        <span className="shrink-0 pl-2" suppressHydrationWarning>
+          {mounted ? relativeTime(run.createdAt) : absoluteTime(run.createdAt)}
+        </span>
       </div>
     </button>
   );

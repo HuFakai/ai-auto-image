@@ -60,18 +60,23 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
   }
 }
 
+/** 提示信息配色：错误红（#ff2442 系）、成功绿 */
+function messageTone(message: string): string {
+  return message.startsWith("⚠") || message.includes("失败") ? "text-seal" : "text-[#5FA36B]";
+}
+
 function runStamp(status: string): { text: string; className: string } {
   switch (status) {
     case "awaiting_approval":
-      return { text: "待批", className: "stamp text-amber" };
+      return { text: "待批", className: "stamp text-[#F0B429]" };
     case "succeeded":
-      return { text: "已讫", className: "stamp text-seal" };
+      return { text: "已讫", className: "stamp text-[#5FA36B]" };
     case "running":
       return { text: "制中", className: "stamp text-seal animate-pulse" };
     case "queued":
       return { text: "待排", className: "stamp stamp-quiet text-ink-faint" };
     case "failed":
-      return { text: "作废", className: "stamp text-ink" };
+      return { text: "作废", className: "stamp text-seal" };
     case "cancelled":
       return { text: "已废", className: "stamp stamp-quiet text-ink-faint" };
     default:
@@ -136,37 +141,22 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
   const stamp = runStamp(detail.status);
   const isDeterministic = detail.input.textRenderingMode === "deterministic";
 
+  // 顶栏面包屑：作品标题截断
+  const crumbTitle = detail.storyboardTitle ?? detail.input.topic;
+  const crumbShort = crumbTitle.length > 14 ? `${crumbTitle.slice(0, 14)}…` : crumbTitle;
+
   return (
-    <div className="space-y-12 pt-10">
-      {/* 标题 */}
-      <section className="rise">
-        <div className="flex items-start justify-between gap-4">
-          <p className="kicker pt-1">
-            RUN · {detail.runId.slice(4, 12)} ·{" "}
-            {new Date(detail.createdAt).toLocaleString("zh-CN", {
-              month: "2-digit",
-              day: "2-digit",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </p>
-          <span className={stamp.className}>{stamp.text}</span>
-        </div>
-        <h1 className="mt-3 font-display text-3xl font-black leading-snug sm:text-4xl">
-          {detail.storyboardTitle ?? detail.input.topic}
-        </h1>
-        <p className="mt-3 font-mono text-xs text-ink-soft">
-          {detail.input.aspectRatio} · {detail.input.platform} ·{" "}
-          {isDeterministic ? "确定性排版" : "原生中文"}
-          {detail.concurrency
-            ? ` · 并发 ${detail.concurrency.effective}（请求 ${detail.concurrency.requested} / 上限 ${detail.concurrency.serverMax}）`
-            : ""}
-          {active ? ` · ${readyCount}/${detail.pages.length || "?"}` : ""}
-        </p>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+    <>
+      {/* 顶栏：面包屑 + 状态章 + 评审/取消按钮组（52px 细栏） */}
+      <header className="sticky top-0 z-20 flex h-[52px] items-center gap-3 border-b border-line bg-paper/85 px-5 backdrop-blur-md max-md:px-4">
+        <span className="min-w-0 truncate font-mono text-xs tracking-[0.14em] text-ink-soft" title={crumbTitle}>
+          作品库 / <b className="font-semibold text-ink">{crumbShort}</b>
+        </span>
+        <span className={`${stamp.className} shrink-0`}>{stamp.text}</span>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           {active ? (
             <button
-              className="btn-ghost px-4 py-1.5 font-mono text-xs"
+              className="btn-ghost whitespace-nowrap px-3.5 py-1.5 font-mono text-xs"
               onClick={() => void cancel()}
               disabled={cancelling}
             >
@@ -174,7 +164,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
             </button>
           ) : detail.status === "awaiting_approval" ? (
             <button
-              className="btn-ink px-5 py-2 font-mono text-xs tracking-[0.15em]"
+              className="btn-ink whitespace-nowrap px-4 py-1.5 font-mono text-xs tracking-[0.15em]"
               onClick={async () => {
                 await fetch(`/api/runs/${initial.runId}/review`, {
                   method: "PATCH",
@@ -188,31 +178,63 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
             </button>
           ) : detail.status === "succeeded" ? (
             <>
-              <button className="btn-ink px-5 py-2 font-mono text-xs tracking-[0.15em]" onClick={exportZip} disabled={exporting}>
+              <button
+                className="btn-ink whitespace-nowrap px-4 py-1.5 font-mono text-xs tracking-[0.15em]"
+                onClick={exportZip}
+                disabled={exporting}
+              >
                 {exporting ? "装订中…" : "导出 ZIP（图片 + 发布文案）"}
               </button>
               {detail.reviewStatus !== "approved" && (
-                <button className="btn-ghost px-4 py-2 font-mono text-xs hover:!border-seal hover:!text-seal" onClick={() => void review("approved")}>
+                <button
+                  className="btn-ghost whitespace-nowrap px-3 py-1.5 font-mono text-xs hover:!border-seal hover:!text-seal"
+                  onClick={() => void review("approved")}
+                >
                   评审通过
                 </button>
               )}
               {detail.reviewStatus !== "rejected" && (
                 <button
-                  className="btn-ghost px-4 py-2 font-mono text-xs"
+                  className="btn-ghost whitespace-nowrap px-3 py-1.5 font-mono text-xs"
                   onClick={() => void review("rejected")}
                 >
                   评审驳回
                 </button>
               )}
-              {detail.reviewStatus !== "pending" && (
-                <span className="font-mono text-[11px] text-ink-faint">
-                  当前评审：{detail.reviewStatus === "approved" ? "已通过" : "已驳回"}
-                  {detail.reviewNote ? ` · ${detail.reviewNote}` : ""}
-                </span>
-              )}
             </>
           ) : null}
         </div>
+      </header>
+
+      <div className="space-y-12 px-[26px] pb-24 pt-10 max-md:px-4">
+      {/* 标题 */}
+      <section className="rise">
+        <p className="kicker">
+          RUN · {detail.runId.slice(4, 12)} ·{" "}
+          {new Date(detail.createdAt).toLocaleString("zh-CN", {
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </p>
+        <h1 className="mt-3 font-display text-3xl font-black leading-snug sm:text-4xl">
+          {detail.storyboardTitle ?? detail.input.topic}
+        </h1>
+        <p className="mt-3 font-mono text-xs text-ink-soft">
+          {detail.input.aspectRatio} · {detail.input.platform} ·{" "}
+          {isDeterministic ? "确定性排版" : "原生中文"}
+          {detail.concurrency
+            ? ` · 并发 ${detail.concurrency.effective}（请求 ${detail.concurrency.requested} / 上限 ${detail.concurrency.serverMax}）`
+            : ""}
+          {active ? ` · ${readyCount}/${detail.pages.length || "?"}` : ""}
+        </p>
+        {detail.status === "succeeded" && detail.reviewStatus !== "pending" && (
+          <p className="mt-3 font-mono text-[11px] text-ink-faint">
+            当前评审：{detail.reviewStatus === "approved" ? "已通过" : "已驳回"}
+            {detail.reviewNote ? ` · ${detail.reviewNote}` : ""}
+          </p>
+        )}
       </section>
 
       {detail.errorSummary && (
@@ -273,7 +295,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
       )}
 
       {/* 生成信息（全部参数可追溯） */}
-      <section className="rise border-t-2 border-ink pt-5" style={{ animationDelay: "180ms" }}>
+      <section className="rise border-t border-line pt-5" style={{ animationDelay: "180ms" }}>
         <div className="mb-4 flex items-baseline justify-between">
           <h2 className="font-display text-lg font-bold">生成信息</h2>
           <span className="kicker">COLOPHON · 全参数可追溯</span>
@@ -349,7 +371,8 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           />
         </div>
       </section>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -407,7 +430,7 @@ function PageFrame({
             {revised ? ` · 第${page.revision}版` : ""}
             {page.model ? ` · ${page.model}` : ""}
             {page.layout && page.layout !== "default" && LAYOUT_LABELS[page.layout] && (
-              <span className="ml-1 rounded bg-ink px-1.5 py-0.5 text-[9px] tracking-wider text-paper">
+              <span className="ml-1 rounded bg-seal px-1.5 py-0.5 text-[9px] tracking-wider text-white">
                 {LAYOUT_LABELS[page.layout]}
               </span>
             )}
@@ -435,7 +458,7 @@ function PageFrame({
   if (page.status === "failed") {
     return (
       <div className="photo-frame flex aspect-[3/4] flex-col items-center justify-center gap-3 p-6 text-center">
-        <span className="stamp text-ink line-through">作废</span>
+        <span className="stamp text-seal line-through">作废</span>
         <p className="font-mono text-xs text-ink-soft">第 {no} 页生成失败</p>
         <p className="text-[11px] leading-relaxed text-ink-faint">
           任务会自动重试该页；其余页面不受影响。
@@ -595,7 +618,7 @@ function RegionImage({
         )}
       </div>
       {selecting && rect && !dragStart && (
-        <div className="border-t border-line bg-paper-deep/40 p-3">
+        <div className="border-t border-line bg-paper-deep p-3">
           <span className="field-label">第 {no} 页 · 区域重绘</span>
           <input
             className="field-input mt-1 !text-sm"
@@ -620,11 +643,11 @@ function RegionImage({
               取消
             </button>
           </div>
-          {message && <p className="mt-2 font-mono text-[10px] text-ink-soft">{message}</p>}
+          {message && <p className={`mt-2 font-mono text-[10px] ${messageTone(message)}`}>{message}</p>}
         </div>
       )}
       {selecting && !rect && !dragStart && !busy && (
-        <p className="border-t border-line bg-paper-deep/40 px-3 py-2 font-mono text-[10px] text-ink-soft">
+        <p className="border-t border-line bg-paper-deep px-3 py-2 font-mono text-[10px] text-ink-soft">
           在图上按住鼠标拖出要重绘的区域。
         </p>
       )}
@@ -704,7 +727,7 @@ function RegenPanel({
   const pageAssetScope = typeof window !== "undefined" ? window.location.pathname.split("/")[2] ?? "" : "";
 
   return (
-    <div className="border-t border-line bg-paper-deep/40 p-3">
+    <div className="border-t border-line bg-paper-deep p-3">
       <span className="field-label">第 {no} 页返修</span>
       <input
         className="field-input mt-1 !text-sm"
@@ -741,7 +764,7 @@ function RegenPanel({
           <span className="font-mono text-[10px] text-seal">改文案需重新出图</span>
         )}
       </div>
-      {message && <p className="mt-2 font-mono text-[10px] text-ink-soft">{message}</p>}
+      {message && <p className={`mt-2 font-mono text-[10px] ${messageTone(message)}`}>{message}</p>}
     </div>
   );
 }
@@ -765,7 +788,7 @@ function CoverCandidatesCard({ detail, onDone }: { detail: RunDetailPayload; onD
           <h2 className="font-display text-lg font-bold">封面候选</h2>
           <span className="kicker">COVER · 作品封面</span>
         </div>
-        <div className="border border-line bg-paper-deep/30 px-5 py-4">
+        <div className="border border-line bg-paper-deep px-5 py-4">
           <p className="font-mono text-[11px] text-ink-soft">漫画以首页为封面，无需单独挑选。</p>
         </div>
       </section>
@@ -821,14 +844,17 @@ function CoverCandidatesCard({ detail, onDone }: { detail: RunDetailPayload; onD
         <h2 className="font-display text-lg font-bold">封面候选</h2>
         <span className="kicker">COVER · 3 选 1 · 随 ZIP 导出</span>
       </div>
-      <div className="border border-line bg-paper-deep/30 p-5">
+      <div className="border border-line bg-paper-deep p-5">
         {detail.covers.length > 0 ? (
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
             {detail.covers.map((cover) => {
               const selected = detail.selectedCoverAssetId === cover.assetId;
               const tooLong = cover.hookTitle.length > 12;
               return (
-                <figure key={cover.assetId} className="photo-frame p-2.5 pb-0">
+                <figure
+                  key={cover.assetId}
+                  className={`photo-frame p-2.5 pb-0 ${selected ? "!border-seal shadow-[0_0_14px_rgba(255,36,66,0.18)]" : ""}`}
+                >
                   <div className="relative">
                     <img
                       src={`/api/assets/${cover.assetId}`}
@@ -837,7 +863,7 @@ function CoverCandidatesCard({ detail, onDone }: { detail: RunDetailPayload; onD
                       draggable={false}
                     />
                     {selected && (
-                      <span className="absolute left-1.5 top-1.5 bg-seal px-2 py-0.5 font-mono text-[10px] text-paper">
+                      <span className="absolute left-1.5 top-1.5 rounded bg-seal px-2 py-0.5 font-mono text-[10px] font-semibold text-white">
                         当前封面 ✓
                       </span>
                     )}
@@ -849,7 +875,7 @@ function CoverCandidatesCard({ detail, onDone }: { detail: RunDetailPayload; onD
                     <p className="truncate font-display text-sm font-bold" title={cover.hookTitle}>
                       {cover.hookTitle}
                     </p>
-                    {tooLong && <p className="mt-0.5 font-mono text-[10px] text-amber">标题偏长，建议 ≤12 字</p>}
+                    {tooLong && <p className="mt-0.5 font-mono text-[10px] text-[#F0B429]">标题偏长，建议 ≤12 字</p>}
                     <p className="mt-0.5 truncate font-mono text-[10px] text-ink-faint" title={cover.styleNote}>
                       {cover.styleNote}
                     </p>
@@ -886,7 +912,7 @@ function CoverCandidatesCard({ detail, onDone }: { detail: RunDetailPayload; onD
             <span className="font-mono text-[10px] text-ink-faint">挑选一张作为作品封面，导出 ZIP 时一并携带。</span>
           </div>
         )}
-        {message && <p className="mt-3 font-mono text-[11px] text-ink-soft">{message}</p>}
+        {message && <p className={`mt-3 font-mono text-[11px] ${messageTone(message)}`}>{message}</p>}
       </div>
     </section>
   );
@@ -962,13 +988,13 @@ function PublishCopyCard({ runId }: { runId: string }) {
         <h2 className="font-display text-lg font-bold">发布文案</h2>
         <span className="kicker">COPY · 标题 / 正文 / 标签</span>
       </div>
-      <div className="border border-line bg-paper-deep/30 p-5">
+      <div className="border border-line bg-paper-deep p-5">
         {loading ? (
           <p className="font-mono text-[11px] text-ink-faint">文案生成中…</p>
         ) : copy ? (
           <>
             <div className="flex items-start justify-between gap-4">
-              <h3 className="font-display text-xl font-black leading-snug">{copy.title}</h3>
+              <h3 className="font-display text-xl font-black leading-snug text-ink sm:text-2xl">{copy.title}</h3>
               <span className="stamp stamp-quiet shrink-0 text-ink-faint">
                 {copy.source === "llm" ? "AI" : "模板"}
               </span>
@@ -976,7 +1002,7 @@ function PublishCopyCard({ runId }: { runId: string }) {
             <p className="mt-3 whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-ink">{copy.body}</p>
             <div className="mt-3 flex flex-wrap gap-1.5">
               {copy.tags.map((tag) => (
-                <span key={tag} className="border border-line bg-paper px-2 py-0.5 font-mono text-[11px] text-ink-soft">
+                <span key={tag} className="rounded-full border border-line px-2.5 py-0.5 font-mono text-[11px] text-ink-soft">
                   {withHashTag(tag)}
                 </span>
               ))}
@@ -993,7 +1019,7 @@ function PublishCopyCard({ runId }: { runId: string }) {
               >
                 {polishing ? "润色中…约 10-20 秒" : "AI 润色"}
               </button>
-              {message && <span className="font-mono text-[11px] text-ink-soft">{message}</span>}
+              {message && <span className={`font-mono text-[11px] ${messageTone(message)}`}>{message}</span>}
             </div>
           </>
         ) : (
@@ -1073,7 +1099,7 @@ function RerenderAllButton({
       >
         {progress ? `重排中 ${progress.done}/${progress.total}…` : "按品牌重排全部页"}
       </button>
-      {message && <span className="font-mono text-[10px] text-ink-soft">{message}</span>}
+      {message && <span className={`font-mono text-[10px] ${messageTone(message)}`}>{message}</span>}
     </span>
   );
 }
@@ -1163,7 +1189,7 @@ function PlatformAdaptCard({
         <h2 className="font-display text-lg font-bold">平台适配包</h2>
         <span className="kicker">ADAPT · 一次创作 · 多平台分发</span>
       </div>
-      <div className="border border-line bg-paper-deep/30 p-5">
+      <div className="border border-line bg-paper-deep p-5">
         {isDeterministic ? (
           <>
             <p className="font-mono text-[11px] text-ink-soft">
@@ -1171,7 +1197,7 @@ function PlatformAdaptCard({
             </p>
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
               {ADAPT_TARGETS.map((target) => (
-                <div key={target.platform} className="flex items-center justify-between gap-3 border border-line bg-paper px-4 py-3">
+                <div key={target.platform} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper-card px-4 py-3">
                   <div>
                     <p className="text-sm font-bold">{target.label}</p>
                     <p className="font-mono text-[10px] text-ink-faint">{target.aspect}</p>
@@ -1194,7 +1220,7 @@ function PlatformAdaptCard({
             </p>
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
               {ADAPT_TARGETS.map((target) => (
-                <div key={target.platform} className="flex items-center justify-between gap-3 border border-line bg-paper px-4 py-3">
+                <div key={target.platform} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper-card px-4 py-3">
                   <div>
                     <p className="text-sm font-bold">{target.label}</p>
                     <p className="font-mono text-[10px] text-ink-faint">以 {target.aspect} 重新生成</p>
@@ -1212,7 +1238,7 @@ function PlatformAdaptCard({
             </div>
           </>
         )}
-        {message && <p className="mt-3 font-mono text-[11px] text-ink-soft">{message}</p>}
+        {message && <p className={`mt-3 font-mono text-[11px] ${messageTone(message)}`}>{message}</p>}
       </div>
     </section>
   );

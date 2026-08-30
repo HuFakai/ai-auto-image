@@ -9,7 +9,7 @@ export default async function LoginPage() {
   if (user) redirect("/");
   const registerEnabled = process.env.REGISTER_ENABLED === "1";
   return (
-    <section className="py-6">
+    <section className="flex min-h-screen items-center justify-center px-4 py-10">
       <LoginForm registerEnabled={registerEnabled} />
     </section>
   );

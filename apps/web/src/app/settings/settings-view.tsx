@@ -96,7 +96,9 @@ export function SettingsView({
   return (
     <div className="space-y-14 pt-10">
       <section className="rise">
-        <p className="kicker">SETTINGS · 渠道与品牌</p>
+        <p className="kicker">
+          工坊 / <span className="text-ink">渠道设置</span>
+        </p>
         <h1 className="mt-3 font-display text-3xl font-black sm:text-4xl">
           设置<span className="text-seal">。</span>
         </h1>
@@ -117,28 +119,33 @@ export function SettingsView({
               </span>
             </div>
             {list.length === 0 && (
-              <p className="border border-dashed border-line-dark px-5 py-8 text-center text-sm text-ink-faint">
+              <p className="mb-2 rounded-xl border border-dashed border-line-dark bg-paper-card/40 px-5 py-8 text-center text-sm text-ink-faint">
                 暂无{TYPE_LABEL[type]}，未配置时使用 Mock。
               </p>
             )}
-            <ul>
+            <ul className="space-y-2">
               {list.map((channel, index) => (
-                <li key={channel.id} className="index-row px-3 py-4">
+                <li
+                  key={channel.id}
+                  className="rounded-xl border border-line bg-paper-card px-4 py-4 transition-colors hover:border-line-dark"
+                >
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
                     <span className="w-7 font-mono text-[11px] text-ink-faint">
                       {String(index + 1).padStart(2, "0")}
                     </span>
-                    <span className="font-display min-w-0 flex-1 truncate text-base font-semibold">
+                    <span className="font-display min-w-0 flex-1 truncate text-base font-bold">
                       {channel.name}
                       {!channel.enabled && (
                         <span className="stamp stamp-quiet ml-2 text-[10px] text-ink-faint">停用</span>
                       )}
                     </span>
                     <span className="font-mono text-[11px] text-ink-soft">{channel.model ?? "—"}</span>
-                    <span className="hidden font-mono text-[11px] text-ink-faint lg:inline">
+                    <span className="hidden max-w-[220px] truncate font-mono text-[11px] text-ink-faint lg:inline">
                       {channel.baseUrl.replace(/^https?:\/\//, "")}
                     </span>
-                    <span className="font-mono text-[11px] text-ink-faint">{channel.apiKeyHint}</span>
+                    <span className="max-w-[90px] truncate font-mono text-[11px] text-ink-faint">
+                      {channel.apiKeyHint}
+                    </span>
                     {channel.type === "image" && channel.imageEditSupport && (
                       <span className="stamp stamp-quiet text-[10px] text-seal">图生图</span>
                     )}
@@ -189,7 +196,7 @@ export function SettingsView({
                   {tests[channel.id] && tests[channel.id] !== "loading" && (
                     <p
                       className={`mt-2 pl-11 font-mono text-[11px] ${
-                        (tests[channel.id] as { ok: boolean }).ok ? "text-seal" : "text-ink-soft"
+                        (tests[channel.id] as { ok: boolean }).ok ? "text-[#5FA36B]" : "text-seal"
                       }`}
                     >
                       {(tests[channel.id] as { ok: boolean }).ok ? "✓ " : "✗ "}
@@ -219,11 +226,14 @@ export function SettingsView({
           主题决定确定性排版的配色；风格关键词注入图片 Prompt；Logo 出现在确定性页面页脚。
           创作时在「品牌手册」下拉选择。
         </p>
-        <ul>
+        <ul className="space-y-2">
           {kits.map((kit) => {
             const swatch = THEME_SWATCH[kit.themeId] ?? THEME_SWATCH.darkroom!;
             return (
-              <li key={kit.id} className="index-row flex items-center gap-4 px-3 py-4">
+              <li
+                key={kit.id}
+                className="flex items-center gap-4 rounded-xl border border-line bg-paper-card px-4 py-4 transition-colors hover:border-line-dark"
+              >
                 <span
                   className="h-9 w-9 shrink-0 rounded-sm border border-line-dark"
                   style={{ background: swatch.bg }}
@@ -234,7 +244,7 @@ export function SettingsView({
                     style={{ background: swatch.accent }}
                   />
                 </span>
-                <span className="font-display min-w-0 flex-1 truncate text-base font-semibold">
+                <span className="font-display min-w-0 flex-1 truncate text-base font-bold">
                   {kit.name}
                   {kit.builtIn && <span className="stamp stamp-quiet ml-2 text-[10px] text-ink-faint">内置</span>}
                 </span>
@@ -372,9 +382,9 @@ function ChannelForm({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/30 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#080706]/85 p-4 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="photo-frame max-h-[90vh] w-full max-w-xl overflow-y-auto p-7"
+        className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-[14px] border border-line bg-paper-deep p-7 shadow-[0_18px_50px_rgba(0,0,0,0.55)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="rule-double mb-5 flex items-baseline justify-between pt-2">
@@ -447,7 +457,7 @@ function ChannelForm({
                 type="checkbox"
                 checked={imageEditSupport}
                 onChange={(event) => setImageEditSupport(event.target.checked)}
-                className="accent-[#b5382d]"
+                className="accent-[#ff2442]"
               />
               支持图片编辑（图生图）——漫画角色一致性、参考图生成将优先使用该渠道
             </label>
@@ -702,9 +712,9 @@ function KitForm({
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-ink/30 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#080706]/85 p-4 backdrop-blur-sm" onClick={onClose}>
       <div
-        className="photo-frame max-h-[90vh] w-full max-w-xl overflow-y-auto p-7"
+        className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-[14px] border border-line bg-paper-deep p-7 shadow-[0_18px_50px_rgba(0,0,0,0.55)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="rule-double mb-5 flex items-baseline justify-between pt-2">
@@ -780,10 +790,10 @@ function KitForm({
                 <img
                   src={`/api/assets/${logoAssetId}`}
                   alt="Logo 预览"
-                  className="h-10 w-10 border border-line object-contain"
+                  className="h-10 w-10 rounded border border-line bg-paper-card object-contain"
                 />
               ) : (
-                <span className="flex h-10 w-10 items-center justify-center border border-dashed border-line-dark text-[10px] text-ink-faint">
+                <span className="flex h-10 w-10 items-center justify-center rounded border border-dashed border-line-dark text-[10px] text-ink-faint">
                   无
                 </span>
               )}
@@ -968,7 +978,7 @@ function KitForm({
                   setPreviewLive(event.target.checked);
                   if (event.target.checked) void runPreview();
                 }}
-                className="accent-[#b5382d]"
+                className="accent-[#ff2442]"
               />
               实时预览（改动 1s 后自动刷新）
             </label>
@@ -983,7 +993,7 @@ function KitForm({
               <img
                 src={previewUrl}
                 alt="品牌样张预览"
-                className="max-h-[360px] w-auto border border-line shadow-sm"
+                className="max-h-[360px] w-auto rounded-md border border-line shadow-[0_10px_30px_rgba(0,0,0,0.4)]"
               />
             </div>
           )}
