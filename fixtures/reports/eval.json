@@ -1,5 +1,5 @@
 {
-  "at": "2026-08-29T20:57:17.883Z",
+  "at": "2026-08-30T05:17:14.225Z",
   "provider": "mock",
   "fontsAvailable": true,
   "cases": [
@@ -13,7 +13,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 456
+      "durationMs": 628
     },
     {
       "topic": "《置身事内》：为什么地方政府像公司",
@@ -25,7 +25,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 938
+      "durationMs": 1145
     },
     {
       "topic": "保温杯怎么选：四个关键参数",
@@ -37,7 +37,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 402
+      "durationMs": 562
     },
     {
       "topic": "什么是复利",
@@ -49,7 +49,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 311
+      "durationMs": 453
     },
     {
       "topic": "睡眠的三个常见误区",
@@ -61,7 +61,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 678
+      "durationMs": 723
     },
     {
       "topic": "咖啡因是如何起作用的",
@@ -73,7 +73,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 354
+      "durationMs": 503
     },
     {
       "topic": "保持专注的三句话",
@@ -85,7 +85,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 403
+      "durationMs": 398
     },
     {
       "topic": "搬家必做的五件事",
@@ -97,7 +97,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 1120
+      "durationMs": 836
     },
     {
       "topic": "骑自行车还是坐地铁通勤",
@@ -109,7 +109,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 1548
+      "durationMs": 747
     },
     {
       "topic": "这款便携咖啡机值得买吗",
@@ -121,7 +121,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 742
+      "durationMs": 454
     },
     {
       "topic": "《置身事内》为什么值得读",
@@ -133,7 +133,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 801
+      "durationMs": 751
     },
     {
       "topic": "复利思维入门",
@@ -145,7 +145,7 @@
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 346
+      "durationMs": 535
     }
   ],
   "metrics": {
@@ -154,7 +154,7 @@
     "runCompletionRate": 1,
     "totalRuns": 12,
     "totalPages": 48,
-    "avgRunDurationMs": 675
+    "avgRunDurationMs": 645
   },
   "thresholds": {
     "structuredParseSuccessRate": 0.99,

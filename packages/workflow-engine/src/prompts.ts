@@ -148,6 +148,24 @@ function buildRecipeStoryboardLines(input: CreateRunInput): string[] {
   }
 }
 
+/**
+ * 版式路由指令段：逐页根据内容形态选择 layout 并输出 layout/layoutData，
+ * 让「页面信息结构决定视觉结构」（确定性渲染端按 layout 分派纯排版布局）。
+ * 数据格式与 shared-schemas 的 LayoutDataSchema 严格对应；非法数据会被管线归一化回退 default。
+ */
+const LAYOUT_ROUTING_RULES = [
+  "版式路由（每页输出 layout 字段；非 default 页必须同时输出形状匹配的 layoutData）：",
+  '- default：普通要点页（标题 + 要点列表），未命中以下形态时使用，不输出 layoutData。',
+  '- big-number：数据冲击页（一个关键数字/结论）。layoutData 示例：{"layout":"big-number","value":"93%","caption":"用户更信任带来源的数据","source":"来源：2025 行业报告"}（value ≤12 字，caption ≤80 字，source ≤60 字可选）。',
+  '- timeline：历程/阶段/演进页。layoutData 示例：{"layout":"timeline","nodes":[{"time":"2020","title":"起步","note":"…"},{"time":"2022","title":"加速","note":"…"},{"time":"2025","title":"成熟","note":"…"}]}（3–6 个节点，time ≤12 字可选，title ≤30 字，note ≤60 字可选）。',
+  '- table：对比/参数/多维度页。layoutData 示例：{"layout":"table","columns":["维度","方案A","方案B"],"rows":[["价格","低","高"],["上手","快","慢"]]}（2–3 个列头，首个为维度列名；2–6 行，每行格数=列数，每格 ≤40 字）。',
+  '- index：目录页（只用于长内容全套的第 2 页，且全套页数 ≥4 时才允许）。layoutData 示例：{"layout":"index","items":[{"title":"它是什么"},{"title":"为什么重要"},{"title":"怎么用"}]}（2–8 项，每项 ≤24 字）。',
+  '- quote：引用/金句页。layoutData 示例：{"layout":"quote","quote":"慢慢来，比较快。","attribution":"——佚名"}（引文 6–120 字，attribution ≤40 字可选）。',
+  '- process：步骤/方法页。layoutData 示例：{"layout":"process","steps":[{"title":"明确目标","note":"…"},{"title":"拆解任务","note":"…"},{"title":"复盘迭代","note":"…"}]}（2–6 步，title ≤16 字，note ≤40 字可选）。',
+  "选择规则：数据冲击页用 big-number；历程/阶段用 timeline；对比页用 table；长内容第 2 页用 index；引用/金句页用 quote；步骤方法页用 process；其余 default。",
+  "全套要求：有合适内容时至少使用 2 种非 default 版式；不要为了凑版式硬套（内容形态不匹配就保持 default）。",
+].join("\n");
+
 export function buildStoryboardPrompt(input: CreateRunInput, brief: ContentBrief): string {
   const lines = [
     `主题：${input.topic}`,
@@ -181,6 +199,8 @@ export function buildStoryboardPrompt(input: CreateRunInput, brief: ContentBrief
   } else if (recipeLines.length === 0) {
     lines.push("任务：生成 4–6 页。");
   }
+  // 版式路由指令：所有卡片类 recipe 共用（comic 管线不走本函数，不受影响）
+  lines.push(LAYOUT_ROUTING_RULES);
   return lines.join("\n");
 }
 

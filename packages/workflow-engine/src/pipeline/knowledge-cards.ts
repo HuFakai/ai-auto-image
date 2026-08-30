@@ -5,6 +5,8 @@ import {
   ContentBriefSchema,
   StoryboardSchema,
   effectiveImageConcurrency,
+  normalizeSlideLayout,
+  resolveSlideLayout,
   type ContentBrief,
   type CreateRunInput,
   type GeneratedImage,
@@ -191,8 +193,10 @@ async function executeKnowledgeCardRun(
       buildPrompt: () => buildStoryboardPrompt(input, brief),
     });
     // LLM 可能输出 1-based 页码；统一归一化为 0-based，保证文件名、页码标签与顺序一致
+    // 版式路由归一化：hint 与 layoutData 不匹配或非法时删除字段回退 default（不抛错）
     storyboard.slides.forEach((slide, index) => {
       slide.index = index;
+      normalizeSlideLayout(slide);
     });
     await throwIfAborted(deps, runId, ctx.signal);
     const pageCount = storyboard.slides.length;
@@ -253,6 +257,29 @@ async function generatePage(
   failedPages: number[],
 ): Promise<void> {
   const mode = input.textRenderingMode;
+  // 版式路由：非 default 版式页为纯排版（无视觉层），deterministic 模式下跳过 AI 生图省额度。
+  // native 模式的整图即内容（含文字），不跳过。
+  const resolved = resolveSlideLayout(slide);
+  if (resolved.layout !== "default" && mode === "deterministic") {
+    const node = await deps.runRepo.createNodeRun(runId, "generate-images");
+    await deps.runRepo.startNode(node.id);
+    await deps.runRepo.succeedNode(node.id, {
+      outputRef: JSON.stringify({
+        pageIndex: slide.index,
+        skipped: "layout-page",
+        layout: resolved.layout,
+        role: slide.role,
+        headline: slide.headline,
+        pageCount,
+      }),
+    });
+    logger.info("layout page skips image generation", {
+      runId,
+      page: slide.index,
+      layout: resolved.layout,
+    });
+    return;
+  }
   const plan = buildSlidePrompt(slide, storyboard, input, mode);
   const node = await deps.runRepo.createNodeRun(runId, "generate-images");
   await deps.runRepo.startNode(node.id, {
@@ -428,10 +455,16 @@ async function renderAllSlides(
       const pageNode = succeededPageNode(rows, slide.index);
       if (!pageNode) continue;
 
-      const visualAsset = await deps.assetRepo.require(
-        (JSON.parse(pageNode.outputRef ?? "{}") as { assetId?: string }).assetId!,
-      );
-      const visualBase64 = fs.readFileSync(deps.assetStore.resolve(visualAsset.filePath)).toString("base64");
+      const output = JSON.parse(pageNode.outputRef ?? "{}") as {
+        assetId?: string;
+        skipped?: string;
+      };
+      // 非 default 版式页：无 AI 视觉层，直接纯排版（visualImageBase64 为空由渲染函数支持）
+      let visualBase64: string | undefined;
+      if (!output.skipped) {
+        const visualAsset = await deps.assetRepo.require(output.assetId!);
+        visualBase64 = fs.readFileSync(deps.assetStore.resolve(visualAsset.filePath)).toString("base64");
+      }
       const logoBase64 = await readLogoBase64(deps, input);
 
       const buffer = await renderSlideDeterministic({
@@ -460,6 +493,8 @@ async function renderAllSlides(
           mode: "deterministic",
           expectedCopy: [slide.headline, ...slide.body],
           templateVersion: deps.templateVersion,
+          // 版式标注：详情展示与后续统计用；default 页恒为 "default"
+          layout: resolveSlideLayout(slide).layout,
         }),
       });
     }
@@ -499,8 +534,19 @@ async function writeExportManifest(
       slide.index,
     );
     if (!pageNode) return [];
-    const output = JSON.parse(pageNode.outputRef ?? "{}") as { assetId?: string };
-    const asset = allAssetsCache.find((row) => row.id === output.assetId);
+    const output = JSON.parse(pageNode.outputRef ?? "{}") as {
+      assetId?: string;
+      skipped?: string;
+    };
+    let asset = output.assetId
+      ? allAssetsCache.find((row) => row.id === output.assetId)
+      : undefined;
+    // 非 default 版式页没有 generated 资产：落到该页的 composite 资产（渲染阶段产出）
+    if (!asset && output.skipped) {
+      const composites = allAssetsCache
+        .filter((row) => row.kind === "composite" && row.pageIndex === slide.index);
+      asset = composites[composites.length - 1];
+    }
     if (!asset) return [];
     const metadata = JSON.parse(asset.metadataJson ?? "{}") as Record<string, unknown>;
     return [
@@ -508,6 +554,9 @@ async function writeExportManifest(
         pageIndex: slide.index,
         role: slide.role,
         headline: slide.headline,
+        // 版式标注：非 default 页在详情/统计中可见
+        layout: resolveSlideLayout(slide).layout,
+        skippedLayout: Boolean(output.skipped),
         assetId: asset.id,
         filePath: asset.filePath,
         mode: metadata.mode,

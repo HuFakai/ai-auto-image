@@ -1,9 +1,20 @@
 import satori from "satori";
 import sharp from "sharp";
-import { CANVAS_SIZES, type AspectRatio, type BrandKitConfig, type StoryboardSlide } from "@aai/shared-schemas";
+import {
+  CANVAS_SIZES,
+  resolveSlideLayout,
+  type AspectRatio,
+  type BrandKitConfig,
+  type StoryboardSlide,
+} from "@aai/shared-schemas";
 import { loadCardFonts, serifAvailable, type LoadedFont } from "./fonts";
 import { applyPaletteOverrides, type CardTheme } from "./theme";
 import { applyBrandOverlays } from "./brand-overlays";
+import { buildLayoutChildren } from "./layouts";
+import { fitFontSize, text, type Element } from "./element";
+
+/* 兼容旧导入路径：宽度估算/字号适配已抽到 element.ts（layouts 与 render 共用） */
+export { estimateLineWidth, fitFontSize } from "./element";
 
 export interface RenderSlideInput {
   theme: CardTheme;
@@ -22,48 +33,10 @@ export interface RenderSlideInput {
   brand?: Partial<BrandKitConfig> | undefined;
 }
 
-interface Element {
-  type: string;
-  props: Record<string, unknown>;
-}
-
-/** 文字宽度估算：CJK ≈ 1em，ASCII ≈ 0.55em（ceil 前先消除浮点噪声） */
-export function estimateLineWidth(text: string, fontSize: number): number {
-  let units = 0;
-  for (const char of text) {
-    units += char.charCodeAt(0) > 0x2e7f ? 1 : 0.55;
-  }
-  return Math.ceil(units * fontSize - 1e-6);
-}
-
-/** 按容器宽度自动缩小字号；低于最小字号仍溢出则抛错（溢出检出率 100% 的落点） */
-export function fitFontSize(
-  lines: string[],
-  maxWidth: number,
-  startSize: number,
-  minSize: number,
-): number {
-  let size = startSize;
-  while (size > minSize) {
-    if (lines.every((line) => estimateLineWidth(line, size) <= maxWidth)) return size;
-    size = Math.floor(size * 0.92);
-  }
-  if (lines.some((line) => estimateLineWidth(line, minSize) > maxWidth)) {
-    throw new Error(
-      `text overflow: cannot fit "${lines[0]?.slice(0, 20)}" below ${minSize}px in ${maxWidth}px`,
-    );
-  }
-  return minSize;
-}
-
 let cachedFonts: LoadedFont[] | null = null;
 function fonts(): LoadedFont[] {
   cachedFonts ??= loadCardFonts();
   return cachedFonts;
-}
-
-function text(text: string, style: Record<string, unknown>): Element {
-  return { type: "div", props: { style, children: text } };
 }
 
 /** titleFont → Satori 字体族；default 跟随主题（无衬线）；serif 不可用时回退 Sans（不 throw） */
@@ -205,62 +178,80 @@ export function buildSlideTree(input: RenderSlideInput): Element {
       }
     }
   } else {
-    children.push(
-      text(`0${slide.index + 1}`, {
-        display: "flex",
-        fontSize: Math.round(width * 0.045),
-        color: c.accent,
-        fontWeight: 700,
-        marginBottom: height * 0.02,
-      }),
-      text(slide.headline, {
-        display: "flex",
-        fontSize: titleSize,
-        fontWeight: 700,
-        color: c.ink,
-        lineHeight: 1.25,
-        letterSpacing: "0.02em",
-      }),
-    );
-    if (bodyLines.length > 0) {
-      children.push({
-        type: "div",
-        props: {
-          style: {
-            display: "flex",
-            flexDirection: "column",
-            marginTop: height * 0.035,
-            gap: height * 0.022,
-          },
-          children: bodyLines.map((line) => ({
-            type: "div",
-            props: {
-              style: {
-                display: "flex",
-                alignItems: "center",
-                fontSize: bodySize,
-                color: c.ink,
-                lineHeight: 1.5,
-              },
-              children: [
-                {
-                  type: "div",
-                  props: {
-                    style: {
-                      width: Math.round(width * 0.018),
-                      height: Math.round(width * 0.018),
-                      borderRadius: 999,
-                      backgroundColor: c.accent,
-                      marginRight: Math.round(width * 0.028),
+    // 版式路由：非 default 版式走纯排版布局函数（仅无视觉层的纯排版路径；
+    // 有 AI 背景图时保持旧行为不变）。resolveSlideLayout 内部重新校验，
+    // hint/data 不匹配或非法时回退 default，不抛错。
+    const resolved = input.visualImageBase64 ? undefined : resolveSlideLayout(slide);
+    if (resolved && resolved.layout !== "default" && resolved.layoutData) {
+      children.push(
+        ...buildLayoutChildren({
+          layout: resolved.layout,
+          layoutData: resolved.layoutData,
+          theme,
+          width,
+          height,
+          padding,
+          contentWidth,
+        }),
+      );
+    } else {
+      children.push(
+        text(`0${slide.index + 1}`, {
+          display: "flex",
+          fontSize: Math.round(width * 0.045),
+          color: c.accent,
+          fontWeight: 700,
+          marginBottom: height * 0.02,
+        }),
+        text(slide.headline, {
+          display: "flex",
+          fontSize: titleSize,
+          fontWeight: 700,
+          color: c.ink,
+          lineHeight: 1.25,
+          letterSpacing: "0.02em",
+        }),
+      );
+      if (bodyLines.length > 0) {
+        children.push({
+          type: "div",
+          props: {
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              marginTop: height * 0.035,
+              gap: height * 0.022,
+            },
+            children: bodyLines.map((line) => ({
+              type: "div",
+              props: {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  fontSize: bodySize,
+                  color: c.ink,
+                  lineHeight: 1.5,
+                },
+                children: [
+                  {
+                    type: "div",
+                    props: {
+                      style: {
+                        width: Math.round(width * 0.018),
+                        height: Math.round(width * 0.018),
+                        borderRadius: 999,
+                        backgroundColor: c.accent,
+                        marginRight: Math.round(width * 0.028),
+                      },
                     },
                   },
-                },
-                line,
-              ],
-            },
-          })),
-        },
-      });
+                  line,
+                ],
+              },
+            })),
+          },
+        });
+      }
     }
   }
 

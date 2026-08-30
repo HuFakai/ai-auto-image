@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { TextModel } from "@aai/ai-core";
 import {
   PLATFORM_PRESETS,
+  resolveSlideLayout,
   type AdaptPlatform,
   type AspectRatio,
   type CreateRunInput,
@@ -239,16 +240,22 @@ export async function buildPlatformAdaptation(
   const missingPages: number[] = [];
   for (const slide of storyboard.slides) {
     const visualAsset = await latestVisualAsset(deps, runId, slide.index);
-    if (!visualAsset) {
+    // 非 default 版式页没有（也不需要）generated 视觉层：
+    // 按目标比例直接纯排版重排（renderSlideDeterministic 的版式路由）
+    const isLayoutPage = resolveSlideLayout(slide).layout !== "default";
+    if (!visualAsset && !isLayoutPage) {
       missingPages.push(slide.index);
       continue;
     }
-    const visualPath = deps.assetStore.resolve(visualAsset.filePath);
-    if (!fs.existsSync(visualPath)) {
-      missingPages.push(slide.index);
-      continue;
+    let visualImageBase64: string | undefined;
+    if (visualAsset) {
+      const visualPath = deps.assetStore.resolve(visualAsset.filePath);
+      if (!fs.existsSync(visualPath)) {
+        missingPages.push(slide.index);
+        continue;
+      }
+      visualImageBase64 = fs.readFileSync(visualPath).toString("base64");
     }
-    const visualImageBase64 = fs.readFileSync(visualPath).toString("base64");
     // Logo 缺失或读取失败时容忍降级（与流水线 readLogoBase64 一致）
     const logoBase64 = input.brandKit?.logoAssetId
       ? await (async () => {
