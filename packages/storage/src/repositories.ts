@@ -86,6 +86,11 @@ export class ProjectRepo {
     if (!row) throw new Error(`project not found: ${id}`);
     return row;
   }
+
+  /** 删除项目（级联删除其全部 run/节点/资产记录；媒体文件由调用方另行清理） */
+  async delete(id: string): Promise<void> {
+    await this.client.delete(projects).where(eq(projects.id, id));
+  }
 }
 
 /* ── Workflow runs & node runs ────────────────────────────────── */

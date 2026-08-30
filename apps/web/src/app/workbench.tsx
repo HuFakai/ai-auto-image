@@ -422,7 +422,7 @@ export function Workbench({ initial, brandKits, stats }: Props) {
 
           {/* row2：参数 chips */}
           <div className="flex flex-wrap items-center gap-1.5 px-3 pb-3 pt-2 max-sm:px-2.5">
-            <Param label="类型" value={RECIPE_LABELS[recipe]} onClick={() => openTray("type")} />
+            <Param label="类型" value={RECIPE_LABELS[recipe]} onClick={() => openTray("type")} active={trayGroup === "type"} />
             <Param
               label="文字"
               value={mode === "native" ? "原生中文" : "确定性排版"}
@@ -440,7 +440,7 @@ export function Workbench({ initial, brandKits, stats }: Props) {
               }
               title="单击切换比例"
             />
-            <Param label="品牌" value={brandName} onClick={() => openTray("brand")} />
+            <Param label="品牌" value={brandName} onClick={() => openTray("brand")} active={trayGroup === "brand"} />
             {!isComicRecipe && (
               <ToggleParam
                 label="封面候选"
@@ -623,21 +623,26 @@ function Param({
   value,
   onClick,
   title,
+  active,
 }: {
   label: string;
   value: string;
   onClick: () => void;
   title?: string;
+  /** 托盘展开中：文字与值转小红书红表示选中态 */
+  active?: boolean;
 }) {
   return (
     <button
       type="button"
       title={title}
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-[7px] border border-line px-2.5 py-1 font-mono text-[11.5px] text-ink-soft transition-colors hover:border-ink-faint hover:text-ink"
+      className={`inline-flex items-center gap-1.5 rounded-[7px] border border-line px-2.5 py-1 font-mono text-[11.5px] transition-colors ${
+        active ? "border-seal/60 text-seal hover:text-seal" : "text-ink-soft hover:border-ink-faint hover:text-ink"
+      }`}
     >
       {label}
-      <b className="font-semibold text-ink">{value}</b>
+      <b className={`font-semibold ${active ? "text-seal" : "text-ink"}`}>{value}</b>
       {(label === "类型" || label === "品牌") && <span className="text-ink-faint">▾</span>}
     </button>
   );

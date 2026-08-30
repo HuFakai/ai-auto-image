@@ -50,6 +50,13 @@ export class AssetStore {
     return full;
   }
 
+  /** 删除某 run 的全部媒体文件（runs/<runId> 目录；含封面候选与返修版本） */
+  deleteRunAssets(runId: string): void {
+    if (!/^[a-z0-9_]+$/i.test(runId)) throw new Error(`invalid run id: ${runId}`);
+    const dir = path.join(this.rootDir, "runs", runId);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
   /** 把 Provider 返回的图片落盘（Base64 或远程 URL 流式下载） */
   async saveGeneratedImage(
     image: Pick<GeneratedImage, "source" | "base64" | "remoteUrl">,

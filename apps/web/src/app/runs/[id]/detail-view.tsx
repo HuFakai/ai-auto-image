@@ -206,7 +206,9 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         </div>
       </header>
 
-      <div className="mx-auto max-w-[1080px] space-y-8 px-[26px] pb-20 pt-8 max-md:px-4">
+      <div className="mx-auto grid max-w-[1080px] grid-cols-1 items-start gap-6 px-[26px] pb-20 pt-8 max-md:px-4 lg:grid-cols-[minmax(0,1fr)_330px]">
+      {/* 左列：标题 / 封面候选 / 页面画廊 / 生成信息 */}
+      <div className="min-w-0 space-y-8">
       {/* 标题 */}
       <section className="rise">
         <p className="kicker">
@@ -241,6 +243,11 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         <p className="border border-seal/40 bg-seal/5 px-5 py-3 font-mono text-xs text-seal">
           {detail.errorSummary}
         </p>
+      )}
+
+      {/* 封面候选：挑选一张作为作品封面（导出 ZIP 时携带）；漫画以首页为封面 */}
+      {detail.status === "succeeded" && (
+        <CoverCandidatesCard detail={detail} onDone={refresh} />
       )}
 
       {/* 页面画廊 */}
@@ -280,19 +287,6 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           )}
         </div>
       </section>
-
-      {/* 封面候选：挑选一张作为作品封面（导出 ZIP 时携带）；漫画以首页为封面 */}
-      {detail.status === "succeeded" && (
-        <CoverCandidatesCard detail={detail} onDone={refresh} />
-      )}
-
-      {/* 发布文案：基于 storyboard，deterministic 与 native 都可展示 */}
-      {detail.status === "succeeded" && <PublishCopyCard runId={detail.runId} />}
-
-      {/* 平台适配包：确定性模式零模型费用一键重排其他平台 */}
-      {detail.status === "succeeded" && (
-        <PlatformAdaptCard runId={detail.runId} isDeterministic={isDeterministic} input={detail.input} />
-      )}
 
       {/* 生成信息（全部参数可追溯） */}
       <section className="rise border-t border-line pt-5" style={{ animationDelay: "180ms" }}>
@@ -372,6 +366,20 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         </div>
       </section>
       </div>
+
+      {/* 右列侧栏：发布文案 / 平台适配 / 删除作品（lg 起吸附跟随滚动） */}
+      <aside className="min-w-0 space-y-6 lg:sticky lg:top-[72px]">
+        {/* 发布文案：基于 storyboard，deterministic 与 native 都可展示 */}
+        {detail.status === "succeeded" && <PublishCopyCard runId={detail.runId} />}
+
+        {/* 平台适配包：确定性模式零模型费用一键重排其他平台 */}
+        {detail.status === "succeeded" && (
+          <PlatformAdaptCard runId={detail.runId} isDeterministic={isDeterministic} input={detail.input} />
+        )}
+
+        <DeleteRunButton runId={detail.runId} />
+      </aside>
+      </div>
     </>
   );
 }
@@ -425,17 +433,16 @@ function PageFrame({
           <RegionImage runId={runId} page={page} no={no} selecting={selecting} onCancelSelect={closeSelecting} onDone={onDone} />
         </div>
         <figcaption className="flex items-center justify-between px-1 py-2.5">
-          <span className="font-mono text-[10px] text-ink-faint" title={page.model ? `生成模型：${page.model}` : undefined}>
+          <span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-ink-faint">
             图{String(no).padStart(2, "0")} · {page.role}
             {revised ? ` · 第${page.revision}版` : ""}
-            {page.model ? ` · ${page.model}` : ""}
             {page.layout && page.layout !== "default" && LAYOUT_LABELS[page.layout] && (
               <span className="ml-1 rounded bg-seal px-1.5 py-0.5 text-[9px] tracking-wider text-white">
                 {LAYOUT_LABELS[page.layout]}
               </span>
             )}
           </span>
-          <span className="truncate px-2 text-xs text-ink-soft">{page.headline}</span>
+          <span className="min-w-0 truncate px-2 text-xs text-ink-soft">{page.headline}</span>
           <span className="flex shrink-0 items-center gap-1">
             <button
               className="btn-ghost px-2 py-0.5 font-mono text-[10px] hover:!border-seal hover:!text-seal"
@@ -503,6 +510,8 @@ function RegionImage({
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // 非框选状态单击图片 → 大图预览（Esc / 单击遮罩关闭）
+  const [preview, setPreview] = useState(false);
 
   // 进入/退出框选模式时清理框选与输入状态
   useEffect(() => {
@@ -511,6 +520,15 @@ function RegionImage({
     setPrompt("");
     setMessage(null);
   }, [selecting]);
+
+  useEffect(() => {
+    if (!preview) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setPreview(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [preview]);
 
   /** 客户端坐标 → 图片容器内归一化坐标（0–1） */
   function pointFrom(clientX: number, clientY: number): { x: number; y: number } | null {
@@ -586,8 +604,12 @@ function RegionImage({
         <img
           src={`/api/assets/${page.assetId}`}
           alt={`第 ${no} 页：${page.headline}`}
-          className={`w-full border border-line/60 ${selecting ? "pointer-events-none select-none" : ""}`}
+          className={`w-full border border-line/60 ${
+            selecting ? "pointer-events-none select-none" : "cursor-zoom-in"
+          }`}
           draggable={false}
+          onClick={selecting ? undefined : () => setPreview(true)}
+          title={selecting ? undefined : "单击查看大图"}
         />
         {selecting && (
           <div
@@ -650,6 +672,18 @@ function RegionImage({
         <p className="border-t border-line bg-paper-deep px-3 py-2 font-mono text-[10px] text-ink-soft">
           在图上按住鼠标拖出要重绘的区域。
         </p>
+      )}
+      {/* 大图预览：复用 globals.css 的 .lightbox（fixed 遮罩 + 居中大图） */}
+      {preview && (
+        <div className="lightbox open" onClick={() => setPreview(false)}>
+          <img src={`/api/assets/${page.assetId}`} alt={`第 ${no} 页：${page.headline}`} />
+          <div className="text-sm text-ink">
+            图{String(no).padStart(2, "0")} · {page.headline}
+            <small className="mt-1 block text-center font-mono text-[11px] text-ink-faint">
+              Esc 或单击任意处关闭
+            </small>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1195,7 +1229,7 @@ function PlatformAdaptCard({
             <p className="font-mono text-[11px] text-ink-soft">
               确定性模式：按目标平台比例重新排版，沿用模型视觉层，零模型费用，不改动原作资产。
             </p>
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="mt-4 grid grid-cols-1 gap-3">
               {ADAPT_TARGETS.map((target) => (
                 <div key={target.platform} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper-card px-4 py-3">
                   <div>
@@ -1218,7 +1252,7 @@ function PlatformAdaptCard({
             <p className="font-mono text-[11px] text-ink-soft">
               原生中文模式的画面已含文字，无法免费重排；可按目标比例重新生成整套作品（消耗生成额度）。
             </p>
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="mt-4 grid grid-cols-1 gap-3">
               {ADAPT_TARGETS.map((target) => (
                 <div key={target.platform} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper-card px-4 py-3">
                   <div>
@@ -1241,5 +1275,50 @@ function PlatformAdaptCard({
         {message && <p className={`mt-3 font-mono text-[11px] ${messageTone(message)}`}>{message}</p>}
       </div>
     </section>
+  );
+}
+
+/**
+ * 删除作品：DELETE /api/runs/:id（后端校验归属并级联删除全部数据与媒体文件）。
+ * 运行中的作品返回 409，展示后端错误；成功后跳回作品库列表。
+ */
+function DeleteRunButton({ runId }: { runId: string }) {
+  const [deleting, setDeleting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function deleteRun() {
+    if (deleting) return;
+    const confirmed = window.confirm(
+      "将删除该作品的全部数据与媒体文件（含封面候选、返修版本、导出文件），不可恢复。确定删除？",
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/runs/${runId}`, { method: "DELETE" });
+      if (response.ok) {
+        window.location.assign("/runs");
+        return;
+      }
+      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      setMessage(`⚠ ${body.error ?? `HTTP ${response.status}`}`);
+    } catch (caught) {
+      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <div>
+      <button
+        className="w-full border border-seal/60 px-4 py-2 font-mono text-xs tracking-[0.15em] text-seal transition-colors hover:bg-seal hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+        onClick={() => void deleteRun()}
+        disabled={deleting}
+      >
+        {deleting ? "删除中…" : "删除作品"}
+      </button>
+      {message && <p className={`mt-2 font-mono text-[11px] ${messageTone(message)}`}>{message}</p>}
+    </div>
   );
 }

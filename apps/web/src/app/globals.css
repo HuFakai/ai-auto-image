@@ -255,7 +255,7 @@ select.field-input option {
   bottom: 20px;
   left: calc(64px + (100% - 64px) / 2);
   transform: translateX(-50%);
-  width: min(760px, calc(100vw - 112px));
+  width: min(840px, calc(100vw - 112px));
   z-index: 30;
 }
 .createbar {
