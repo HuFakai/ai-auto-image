@@ -239,6 +239,18 @@ export class RunRepo {
     await this.client.update(nodeRuns).set({ outputRef }).where(eq(nodeRuns.id, id));
   }
 
+  /**
+   * 设置作品封面（可传 null 取消选择）。
+   * 封面是增强能力，不做终态保护；更新后返回最新行。
+   */
+  async setSelectedCover(id: string, assetId: string | null) {
+    await this.client
+      .update(workflowRuns)
+      .set({ selectedCoverAssetId: assetId, updatedAt: now() })
+      .where(eq(workflowRuns.id, id));
+    return this.require(id);
+  }
+
   async failNode(id: string, category: ProviderErrorCategory | "internal", summary: string) {
     await this.client
       .update(nodeRuns)
@@ -719,6 +731,19 @@ export class JobRepo {
         .select()
         .from(jobs)
         .where(eq(jobs.runId, runId))
+        .orderBy(sql`${jobs.createdAt} DESC`)
+        .limit(1),
+    );
+    return row ?? null;
+  }
+
+  /** 某 Run 最近一次指定 kind 的作业（如 cover_generate 的生成中状态判断）；无则返回 null */
+  async findLatestByRunIdAndKind(runId: string, kind: string): Promise<typeof jobs.$inferSelect | null> {
+    const row = await one(
+      this.client
+        .select()
+        .from(jobs)
+        .where(and(eq(jobs.runId, runId), eq(jobs.kind, kind)))
         .orderBy(sql`${jobs.createdAt} DESC`)
         .limit(1),
     );

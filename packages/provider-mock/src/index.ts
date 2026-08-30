@@ -123,8 +123,33 @@ function defaultBrief(topic: string): ContentBrief {
   });
 }
 
-function defaultStoryboard(topic: string, aspectRatio: string, platform: string): Storyboard {
-  return StoryboardSchema.parse({
+/** Mock 封面候选：三个候选各用一条知识类标题公式（数字型/悬念型/直给型） */
+function defaultCoverCandidates(topic: string): Array<{
+  hookTitle: string;
+  visualPrompt: string;
+  styleNote: string;
+}> {
+  const t = topic.slice(0, 8);
+  return [
+    {
+      hookTitle: `3个方法看懂${t}`.slice(0, 20),
+      visualPrompt: `${topic}封面主视觉：简洁示意插画，主体居中，留白充足`,
+      styleNote: "构图公式：数字型 · 居中构图",
+    },
+    {
+      hookTitle: `原来${t}一直被误解`.slice(0, 20),
+      visualPrompt: `${topic}封面主视觉：悬念氛围，暖光从侧面打入，聚焦一个核心物件`,
+      styleNote: "构图公式：悬念型 · 侧光特写",
+    },
+    {
+      hookTitle: `一文讲透${t}`.slice(0, 20),
+      visualPrompt: `${topic}封面主视觉：图表化排版元素，深浅两色对比，视觉重心在下方`,
+      styleNote: "构图公式：直给型 · 图表化",
+    },
+  ];
+}
+
+function defaultStoryboard(topic: string, aspectRatio: string, platform: string): Storyboard {  return StoryboardSchema.parse({
     title: `${topic}：一图读懂`,
     platform: platform === "douyin" || platform === "wechat" ? platform : "xiaohongshu",
     aspectRatio: aspectRatio === "9:16" || aspectRatio === "1:1" || aspectRatio === "16:9" ? aspectRatio : "3:4",
@@ -302,6 +327,10 @@ export function createMockProvider(options: MockProviderOptions = {}): MockProvi
           body: `关于「${context.topic}」的要点都在这套图里了，看完记得收藏。\n评论区聊聊你的想法。`,
           tags: ["#干货分享", "#知识科普", "#收藏备用", "#一图读懂"],
         } as unknown as T;
+      }
+      if (request.schemaName === "CoverPlan") {
+        request.onUsage?.(mockUsage);
+        return { candidates: defaultCoverCandidates(context.topic) } as unknown as T;
       }
       // 未知 Schema：走共享结构化管道，把请求转成 JSON 校验失败 → 可诊断错误
       return generateStructured({

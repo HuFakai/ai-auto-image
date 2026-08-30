@@ -20,6 +20,7 @@ import {
 import {
   JobRunner,
   registerComicPipeline,
+  registerCoverPipeline,
   registerKnowledgeCardPipeline,
   registerPageRegenPipeline,
   type ImageRoute,
@@ -344,6 +345,28 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     set visualQuality(model) {
       pipelineDeps.visualQuality = model;
     },
+  });
+
+  registerCoverPipeline(runtime.runner, {
+    runRepo: runtime.runRepo,
+    jobRepo: runtime.jobRepo,
+    assetRepo: runtime.assetRepo,
+    providerRepo: runtime.providerRepo,
+    assetStore: runtime.assetStore,
+    get textRoutes() {
+      return pipelineDeps.textRoutes;
+    },
+    set textRoutes(routes) {
+      pipelineDeps.textRoutes = routes;
+    },
+    get imageRoutes() {
+      return pipelineDeps.imageRoutes;
+    },
+    set imageRoutes(routes) {
+      pipelineDeps.imageRoutes = routes;
+    },
+    imageApiSemaphore: runtime.imageApiSemaphore,
+    assetsDir,
   });
 
   await runtime.refreshChannels();

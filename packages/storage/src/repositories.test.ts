@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openDatabase, type OpenDatabase } from "./database";
-import { BrandKitRepo, JobRepo, ProjectRepo, RunRepo } from "./repositories";
+import { AssetRepo, BrandKitRepo, JobRepo, ProjectRepo, RunRepo } from "./repositories";
 
 function migrationsDir(): string {
   const moduleUrl = import.meta.url;
@@ -179,6 +179,34 @@ describe("RunRepo", () => {
     expect(await runs.updateStatus(run3.id, "failed")).toBe(true);
     expect(await runs.updateStatus(run3.id, "running")).toBe(true);
     expect((await runs.require(run3.id)).status).toBe("running");
+  });
+
+  it("setSelectedCover round-trips the selected cover asset id", async () => {
+    const projects = new ProjectRepo(db.db);
+    const runs = new RunRepo(db.db);
+    const assets = new AssetRepo(db.db);
+    const project = await projects.create({ title: "封面选择测试" });
+    const run = await runs.create({ projectId: project.id, inputJson: "{}" });
+
+    // 未挑选时为 null
+    expect((await runs.require(run.id)).selectedCoverAssetId).toBeNull();
+
+    // 写入并回读（外键约束：须为真实资产）
+    const coverAsset = await assets.create({
+      runId: run.id,
+      pageIndex: -1,
+      kind: "cover",
+      filePath: "runs/x/covers/cover-1.png",
+      bytes: 1,
+      metadataJson: JSON.stringify({ purpose: "cover", variant: 1 }),
+    });
+    const updated = await runs.setSelectedCover(run.id, coverAsset.id);
+    expect(updated.selectedCoverAssetId).toBe(coverAsset.id);
+    expect((await runs.require(run.id)).selectedCoverAssetId).toBe(coverAsset.id);
+
+    // 传 null 取消选择
+    const cleared = await runs.setSelectedCover(run.id, null);
+    expect(cleared.selectedCoverAssetId).toBeNull();
   });
 });
 

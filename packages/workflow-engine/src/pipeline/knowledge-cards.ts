@@ -33,6 +33,7 @@ import { applyBrandOverlays, hasBrandOverlays, renderSlideDeterministic, themeBy
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import { buildBriefPrompt, buildSlidePrompt, buildStoryboardPrompt } from "../prompts";
+import { runCoverStage } from "./cover";
 
 export const KNOWLEDGE_CARD_KIND = "knowledge_card_run";
 
@@ -207,6 +208,9 @@ async function executeKnowledgeCardRun(
     });
     await runPool(pageTasks, effective);
     await throwIfAborted(deps, runId, ctx.signal);
+
+    /* generate-covers：封面候选（增强能力，失败不阻塞；Comic 管线不做——漫画首页即封面） */
+    await runCoverStage(deps, ctx, runId, input, storyboard);
 
     /* render-slides：仅确定性模式 */
     if (input.textRenderingMode === "deterministic") {

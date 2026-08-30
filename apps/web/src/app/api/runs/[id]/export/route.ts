@@ -3,7 +3,7 @@ import path from "node:path";
 import { NextResponse } from "next/server";
 import type { CreateRunInput, Storyboard } from "@aai/shared-schemas";
 import { StoryboardSchema } from "@aai/shared-schemas";
-import { buildExportZip, generatePlatformCopy, templateCopy, type ExportPageFile } from "@aai/workflow-engine";
+import { buildExportZip, generatePlatformCopy, templateCopy, type ExportCoverFile, type ExportPageFile } from "@aai/workflow-engine";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser } from "@/server/auth";
 
@@ -70,6 +70,34 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "no pages to export" }, { status: 409 });
   }
 
+  // 选中封面（可选）：作为 ZIP 首张 images/00-封面.png；资产缺失或读取失败时零影响
+  let coverFile: ExportCoverFile | undefined;
+  if (run.selectedCoverAssetId) {
+    try {
+      const coverAsset = await runtime.assetRepo.require(run.selectedCoverAssetId);
+      if (coverAsset.kind === "cover") {
+        const coverPath = runtime.assetStore.resolve(coverAsset.filePath);
+        if (fs.existsSync(coverPath)) {
+          const coverMeta = (() => {
+            try {
+              return JSON.parse(coverAsset.metadataJson ?? "{}") as { hookTitle?: string };
+            } catch {
+              return {} as { hookTitle?: string };
+            }
+          })();
+          coverFile = {
+            assetId: coverAsset.id,
+            hookTitle: coverMeta.hookTitle,
+            filename: path.basename(coverAsset.filePath),
+            buffer: fs.readFileSync(coverPath),
+          };
+        }
+      }
+    } catch {
+      coverFile = undefined;
+    }
+  }
+
   // 发布文案：优先复用缓存；否则用文本渠道生成（失败降级模板）
   const exportDir = path.join(runtime.config.exportsDir, id);
   fs.mkdirSync(exportDir, { recursive: true });
@@ -108,7 +136,13 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
     },
     pages: pageFiles,
     copy,
-    manifest: { ...manifest, exportedAt: new Date().toISOString(), copySource: copy.source },
+    cover: coverFile,
+    manifest: {
+      ...manifest,
+      exportedAt: new Date().toISOString(),
+      copySource: copy.source,
+      ...(coverFile ? { cover: { assetId: coverFile.assetId, hookTitle: coverFile.hookTitle } } : {}),
+    },
   });
 
   return new Response(new Uint8Array(zip), {

@@ -7,6 +7,7 @@ import {
   real,
   text,
   uniqueIndex,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 /**
@@ -50,6 +51,10 @@ export const workflowRuns = pgTable(
     reviewStatus: text("review_status").notNull().default("pending"),
     reviewNote: text("review_note"),
     reviewedAt: epochColumn("reviewed_at"),
+    /** 用户挑选的作品封面（assets 表 kind="cover" 的资产；封面是增强能力，可空） */
+    selectedCoverAssetId: text("selected_cover_asset_id").references((): AnyPgColumn => assets.id, {
+      onDelete: "set null",
+    }),
     createdAt: createdAt(),
     updatedAt: epochColumn("updated_at").notNull(),
     startedAt: epochColumn("started_at"),

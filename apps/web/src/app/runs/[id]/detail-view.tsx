@@ -100,9 +100,10 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
       const timer = setInterval(refresh, 3000);
       return () => clearInterval(timer);
     }
-    const timer = setInterval(refresh, 15000);
+    // 封面生成中加快轮询，其余保持低频刷新
+    const timer = setInterval(refresh, detail.coverJobPending ? 5000 : 15000);
     return () => clearInterval(timer);
-  }, [active, editingPage, refresh]);
+  }, [active, editingPage, refresh, detail.coverJobPending]);
 
   async function cancel() {
     if (cancelling) return;
@@ -256,6 +257,11 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           )}
         </div>
       </section>
+
+      {/* 封面候选：挑选一张作为作品封面（导出 ZIP 时携带）；漫画以首页为封面 */}
+      {detail.status === "succeeded" && (
+        <CoverCandidatesCard detail={detail} onDone={refresh} />
+      )}
 
       {/* 发布文案：基于 storyboard，deterministic 与 native 都可展示 */}
       {detail.status === "succeeded" && <PublishCopyCard runId={detail.runId} />}
@@ -731,6 +737,152 @@ function RegenPanel({
       </div>
       {message && <p className="mt-2 font-mono text-[10px] text-ink-soft">{message}</p>}
     </div>
+  );
+}
+
+/**
+ * 封面候选卡片：每个作品产出 3 个封面候选（不同标题钩子/构图），
+ * 用户挑选一张作为作品封面（导出 ZIP 时作为首张 00-封面.png）。
+ * 漫画类型不做封面候选（漫画首页即封面）。
+ */
+function CoverCandidatesCard({ detail, onDone }: { detail: RunDetailPayload; onDone: () => Promise<void> }) {
+  const recipe = detail.generation.recipe;
+  const isComic = recipe === "comic_story" || recipe === "strip_comic";
+  const [generating, setGenerating] = useState(false);
+  const [selecting, setSelecting] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  if (isComic) {
+    return (
+      <section className="rise" style={{ animationDelay: "130ms" }}>
+        <div className="rule-double mb-5 flex items-baseline justify-between pt-2">
+          <h2 className="font-display text-lg font-bold">封面候选</h2>
+          <span className="kicker">COVER · 作品封面</span>
+        </div>
+        <div className="border border-line bg-paper-deep/30 px-5 py-4">
+          <p className="font-mono text-[11px] text-ink-soft">漫画以首页为封面，无需单独挑选。</p>
+        </div>
+      </section>
+    );
+  }
+
+  async function generate() {
+    if (generating) return;
+    setGenerating(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/runs/${detail.runId}/covers/generate`, { method: "POST" });
+      const body = (await response.json().catch(() => ({}))) as { error?: string; hint?: string };
+      if (!response.ok) {
+        throw new Error(body.hint ?? body.error ?? `HTTP ${response.status}`);
+      }
+      setMessage(body.hint ?? "封面生成中，约 1–2 分钟，稍后刷新查看");
+      await onDone();
+    } catch (caught) {
+      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function select(assetId: string) {
+    if (selecting) return;
+    setSelecting(assetId);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/runs/${detail.runId}/cover/select`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assetId }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      await onDone();
+    } catch (caught) {
+      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+    } finally {
+      setSelecting(null);
+    }
+  }
+
+  const pending = detail.coverJobPending;
+
+  return (
+    <section className="rise" style={{ animationDelay: "130ms" }}>
+      <div className="rule-double mb-5 flex items-baseline justify-between pt-2">
+        <h2 className="font-display text-lg font-bold">封面候选</h2>
+        <span className="kicker">COVER · 3 选 1 · 随 ZIP 导出</span>
+      </div>
+      <div className="border border-line bg-paper-deep/30 p-5">
+        {detail.covers.length > 0 ? (
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+            {detail.covers.map((cover) => {
+              const selected = detail.selectedCoverAssetId === cover.assetId;
+              const tooLong = cover.hookTitle.length > 12;
+              return (
+                <figure key={cover.assetId} className="photo-frame p-2.5 pb-0">
+                  <div className="relative">
+                    <img
+                      src={`/api/assets/${cover.assetId}`}
+                      alt={`封面候选 ${cover.variant}：${cover.hookTitle}`}
+                      className="w-full border border-line/60"
+                      draggable={false}
+                    />
+                    {selected && (
+                      <span className="absolute left-1.5 top-1.5 bg-seal px-2 py-0.5 font-mono text-[10px] text-paper">
+                        当前封面 ✓
+                      </span>
+                    )}
+                    <span className="absolute right-1.5 top-1.5 bg-paper/90 px-1.5 py-0.5 font-mono text-[10px] text-ink-soft">
+                      候选 {cover.variant}
+                    </span>
+                  </div>
+                  <figcaption className="px-1 py-2.5">
+                    <p className="truncate font-display text-sm font-bold" title={cover.hookTitle}>
+                      {cover.hookTitle}
+                    </p>
+                    {tooLong && <p className="mt-0.5 font-mono text-[10px] text-amber">标题偏长，建议 ≤12 字</p>}
+                    <p className="mt-0.5 truncate font-mono text-[10px] text-ink-faint" title={cover.styleNote}>
+                      {cover.styleNote}
+                    </p>
+                    <div className="mt-2">
+                      {selected ? (
+                        <span className="stamp stamp-quiet text-ink-faint">已选用</span>
+                      ) : (
+                        <button
+                          className="btn-ghost px-3 py-1 font-mono text-[11px] hover:!border-seal hover:!text-seal"
+                          onClick={() => void select(cover.assetId)}
+                          disabled={selecting !== null}
+                        >
+                          {selecting === cover.assetId ? "选定中…" : "选为封面"}
+                        </button>
+                      )}
+                    </div>
+                  </figcaption>
+                </figure>
+              );
+            })}
+          </div>
+        ) : pending || generating ? (
+          <p className="font-mono text-[11px] text-seal">封面生成中…（约 1–2 分钟，生成完成后自动展示）</p>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              className="btn-ink px-4 py-2 font-mono text-xs tracking-[0.1em]"
+              onClick={() => void generate()}
+              disabled={generating}
+              title="生成 3 个封面候选（不同标题钩子/构图），约消耗 3 次图片额度"
+            >
+              {generating ? "提交中…" : "生成封面候选（3 张，约消耗 3 次图片额度）"}
+            </button>
+            <span className="font-mono text-[10px] text-ink-faint">挑选一张作为作品封面，导出 ZIP 时一并携带。</span>
+          </div>
+        )}
+        {message && <p className="mt-3 font-mono text-[11px] text-ink-soft">{message}</p>}
+      </div>
+    </section>
   );
 }
 

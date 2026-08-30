@@ -20,6 +20,7 @@ import { JobRunner } from "./job-runner";
 import { registerKnowledgeCardPipeline, type ImageRoute, type TextRoute, type WorkflowDeps } from "./pipeline/knowledge-cards";
 import { registerComicPipeline, type ComicPipelineDeps } from "./pipeline/comic";
 import { registerPageRegenPipeline, type PageRegenDeps } from "./pipeline/page-regen";
+import { registerCoverPipeline, type CoverDeps } from "./pipeline/cover";
 
 /** 评测与集成测试共用的流水线装置：进程内 PGlite + Mock Provider + 临时目录 */
 export interface Harness {
@@ -27,6 +28,7 @@ export interface Harness {
   deps: WorkflowDeps;
   comicDeps: ComicPipelineDeps;
   pageRegenDeps: PageRegenDeps;
+  coverDeps: CoverDeps;
   revisionRepo: RevisionRepo;
   jobRepo: JobRepo;
   runRepo: RunRepo;
@@ -96,12 +98,24 @@ export async function createHarness(options: { mock?: MockProviderOptions } = {}
     assetsDir: assetsRoot,
     visualQuality: mock.bundle.visualQuality,
   };
+  const coverDeps: CoverDeps = {
+    runRepo: deps.runRepo,
+    jobRepo: deps.jobRepo,
+    assetRepo: deps.assetRepo,
+    providerRepo: deps.providerRepo,
+    assetStore: deps.assetStore,
+    textRoutes: deps.textRoutes,
+    imageRoutes: deps.imageRoutes,
+    imageApiSemaphore: deps.imageApiSemaphore,
+    assetsDir: assetsRoot,
+  };
 
   return {
     db,
     deps,
     comicDeps,
     pageRegenDeps,
+    coverDeps,
     revisionRepo,
     jobRepo: deps.jobRepo,
     runRepo: deps.runRepo,
@@ -124,6 +138,7 @@ export function startEvalRunner(harness: Harness): JobRunner {
   registerKnowledgeCardPipeline(runner, harness.deps);
   registerPageRegenPipeline(runner, harness.pageRegenDeps);
   registerComicPipeline(runner, harness.comicDeps);
+  registerCoverPipeline(runner, harness.coverDeps);
   runner.start();
   return runner;
 }

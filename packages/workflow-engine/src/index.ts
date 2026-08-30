@@ -4,5 +4,6 @@ export * from "./prompts";
 export * from "./pipeline/knowledge-cards";
 export * from "./pipeline/page-regen";
 export * from "./pipeline/comic";
+export * from "./pipeline/cover";
 export * from "./export";
 export * from "./testkit";

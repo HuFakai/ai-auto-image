@@ -92,6 +92,12 @@ export interface RunDetailPayload {
   job: { id: string; status: string; attempts: number; recoveries: number } | null;
   nodes: Array<{ nodeName: string; status: string; attempt: number }>;
   storyboardTitle: string | null;
+  /** 封面候选（kind="cover"，按 variant 排序；漫画类型为空） */
+  covers: CoverCandidateView[];
+  /** 用户挑选的作品封面资产 id（未挑选为 null） */
+  selectedCoverAssetId: string | null;
+  /** cover_generate 作业是否仍在排队/执行 */
+  coverJobPending: boolean;
   /** 生成信息（来自冻结的 RunSnapshot 与输入），详情页完整呈现 */
   generation: {
     recipe: string;
@@ -104,6 +110,14 @@ export interface RunDetailPayload {
     characterRefAssetId: string | null;
   };
   pages: RunDetailPage[];
+}
+
+/** 封面候选（详情页展示用） */
+export interface CoverCandidateView {
+  assetId: string;
+  variant: number;
+  hookTitle: string;
+  styleNote: string;
 }
 
 export interface RunsListPayload {

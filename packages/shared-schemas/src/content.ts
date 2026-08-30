@@ -83,3 +83,20 @@ export const SlidePlanSchema = StoryboardSlideSchema.extend({
   expectedCopy: z.array(z.string()),
 });
 export type SlidePlan = z.infer<typeof SlidePlanSchema>;
+
+/** 封面候选：一个候选 = 钩子标题 + 画面描述 + 构图/风格说明 */
+export const CoverCandidatePlanSchema = z.object({
+  /** 封面大字标题（钩子），建议 ≤12 字 */
+  hookTitle: z.string().min(2).max(20),
+  /** 画面描述（给图片模型） */
+  visualPrompt: z.string().min(4).max(400),
+  /** 构图/风格说明（展示用） */
+  styleNote: z.string().max(60),
+});
+export type CoverCandidatePlan = z.infer<typeof CoverCandidatePlanSchema>;
+
+/** 封面方案：恰好 3 个候选（不同标题公式/构图） */
+export const CoverPlanSchema = z.object({
+  candidates: z.array(CoverCandidatePlanSchema).min(3).max(3),
+});
+export type CoverPlan = z.infer<typeof CoverPlanSchema>;

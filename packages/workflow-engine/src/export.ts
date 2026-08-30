@@ -98,9 +98,18 @@ export function renderCopyMarkdown(
   ].join("\n");
 }
 
+export interface ExportCoverFile {
+  assetId: string;
+  /** 封面钩子标题（来自资产 metadata，缺省 undefined） */
+  hookTitle?: string | undefined;
+  filename: string;
+  buffer: Buffer;
+}
+
 /**
  * 组装导出 ZIP：按序图片 + 发布文案 Markdown + manifest + 发布清单。
  * 文件名用「序号-页码-角色」，保证解压后的排序即发布顺序。
+ * 选中封面时作为 images/00-封面.png 置于首张（正文仍从 01 起）。
  */
 export async function buildExportZip(input: {
   runId: string;
@@ -109,9 +118,15 @@ export async function buildExportZip(input: {
   pages: ExportPageFile[];
   copy: PlatformCopy;
   manifest: Record<string, unknown>;
+  /** 用户挑选的作品封面（可选；无选中封面时零行为变化） */
+  cover?: ExportCoverFile | undefined;
 }): Promise<Buffer> {
   const zip = new JSZip();
   const images = zip.folder("images")!;
+
+  if (input.cover) {
+    images.file("00-封面.png", input.cover.buffer);
+  }
 
   const ordered = [...input.pages].sort((a, b) => a.index - b.index);
   ordered.forEach((page, order) => {
@@ -131,9 +146,9 @@ export async function buildExportZip(input: {
       `页数：${ordered.length}`,
       "",
       "发布步骤：",
-      "1. 按顺序上传 images/ 目录中的图片（文件名序号即顺序）",
-      "2. 粘贴 发布文案.md 中的标题、正文与标签",
-      "3. 首图建议使用 01 文件；发布前确认图片顺序与内容",
+      `1. 按顺序上传 images/ 目录中的图片（文件名序号即顺序${input.cover ? "，00 为封面" : ""}）`,
+      `2. 粘贴 发布文案.md 中的标题、正文与标签`,
+      `3. 首图建议使用 ${input.cover ? "00（封面）" : "01"} 文件；发布前确认图片顺序与内容`,
       "",
       "生成信息见 manifest.json（模型、Prompt 版本、用量与资产血缘）。",
     ].join("\n"),

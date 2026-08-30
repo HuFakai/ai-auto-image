@@ -249,8 +249,7 @@ export function buildSlidePrompt(
 /**
  * 科普漫画分镜 Prompt（comic 管线 generate-comic-storyboard 节点）：
  * comic_story 保持原有指令；strip_comic 为四格漫画变体（1–2 页、每页四格起承转合、对白精简）。
- */
-export function buildComicStoryboardPrompt(
+ */export function buildComicStoryboardPrompt(
   input: CreateRunInput,
   brief: Pick<ContentBrief, "coreMessage">,
   castText: string,
@@ -279,5 +278,63 @@ export function buildComicStoryboardPrompt(
     input.sourceText ? `参考资料：\n<<<资料>>>\n${input.sourceText.slice(0, 6000)}` : "",
   ]
     .filter(Boolean)
+    .join("\n");
+}
+
+/** 各 Recipe 的封面标题公式库（每个候选必须来自不同的公式） */
+function coverHookFormulas(recipe: string | undefined): string[] {
+  switch (recipe) {
+    case "quote_cards":
+      return [
+        "金句直给式：把最有力的一句判断压缩成大字标题（如「慢慢来，比较快」）。",
+        "反问式：用一个问题勾起好奇（如「你真的会休息吗？」）。",
+        "身份共鸣式：点出目标人群的身份/处境（如「打工人的周三自救指南」）。",
+        "反差式：制造认知反差（如「越努力越焦虑？」）。",
+      ];
+    case "checklist_cards":
+      return [
+        "步骤承诺式：承诺可完成的步骤数（如「3 步搞定 X」）。",
+        "终极清单式：强调全面收好（如「X 全攻略，一篇够了」）。",
+        "避坑式：点出常见坑（如「别再这样做 X 了」）。",
+        "新手友好式：降低门槛（如「新手也能上手的小技巧」）。",
+      ];
+    default:
+      // 知识类公式库：knowledge_cards 与其余 recipe 复用
+      return [
+        "数字型：给出具体数字承诺（如「3 个方法」「5 分钟看懂」）。",
+        "悬念型：留半句话勾好奇（如「原来我一直…」）。",
+        "对比型：制造 A vs B 对照（如「新手 vs 高手」「误区 vs 真相」）。",
+        "直给型：直接点明价值（如「一文讲透 X」）。",
+      ];
+  }
+}
+
+/**
+ * 封面方案 Prompt（generate-covers 节点）：
+ * 要求恰好 3 个候选，每个来自不同的标题公式；给出主题与核心结论作语境，
+ * 要求 hookTitle 具体不空泛、画面与正文首页差异化。
+ */
+export function buildCoverPlanPrompt(
+  input: CreateRunInput,
+  storyboard: Storyboard,
+  coreMessage: string | undefined,
+): string {
+  const formulas = coverHookFormulas(input.recipe);
+  const firstPage = storyboard.slides[0];
+  return [
+    `主题：${input.topic}`,
+    `目标平台：${input.platform}`,
+    coreMessage ? `作品核心结论：${coreMessage}` : undefined,
+    firstPage ? `正文首页标题（封面画面须与之差异化，不得重复）：${firstPage.headline}` : undefined,
+    "任务：为这套图文生成 3 个封面候选方案（CoverPlan）。",
+    "要求：",
+    "- 必须恰好 3 个候选；每个候选使用上面不同的标题公式（逐条对应，不得重复同一公式）。",
+    "- hookTitle 是封面大字标题：具体、有钩子、不空泛，长度不超过 12 字（硬上限 20 字）。",
+    "- visualPrompt 是封面画面描述（给图片模型），描述主体、构图与氛围，与正文首页画面差异化。",
+    "- styleNote 用一句话说明构图/风格（展示给用户看），不超过 30 字。",
+    ...formulas.map((formula, index) => `- 公式${index + 1}：${formula}`),
+    input.sourceText ? `参考资料开头（语境参考）：\n${input.sourceText.slice(0, 800)}` : undefined,
+  ]
+    .filter((line): line is string => Boolean(line))
     .join("\n");
 }

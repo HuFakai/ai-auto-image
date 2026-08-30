@@ -40,7 +40,8 @@ describe("knowledge card pipeline (mock)", () => {
     const snapshot = JSON.parse(finalRun.snapshotJson ?? "{}") as { concurrency?: { effective?: number } };
     expect(snapshot.concurrency?.effective).toBe(1);
 
-    expect((await harness.runRepo.runTotals(runId)).images).toBe(4);
+    // 4 张正文页 + 3 张封面候选（generate-covers 增强工序）
+    expect((await harness.runRepo.runTotals(runId)).images).toBe(7);
   });
 
   it("retries only the failed page, not the whole set", async () => {

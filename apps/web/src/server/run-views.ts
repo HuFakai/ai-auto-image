@@ -166,6 +166,24 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
   const job = await runtime.jobRepo.findByRunId(runId);
   const totals = await runtime.runRepo.runTotals(runId);
 
+  // 封面候选（kind="cover"、未被替代），按 variant 排序；漫画类型自然为空
+  const covers: RunDetailPayload["covers"] = allAssets
+    .filter((a) => a.kind === "cover" && a.supersededAt === null)
+    .map((a) => {
+      const meta = a.metadataJson ? (JSON.parse(a.metadataJson) as Record<string, unknown>) : {};
+      return {
+        assetId: a.id,
+        variant: typeof meta.variant === "number" ? meta.variant : 0,
+        hookTitle: typeof meta.hookTitle === "string" ? meta.hookTitle : "",
+        styleNote: typeof meta.styleNote === "string" ? meta.styleNote : "",
+      };
+    })
+    .sort((a, b) => a.variant - b.variant);
+  // cover_generate 作业是否仍在排队/执行（决定详情页"封面生成中"状态）
+  const coverJob = await runtime.jobRepo.findLatestByRunIdAndKind(runId, "cover_generate");
+  const coverJobPending =
+    coverJob !== null && ["queued", "retry_waiting", "running"].includes(coverJob.status);
+
   // 生成信息：输入 + 冻结快照 + 漫画定妆图
   let brandKitMeta: RunDetailPayload["generation"]["brandKit"] = null;
   if (input.brandKit) {
@@ -203,6 +221,9 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
       : null,
     nodes: nodes.map((n) => ({ nodeName: n.nodeName, status: n.status, attempt: n.attempt })),
     storyboardTitle: storyboard?.title ?? comicStoryboard?.title ?? null,
+    covers,
+    selectedCoverAssetId: run.selectedCoverAssetId,
+    coverJobPending,
     generation: {
       recipe: input.recipe ?? "knowledge_cards",
       textRenderingMode: input.textRenderingMode,

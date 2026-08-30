@@ -1,0 +1,2 @@
+ALTER TABLE "workflow_runs" ADD COLUMN "selected_cover_asset_id" text;--> statement-breakpoint
+ALTER TABLE "workflow_runs" ADD CONSTRAINT "workflow_runs_selected_cover_asset_id_assets_id_fk" FOREIGN KEY ("selected_cover_asset_id") REFERENCES "public"."assets"("id") ON DELETE set null ON UPDATE no action;
