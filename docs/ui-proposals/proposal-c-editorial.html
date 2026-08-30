@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>方案 C · 墨蓝编辑台 — AI 图文工坊</title>
+<style>
+  /* ── Token:冷调纸白 / 墨黑 / 靛蓝 + 一处朱红;宋体标题 ── */
+  :root{
+    --bg:#F7F7F4; --panel:#FFFFFF; --line:#E3E2DC; --line-strong:#CFCDC5;
+    --ink:#1C1C1A; --ink-soft:#77756E; --ink-faint:#A6A49B;
+    --indigo:#2F3E9E; --indigo-soft:#EEF0FA; --cinnabar:#C2401C;
+    --serif:"Songti SC","Noto Serif SC","STSong",serif;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+    font-size:14px; line-height:1.65; -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:#DDE2F5}
+
+  /* ── 顶部品牌横栏 ── */
+  header.mast{
+    background:var(--panel);border-bottom:1px solid var(--line);
+    padding:0 34px;display:flex;align-items:center;gap:34px;height:64px;
+    position:sticky;top:0;z-index:10;
+  }
+  .mast .word{
+    font-family:var(--serif);font-weight:900;font-size:21px;letter-spacing:.06em;
+    display:flex;align-items:baseline;gap:10px;white-space:nowrap
+  }
+  .mast .word .seal{
+    width:26px;height:26px;background:var(--cinnabar);color:#fff;border-radius:6px;
+    display:inline-grid;place-items:center;font-size:14px;font-family:var(--serif);align-self:center
+  }
+  .mast .word em{font-style:normal;font-family:var(--mono);font-size:10px;letter-spacing:.28em;color:var(--ink-faint)}
+  .tabs{display:flex;gap:4px;height:100%}
+  .tab{
+    display:flex;align-items:center;padding:0 16px;cursor:pointer;color:var(--ink-soft);
+    font-size:14px;border-bottom:2px solid transparent;transition:.15s;margin-bottom:-1px
+  }
+  .tab:hover{color:var(--ink)}
+  .tab.on{color:var(--ink);font-weight:600;border-bottom-color:var(--cinnabar)}
+  .mast .right{margin-left:auto;display:flex;align-items:center;gap:14px}
+  .mast .date{font-family:var(--mono);font-size:11px;color:var(--ink-faint);letter-spacing:.1em}
+  .avatar{width:30px;height:30px;border-radius:50%;background:var(--indigo);color:#fff;display:grid;place-items:center;font-size:12px}
+
+  main{max-width:1180px;margin:0 auto;padding:34px 34px 200px}
+
+  /* ── 编辑区:今日创作 ── */
+  .desk{
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:30px 34px 26px;position:relative;overflow:hidden;
+  }
+  .desk::before{ /* 顶部靛蓝书脊线 */
+    content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--indigo)
+  }
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.3em;color:var(--ink-faint)}
+  .desk h1{
+    font-family:var(--serif);font-weight:900;font-size:34px;letter-spacing:.02em;
+    margin:8px 0 4px;line-height:1.3
+  }
+  .desk h1 .accent{color:var(--indigo)}
+  .desk .sub{color:var(--ink-soft);font-size:13.5px;max-width:560px;margin-bottom:22px}
+  .draft{
+    display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line-strong);
+    border-radius:10px;padding:13px 14px;background:var(--bg);transition:.15s
+  }
+  .draft:focus-within{border-color:var(--indigo);box-shadow:0 0 0 3px var(--indigo-soft)}
+  .draft textarea{
+    flex:1;border:none;background:none;outline:none;resize:none;font-family:var(--serif);
+    font-size:19px;color:var(--ink);min-height:34px;line-height:1.5
+  }
+  .draft textarea::placeholder{color:var(--ink-faint)}
+  .draft .btn{
+    background:var(--cinnabar);color:#fff;border:none;border-radius:8px;padding:10px 22px;
+    font-size:14.5px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;transition:.15s
+  }
+  .draft .btn:hover{background:#AD3817}
+
+  /* ── 活字托盘:参数字模 ── */
+  .tray{margin-top:18px}
+  .tray .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.24em;color:var(--ink-faint);margin-bottom:9px}
+  .tray .blocks{display:flex;gap:8px;flex-wrap:wrap}
+  .block{
+    min-width:74px;text-align:center;padding:9px 13px 7px;border:1px solid var(--line-strong);
+    border-radius:8px;background:var(--panel);cursor:pointer;transition:.15s;user-select:none
+  }
+  .block .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;color:var(--ink-faint)}
+  .block .v{font-size:13.5px;font-weight:600;margin-top:1px}
+  .block:hover{border-color:var(--indigo)}
+  .block.on{background:var(--indigo);border-color:var(--indigo)}
+  .block.on .k{color:#B9C2EE}
+  .block.on .v{color:#fff}
+  .tray .extra{display:flex;gap:18px;margin-top:14px;flex-wrap:wrap}
+  .switchrow{display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;color:var(--ink-soft)}
+  .switch{width:32px;height:19px;border-radius:99px;background:#D6D4CC;position:relative;transition:.16s;flex:none}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:#fff;transition:.16s;box-shadow:0 1px 2px rgba(0,0,0,.18)}
+  .switch.on{background:var(--indigo)}
+  .switch.on::after{left:15px}
+
+  /* ── 杂志架:作品墙 ── */
+  .rack-head{display:flex;align-items:baseline;justify-content:space-between;margin:36px 4px 16px}
+  .rack-head h2{font-family:var(--serif);font-size:21px;font-weight:900;letter-spacing:.04em}
+  .rack-head .more{font-size:13px;color:var(--indigo);cursor:pointer}
+  .rack{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:20px}
+  .issue{
+    background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden;
+    cursor:pointer;transition:.2s;opacity:0;transform:translateY(8px);animation:rise .5s ease forwards
+  }
+  .issue:nth-child(odd){animation-delay:.05s}.issue:nth-child(even){animation-delay:.12s}
+  @keyframes rise{to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){.issue{animation:none;opacity:1;transform:none}}
+  .issue:hover{transform:translateY(-3px);box-shadow:0 14px 34px rgba(28,28,26,.1);border-color:var(--line-strong)}
+  .i-cover{aspect-ratio:3/4;position:relative;overflow:hidden}
+  .i-cover .img{position:absolute;inset:0;transition:.35s}
+  .issue:hover .img{transform:scale(1.03)}
+  .i-cat{
+    position:absolute;top:10px;left:10px;font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+    background:rgba(247,247,244,.92);color:var(--ink);padding:3px 8px;border-radius:4px
+  }
+  .i-meta{padding:12px 14px 14px}
+  .i-title{font-family:var(--serif);font-weight:700;font-size:15.5px;line-height:1.5;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .i-sub{font-family:var(--mono);font-size:11px;color:var(--ink-faint);margin-top:5px;display:flex;justify-content:space-between}
+  .i-sub .st-review{color:var(--cinnabar)}
+  /* 占位封面 */
+  .ph-1{background:radial-gradient(120% 90% at 20% 15%,#2E4A8F 0%,#101A33 58%,#0A0F1E 100%)}
+  .ph-2{background:linear-gradient(160deg,#F2E8D5 0%,#D8C9A8 45%,#8A6F45 100%)}
+  .ph-3{background:radial-gradient(110% 100% at 75% 20%,#E8834A 0%,#B4402A 55%,#3E120C 100%)}
+  .ph-4{background:linear-gradient(200deg,#20302B 0%,#0E1613 60%,#080B0A 100%)}
+  .ph-5{background:radial-gradient(130% 100% at 50% 0%,#4A3F6B 0%,#241E38 55%,#0E0B18 100%)}
+  .ph-6{background:linear-gradient(140deg,#DDE4EA 0%,#9FB2C4 50%,#4E6072 100%)}
+  .bigchar{position:absolute;top:15%;left:0;right:0;text-align:center;color:#fff;font-weight:900;font-size:42px;font-family:var(--serif)}
+  .bigchar small{display:block;font-size:12px;font-weight:400;opacity:.72;margin-top:5px;letter-spacing:.3em;font-family:var(--mono)}
+
+  @media (max-width:800px){main{padding:22px 18px 190px}.mast{padding:0 18px;gap:16px}.tabs .tab{padding:0 10px}.desk{padding:22px}}
+</style>
+</head>
+<body>
+<header class="mast">
+  <div class="word"><span class="seal">印</span>AI 图文工坊<em>AUTO IMAGE PRESS</em></div>
+  <nav class="tabs">
+    <div class="tab on">工作台</div>
+    <div class="tab">作品库</div>
+    <div class="tab">品牌手册</div>
+    <div class="tab">渠道设置</div>
+  </nav>
+  <div class="right">
+    <span class="date">2026-08-30 · SAT</span>
+    <div class="avatar">A</div>
+  </div>
+</header>
+
+<main>
+  <section class="desk">
+    <div class="kicker">TODAY'S DESK · 今日创作</div>
+    <h1>把一个想法,<span class="accent">排成一套可发布的图文。</span></h1>
+    <p class="sub">输入主题,AI 完成分镜、配图、排版与发布文案;封面候选、页内返修、多平台导出在作品详情中完成。</p>
+    <div class="draft">
+      <textarea placeholder="写下主题,例如:三分钟看懂量子纠缠">为什么天空是蓝色的,晚霞却是红色的?</textarea>
+      <button class="btn">开始创作</button>
+    </div>
+    <div class="tray">
+      <div class="lbl">TYPE SETTING · 参数字模</div>
+      <div class="blocks">
+        <div class="block on"><div class="k">类型</div><div class="v">知识卡片</div></div>
+        <div class="block"><div class="k">类型</div><div class="v">科普漫画</div></div>
+        <div class="block"><div class="k">类型</div><div class="v">金句卡</div></div>
+        <div class="block on"><div class="k">文字</div><div class="v">原生中文</div></div>
+        <div class="block"><div class="k">比例</div><div class="v">3:4</div></div>
+        <div class="block"><div class="k">品牌</div><div class="v">暗房工作室</div></div>
+      </div>
+      <div class="extra">
+        <span class="switchrow"><span class="switch on"></span>封面候选(3 张 · 耗 3 次额度)</span>
+        <span class="switchrow"><span class="switch"></span>审批门(终稿确认后可导出)</span>
+        <span class="switchrow" style="color:var(--ink-faint)">粘贴长文 / 从 URL 导入 ↗</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="rack-head">
+    <h2>近期作品</h2>
+    <span class="more">进入作品库 →</span>
+  </div>
+  <section class="rack">
+    <div class="issue"><div class="i-cover"><div class="img ph-1"></div><div class="bigchar">≈4<small>倍散射强度</small></div><span class="i-cat">知识卡片</span></div>
+      <div class="i-meta"><div class="i-title">为什么天空是蓝色的</div><div class="i-sub"><span>6 页 · 3:4</span><span>3 分钟前</span></div></div></div>
+    <div class="issue"><div class="i-cover"><div class="img ph-2"></div><span class="i-cat">图书推荐</span></div>
+      <div class="i-meta"><div class="i-title">《精益创业》五个反直觉</div><div class="i-sub"><span>5 页</span><span class="st-review">待评审</span></div></div></div>
+    <div class="issue"><div class="i-cover"><div class="img ph-3"></div><span class="i-cat">产品种草</span></div>
+      <div class="i-meta"><div class="i-title">空气炸锅是帮手吗</div><div class="i-sub"><span>6 页</span><span>2 小时前</span></div></div></div>
+    <div class="issue"><div class="i-cover"><div class="img ph-4"></div><span class="i-cat">科普漫画</span></div>
+      <div class="i-meta"><div class="i-title">人为什么会晕车</div><div class="i-sub"><span>8 页</span><span>昨天</span></div></div></div>
+    <div class="issue"><div class="i-cover"><div class="img ph-5"></div><span class="i-cat">金句卡</span></div>
+      <div class="i-meta"><div class="i-title">值得抄进笔记本的句子</div><div class="i-sub"><span>5 页</span><span>昨天</span></div></div></div>
+    <div class="issue"><div class="i-cover"><div class="img ph-6"></div><span class="i-cat">长文拆解</span></div>
+      <div class="i-meta"><div class="i-title">内容复利的三层结构</div><div class="i-sub"><span>7 页</span><span>2 天前</span></div></div></div>
+  </section>
+</main>
+</body>
+</html>

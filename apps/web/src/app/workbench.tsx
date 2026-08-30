@@ -49,7 +49,6 @@ export function Workbench({ initial, brandKits }: Props) {
   const [topic, setTopic] = useState("");
   const [aspectRatio, setAspectRatio] = useState("3:4");
   const [mode, setMode] = useState<string>("native");
-  const [concurrency, setConcurrency] = useState<number>(initial.defaultConcurrency);
   const [sourceText, setSourceText] = useState("");
   const [brandKitId, setBrandKitId] = useState("");
   const [recipe, setRecipe] = useState<Recipe>("knowledge_cards");
@@ -140,7 +139,6 @@ export function Workbench({ initial, brandKits }: Props) {
           topic: topic.trim(),
           aspectRatio,
           textRenderingMode: TextRenderingModeSchema.parse(mode),
-          requestedImageConcurrency: concurrency,
           ...(isComicRecipe && castDescription.trim()
             ? { castDescription: castDescription.trim().slice(0, 2000) }
             : {}),
@@ -289,20 +287,6 @@ export function Workbench({ initial, brandKits }: Props) {
                       <option value="9:16">9:16</option>
                       <option value="1:1">1:1</option>
                       <option value="16:9">16:9</option>
-                    </select>
-                  </div>
-                  <div>
-                    <span className="field-label">并发</span>
-                    <select
-                      className="field-input mt-1 !py-1.5 !text-[13px]"
-                      value={concurrency}
-                      onChange={(event) => setConcurrency(Number(event.target.value))}
-                    >
-                      {Array.from({ length: initial.serverMaxConcurrency }, (_, index) => index + 1).map((value) => (
-                        <option key={value} value={value}>
-                          {value} 路
-                        </option>
-                      ))}
                     </select>
                   </div>
                   <div>

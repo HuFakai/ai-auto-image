@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>方案 B · 亮面控制台 — AI 图文工坊</title>
+<style>
+  /* ── Token:纯白 / 冷灰面板 / 钴蓝强调 —— 工具效率向 ── */
+  :root{
+    --bg:#FFFFFF; --sub:#F6F7F9; --line:#E6E8EC; --line-strong:#D8DBE0;
+    --ink:#171B26; --ink-soft:#667085; --ink-faint:#98A2B3;
+    --blue:#2E5BFF; --blue-soft:#EBF0FF; --green:#12805C; --amber:#B25E09;
+    --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:-apple-system,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+    font-size:14px; line-height:1.6; -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:#CFE0FF}
+
+  .shell{display:grid;grid-template-columns:224px 1fr 320px;min-height:100vh}
+
+  /* ── 左侧全导航 ── */
+  nav.side{
+    border-right:1px solid var(--line);background:var(--sub);
+    padding:18px 12px;display:flex;flex-direction:column;gap:2px;
+    position:sticky;top:0;height:100vh;
+  }
+  .brand{display:flex;align-items:center;gap:9px;padding:4px 10px 18px}
+  .brand .mark{
+    width:30px;height:30px;border-radius:8px;background:var(--ink);color:#fff;
+    display:grid;place-items:center;font-weight:800;font-size:14px
+  }
+  .brand .name{font-weight:700;font-size:15px;letter-spacing:.01em}
+  .group{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;color:var(--ink-faint);padding:14px 10px 6px}
+  .nav-item{
+    display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;
+    color:var(--ink-soft);cursor:pointer;transition:.14s;font-weight:500
+  }
+  .nav-item svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7;flex:none}
+  .nav-item:hover{background:#EDF0F4;color:var(--ink)}
+  .nav-item.active{background:var(--blue-soft);color:var(--blue);font-weight:600}
+  .nav-item .count{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
+  .nav-item.active .count{color:var(--blue)}
+  .side .foot{
+    margin-top:auto;background:#fff;border:1px solid var(--line);border-radius:10px;padding:11px
+  }
+  .foot .t{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;color:var(--ink-faint)}
+  .foot .row{display:flex;justify-content:space-between;font-size:12.5px;margin-top:6px}
+  .foot .ok{color:var(--green);font-weight:600}
+  .foot .off{color:var(--ink-faint)}
+
+  /* ── 中列 ── */
+  .center{border-right:1px solid var(--line);min-width:0}
+  .topbar{
+    height:54px;border-bottom:1px solid var(--line);display:flex;align-items:center;
+    gap:12px;padding:0 20px;position:sticky;top:0;background:rgba(255,255,255,.92);
+    backdrop-filter:blur(8px);z-index:10
+  }
+  .topbar h1{font-size:16px;font-weight:700}
+  .search{
+    margin-left:auto;display:flex;align-items:center;gap:7px;background:var(--sub);
+    border:1px solid var(--line);border-radius:8px;padding:6px 11px;width:210px;
+    color:var(--ink-faint);font-size:13px
+  }
+  .seg{display:flex;background:var(--sub);border:1px solid var(--line);border-radius:8px;padding:2px}
+  .seg button{
+    border:none;background:none;padding:5px 13px;border-radius:6px;font-size:12.5px;
+    color:var(--ink-soft);cursor:pointer;font-family:inherit
+  }
+  .seg button.on{background:#fff;color:var(--ink);font-weight:600;box-shadow:0 1px 3px rgba(16,24,40,.1)}
+
+  .feed{padding:18px 20px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px}
+  .card{
+    border:1px solid var(--line);border-radius:11px;overflow:hidden;background:#fff;
+    cursor:pointer;transition:.18s;opacity:0;transform:translateY(8px);animation:rise .45s ease forwards
+  }
+  .card:nth-child(odd){animation-delay:.04s}.card:nth-child(even){animation-delay:.1s}
+  @keyframes rise{to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){.card{animation:none;opacity:1;transform:none}}
+  .card:hover{border-color:var(--line-strong);box-shadow:0 8px 24px rgba(16,24,40,.09);transform:translateY(-2px)}
+  .cover{aspect-ratio:3/4;position:relative;overflow:hidden}
+  .cover img,.cover .img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:.3s}
+  .card:hover .img{transform:scale(1.025)}
+  .status{
+    position:absolute;top:9px;left:9px;font-size:11px;font-weight:600;
+    padding:3px 9px;border-radius:99px;backdrop-filter:blur(4px);display:inline-flex;align-items:center;gap:5px
+  }
+  .status.done{background:rgba(18,128,92,.12);color:#0E6B4E}
+  .status.review{background:rgba(178,94,9,.13);color:var(--amber)}
+  .status::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor}
+  .pbody{padding:10px 12px 12px}
+  .pt{font-weight:600;font-size:13.5px;line-height:1.45;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pm{display:flex;gap:6px;margin-top:7px;flex-wrap:wrap}
+  .tag{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);background:var(--sub);border-radius:5px;padding:2px 7px}
+  .ph-1{background:radial-gradient(120% 90% at 20% 15%,#2E4A8F 0%,#101A33 58%,#0A0F1E 100%)}
+  .ph-2{background:linear-gradient(160deg,#F2E8D5 0%,#D8C9A8 45%,#8A6F45 100%)}
+  .ph-3{background:radial-gradient(110% 100% at 75% 20%,#E8834A 0%,#B4402A 55%,#3E120C 100%)}
+  .ph-4{background:linear-gradient(200deg,#20302B 0%,#0E1613 60%,#080B0A 100%)}
+  .ph-5{background:radial-gradient(130% 100% at 50% 0%,#4A3F6B 0%,#241E38 55%,#0E0B18 100%)}
+  .ph-6{background:linear-gradient(140deg,#DDE4EA 0%,#9FB2C4 50%,#4E6072 100%)}
+  .bigchar{position:absolute;top:16%;left:0;right:0;text-align:center;color:#fff;font-weight:900;font-size:40px}
+  .bigchar small{display:block;font-size:12px;font-weight:400;opacity:.75;margin-top:4px;letter-spacing:.3em}
+
+  /* ── 右侧参数检查器(Figma 式常驻面板)── */
+  .inspector{
+    background:var(--sub);position:sticky;top:0;height:100vh;overflow-y:auto;
+    padding:18px 16px;display:flex;flex-direction:column;gap:14px
+  }
+  .ins-head{display:flex;align-items:baseline;justify-content:space-between}
+  .ins-head h2{font-size:14.5px;font-weight:700}
+  .ins-head span{font-family:var(--mono);font-size:10.5px;color:var(--ink-faint);letter-spacing:.1em}
+  .field{background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px}
+  .field .lb{font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:7px;display:flex;justify-content:space-between}
+  .field .lb em{font-style:normal;font-family:var(--mono);font-size:10px;color:var(--ink-faint)}
+  .field textarea{
+    width:100%;border:none;outline:none;resize:none;font-family:inherit;font-size:13.5px;
+    line-height:1.55;color:var(--ink);min-height:52px
+  }
+  .field textarea::placeholder{color:var(--ink-faint)}
+  .opts{display:flex;flex-wrap:wrap;gap:6px}
+  .opt{
+    font-size:12.5px;padding:6px 12px;border-radius:7px;border:1px solid var(--line);
+    background:#fff;color:var(--ink-soft);cursor:pointer;transition:.13s;font-family:inherit
+  }
+  .opt:hover{border-color:var(--ink-faint);color:var(--ink)}
+  .opt.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+  .switchrow{display:flex;justify-content:space-between;align-items:center;padding:2px 0}
+  .switchrow .sl{font-size:13px}
+  .switchrow .sd{font-size:11px;color:var(--ink-faint)}
+  .switch{width:34px;height:20px;border-radius:99px;background:#D0D5DD;position:relative;cursor:pointer;transition:.16s;flex:none}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.16s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+  .switch.on{background:var(--blue)}
+  .switch.on::after{left:16px}
+  .go{
+    background:var(--blue);color:#fff;border:none;border-radius:10px;padding:12px;
+    font-size:14.5px;font-weight:700;cursor:pointer;font-family:inherit;transition:.15s
+  }
+  .go:hover{background:#2450DB}
+  .hint{font-size:11.5px;color:var(--ink-faint);text-align:center}
+
+  @media (max-width:1100px){.shell{grid-template-columns:200px 1fr 280px}}
+  @media (max-width:900px){.shell{grid-template-columns:1fr}.side,.inspector{display:none}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="side">
+    <div class="brand"><div class="mark">印</div><div class="name">AI 图文工坊</div></div>
+    <div class="group">创作</div>
+    <div class="nav-item active"><svg viewBox="0 0 24 24"><path d="M12 3l1.9 5.8H20l-4.9 3.6 1.9 5.8-5-3.6-5 3.6 1.9-5.8L4 8.8h6.1z"/></svg>工作台</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/></svg>作品库 <span class="count">128</span></div>
+    <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M4 19V5a2 2 0 012-2h13v18H6a2 2 0 01-2-2zm0 0a2 2 0 012-2h13"/></svg>品牌手册 <span class="count">8</span></div>
+    <div class="group">系统</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>渠道设置</div>
+    <div class="nav-item"><svg viewBox="0 0 24 24"><path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/></svg>使用统计</div>
+    <div class="foot">
+      <div class="t">渠道状态</div>
+      <div class="row"><span>deepseek-v4</span><span class="ok">在线</span></div>
+      <div class="row"><span>grok-imagine</span><span class="ok">在线</span></div>
+      <div class="row"><span>并发上限</span><span class="off">4 路</span></div>
+    </div>
+  </nav>
+
+  <section class="center">
+    <div class="topbar">
+      <h1>工作台</h1>
+      <div class="seg"><button class="on">全部</button><button>待评审 3</button><button>已完成</button></div>
+      <div class="search">⌕ 搜索主题 / 类型…</div>
+    </div>
+    <div class="feed">
+      <div class="grid">
+        <div class="card"><div class="cover"><div class="img ph-1"></div><div class="bigchar">≈4<small>倍散射强度</small></div><span class="status done">已完成</span></div>
+          <div class="pbody"><div class="pt">为什么天空是蓝色的,晚霞却是红色的?</div><div class="pm"><span class="tag">知识卡片</span><span class="tag">6P</span><span class="tag">3:4</span></div></div></div>
+        <div class="card"><div class="cover"><div class="img ph-2"></div><span class="status review">待评审</span></div>
+          <div class="pbody"><div class="pt">《精益创业》:创业者必读的 5 个反直觉</div><div class="pm"><span class="tag">图书推荐</span><span class="tag">5P</span></div></div></div>
+        <div class="card"><div class="cover"><div class="img ph-3"></div><span class="status done">已完成</span></div>
+          <div class="pbody"><div class="pt">空气炸锅:厨房帮手还是智商税?</div><div class="pm"><span class="tag">产品种草</span><span class="tag">6P</span></div></div></div>
+        <div class="card"><div class="cover"><div class="img ph-4"></div><span class="status done">已完成</span></div>
+          <div class="pbody"><div class="pt">人为什么会晕车?一页讲透前庭觉</div><div class="pm"><span class="tag">科普漫画</span><span class="tag">8P</span></div></div></div>
+        <div class="card"><div class="cover"><div class="img ph-5"></div><span class="status done">已完成</span></div>
+          <div class="pbody"><div class="pt">那些值得抄进笔记本的句子</div><div class="pm"><span class="tag">金句卡</span><span class="tag">5P</span></div></div></div>
+        <div class="card"><div class="cover"><div class="img ph-6"></div><span class="status done">已完成</span></div>
+          <div class="pbody"><div class="pt">万字长文拆解:内容复利的三层结构</div><div class="pm"><span class="tag">长文拆解</span><span class="tag">7P</span></div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="inspector">
+    <div class="ins-head"><h2>新建作品</h2><span>GENERATE</span></div>
+    <div class="field">
+      <div class="lb">主题 <em>必填</em></div>
+      <textarea placeholder="例如:三分钟看懂量子纠缠">为什么天空是蓝色的,晚霞却是红色的?</textarea>
+    </div>
+    <div class="field">
+      <div class="lb">内容类型</div>
+      <div class="opts">
+        <button class="opt on">知识卡片</button><button class="opt">科普漫画</button>
+        <button class="opt">金句卡</button><button class="opt">清单卡</button>
+        <button class="opt">对比卡</button><button class="opt">产品种草</button>
+      </div>
+    </div>
+    <div class="field">
+      <div class="lb">文字模式</div>
+      <div class="opts">
+        <button class="opt on">原生中文</button><button class="opt">确定性排版</button><button class="opt">自动</button>
+      </div>
+    </div>
+    <div class="field">
+      <div class="lb">画布比例</div>
+      <div class="opts">
+        <button class="opt on">3:4</button><button class="opt">9:16</button><button class="opt">1:1</button><button class="opt">16:9</button>
+      </div>
+    </div>
+    <div class="field">
+      <div class="lb">品牌手册</div>
+      <div class="opts">
+        <button class="opt">不使用</button><button class="opt on">暗房工作室</button><button class="opt">纸感极简</button><button class="opt">科技深色</button>
+      </div>
+    </div>
+    <div class="field">
+      <div class="switchrow"><div><div class="sl">封面候选</div><div class="sd">生成 3 张供挑选 · 耗 3 次额度</div></div><div class="switch on"></div></div>
+      <div class="switchrow" style="margin-top:10px"><div><div class="sl">审批门</div><div class="sd">确认终稿前不可导出</div></div><div class="switch"></div></div>
+    </div>
+    <button class="go">开始创作</button>
+    <div class="hint">粘贴长文 / 从 URL 导入 → 展开更多选项</div>
+  </aside>
+</div>
+</body>
+</html>
