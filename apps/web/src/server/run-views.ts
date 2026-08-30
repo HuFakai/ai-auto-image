@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { normalizeSlideIndices } from "@aai/shared-schemas";
 import type { ComicStoryboard, Storyboard } from "@aai/shared-schemas";
 import type { Runtime } from "./runtime";
 import type { RunDetailPayload, RunListItem } from "@/lib/types";
@@ -84,8 +85,13 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
       const value = (JSON.parse(storyboardNode.outputRef) as { value: unknown }).value;
       if (Array.isArray((value as { cast?: unknown }).cast)) {
         comicStoryboard = value as ComicStoryboard;
+        // 防御：comic 管线已归一化，这里再统一一次（存量/异常数据兜底）
+        comicStoryboard.pages.forEach((page, index) => {
+          page.index = index;
+        });
       } else {
-        storyboard = value as Storyboard;
+        // LLM 可能输出 1-based 页码：统一按数组下标归一化，防止页文与图片错位
+        storyboard = normalizeSlideIndices(value as Storyboard);
       }
     } catch {
       storyboard = null;

@@ -177,7 +177,7 @@ async function executeKnowledgeCardRun(
     );
 
     /* generate-brief */
-    const brief = await runStructuredNode(deps, ctx, runId, existingNodes, {
+    const { value: brief } = await runStructuredNode(deps, ctx, runId, existingNodes, {
       nodeName: "generate-brief",
       schemaName: "ContentBrief",
       schema: ContentBriefSchema,
@@ -186,7 +186,7 @@ async function executeKnowledgeCardRun(
     await throwIfAborted(deps, runId, ctx.signal);
 
     /* generate-storyboard */
-    const storyboard = await runStructuredNode(deps, ctx, runId, existingNodes, {
+    const { value: storyboard, nodeId: storyboardNodeId } = await runStructuredNode(deps, ctx, runId, existingNodes, {
       nodeName: "generate-storyboard",
       schemaName: "Storyboard",
       schema: StoryboardSchema,
@@ -198,6 +198,12 @@ async function executeKnowledgeCardRun(
       slide.index = index;
       normalizeSlideLayout(slide);
     });
+    // LLM 可能输出 1-based 页码：把归一化后的分镜写回节点，
+    // 保证详情/导出/返修等消费方读到的 index 与图片资产一致
+    await deps.runRepo.setNodeOutput(
+      storyboardNodeId,
+      JSON.stringify({ value: storyboard, schemaName: "Storyboard" }),
+    );
     await throwIfAborted(deps, runId, ctx.signal);
     const pageCount = storyboard.slides.length;
 
@@ -614,11 +620,11 @@ async function runStructuredNode<T>(
     schema: z.ZodType<T>;
     buildPrompt: () => string;
   },
-): Promise<T> {
+): Promise<{ value: T; nodeId: string }> {
   const succeeded = succeededNode(existingNodes, spec.nodeName);
   if (succeeded?.outputRef) {
     try {
-      return (JSON.parse(succeeded.outputRef) as { value: T }).value;
+      return { value: (JSON.parse(succeeded.outputRef) as { value: T }).value, nodeId: succeeded.id };
     } catch {
       /* 输出损坏则重新生成 */
     }
@@ -682,7 +688,7 @@ async function runStructuredNode<T>(
       completionTokens: usageAcc.completionTokens,
       costUsd: usageAcc.costUsd,
     });
-    return value;
+    return { value, nodeId: node.id };
   } catch (error) {
     const aiError = toAiError(error);
     await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));

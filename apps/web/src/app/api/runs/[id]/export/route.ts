@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { normalizeSlideIndices } from "@aai/shared-schemas";
 import type { CreateRunInput, Storyboard } from "@aai/shared-schemas";
 import { StoryboardSchema } from "@aai/shared-schemas";
 import { buildExportZip, generatePlatformCopy, templateCopy, type ExportCoverFile, type ExportPageFile } from "@aai/workflow-engine";
@@ -37,7 +38,10 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   if (!storyboardNode?.outputRef) {
     return NextResponse.json({ error: "storyboard missing" }, { status: 409 });
   }
-  const storyboard = (JSON.parse(storyboardNode.outputRef) as { value: unknown }).value as Storyboard;
+  // LLM 可能输出 1-based 页码：按数组下标归一化，与图片资产对齐
+  const storyboard = normalizeSlideIndices(
+    (JSON.parse(storyboardNode.outputRef) as { value: unknown }).value as Storyboard,
+  );
   const parsedStoryboard = StoryboardSchema.safeParse(storyboard);
   if (!parsedStoryboard.success) {
     return NextResponse.json({ error: "storyboard invalid" }, { status: 409 });

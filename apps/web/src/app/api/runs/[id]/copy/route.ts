@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { normalizeSlideIndices } from "@aai/shared-schemas";
 import type { CreateRunInput, Storyboard } from "@aai/shared-schemas";
 import { StoryboardSchema } from "@aai/shared-schemas";
 import { generatePlatformCopy, templateCopy } from "@aai/workflow-engine";
@@ -40,7 +41,9 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   if (!storyboardNode?.outputRef) {
     return NextResponse.json({ error: "storyboard missing" }, { status: 409 });
   }
-  const storyboard = (JSON.parse(storyboardNode.outputRef) as { value: unknown }).value as Storyboard;
+  const storyboard = normalizeSlideIndices(
+    (JSON.parse(storyboardNode.outputRef) as { value: unknown }).value as Storyboard,
+  );
   const parsedStoryboard = StoryboardSchema.safeParse(storyboard);
   if (!parsedStoryboard.success) {
     return NextResponse.json({ error: "storyboard invalid" }, { status: 409 });

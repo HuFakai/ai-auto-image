@@ -38,7 +38,12 @@ async function loadStoryboard(deps: PageRegenDeps, runId: string): Promise<Story
   const nodes = await deps.runRepo.listNodeRuns(runId);
   const node = nodes.find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded");
   if (!node?.outputRef) throw new Error("storyboard not found for run");
-  return (JSON.parse(node.outputRef) as { value: Storyboard }).value;
+  // LLM 可能输出 1-based 页码：按数组下标归一化，与图片资产对齐
+  const storyboard = (JSON.parse(node.outputRef) as { value: Storyboard }).value;
+  storyboard.slides.forEach((slide, index) => {
+    slide.index = index;
+  });
+  return storyboard;
 }
 
 /** 返修成功后把新文案同步回 Storyboard，保证详情/导出与图片一致 */

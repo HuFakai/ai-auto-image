@@ -203,6 +203,18 @@ export const StoryboardSchema = z.object({
 export type Storyboard = z.infer<typeof StoryboardSchema>;
 
 /**
+ * 统一按数组下标归一化页码：LLM 可能输出 1-based 的 slide.index，
+ * 而图片资产按归一化后的 0-based page_index 存储。
+ * 所有从节点持久化值解析 Storyboard 的消费方都必须先调用本函数，防止页文错位。
+ */
+export function normalizeSlideIndices(storyboard: Storyboard): Storyboard {
+  storyboard.slides.forEach((slide, index) => {
+    slide.index = index;
+  });
+  return storyboard;
+}
+
+/**
  * 单页生成计划：在 Storyboard 基础上补充图片 Prompt 与预期文案。
  * 原生模式把 expectedCopy 逐字写入 Prompt；质量检查用它对比图片中的实际文字。
  */

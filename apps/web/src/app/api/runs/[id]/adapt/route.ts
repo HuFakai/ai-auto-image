@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { normalizeSlideIndices } from "@aai/shared-schemas";
 import type { CreateRunInput, Storyboard } from "@aai/shared-schemas";
 import { StoryboardSchema } from "@aai/shared-schemas";
 import type { AdaptPlatform } from "@aai/shared-schemas";
@@ -76,7 +77,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "storyboard missing" }, { status: 409 });
   }
   const parsedStoryboard = StoryboardSchema.safeParse(
-    (JSON.parse(storyboardNode.outputRef) as { value: unknown }).value as Storyboard,
+    normalizeSlideIndices((JSON.parse(storyboardNode.outputRef) as { value: unknown }).value as Storyboard),
   );
   if (!parsedStoryboard.success) {
     return NextResponse.json({ error: "storyboard invalid" }, { status: 409 });
