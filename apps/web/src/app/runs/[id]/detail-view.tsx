@@ -183,7 +183,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
                 onClick={exportZip}
                 disabled={exporting}
               >
-                {exporting ? "装订中…" : "导出 ZIP（图片 + 发布文案）"}
+                {exporting ? "装订中…" : "导出 ZIP"}
               </button>
               {detail.reviewStatus !== "approved" && (
                 <button
@@ -206,7 +206,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         </div>
       </header>
 
-      <div className="space-y-12 px-[26px] pb-24 pt-10 max-md:px-4">
+      <div className="mx-auto max-w-[1080px] space-y-8 px-[26px] pb-20 pt-8 max-md:px-4">
       {/* 标题 */}
       <section className="rise">
         <p className="kicker">
@@ -218,10 +218,10 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
             minute: "2-digit",
           })}
         </p>
-        <h1 className="mt-3 font-display text-3xl font-black leading-snug sm:text-4xl">
+        <h1 className="mt-2 font-display text-2xl font-black leading-snug">
           {detail.storyboardTitle ?? detail.input.topic}
         </h1>
-        <p className="mt-3 font-mono text-xs text-ink-soft">
+        <p className="mt-2 font-mono text-xs text-ink-soft">
           {detail.input.aspectRatio} · {detail.input.platform} ·{" "}
           {isDeterministic ? "确定性排版" : "原生中文"}
           {detail.concurrency
@@ -230,7 +230,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           {active ? ` · ${readyCount}/${detail.pages.length || "?"}` : ""}
         </p>
         {detail.status === "succeeded" && detail.reviewStatus !== "pending" && (
-          <p className="mt-3 font-mono text-[11px] text-ink-faint">
+          <p className="mt-2 font-mono text-[11px] text-ink-faint">
             当前评审：{detail.reviewStatus === "approved" ? "已通过" : "已驳回"}
             {detail.reviewNote ? ` · ${detail.reviewNote}` : ""}
           </p>
@@ -257,7 +257,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
             )}
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-7 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-4">
           {detail.pages.map((page, index) => (
             <PageFrame
               key={page.index}

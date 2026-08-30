@@ -94,17 +94,13 @@ export function SettingsView({
   }
 
   return (
-    <div className="space-y-14 pt-10">
+    <div className="mx-auto max-w-[1080px] space-y-10 px-[26px] pt-8 max-md:px-4">
       <section className="rise">
-        <p className="kicker">
-          工坊 / <span className="text-ink">渠道设置</span>
-        </p>
-        <h1 className="mt-3 font-display text-3xl font-black sm:text-4xl">
-          设置<span className="text-seal">。</span>
-        </h1>
-        <p className="mt-3 max-w-xl text-sm leading-relaxed text-ink-soft">
-          模型渠道与品牌手册均保存于数据库：渠道密钥加密落库（只显示末四位），保存即时生效。
-          当前生效：<span className="ml-1 font-mono text-xs text-ink">{data.providerLabel}</span>
+        <p className="kicker">SETTINGS · 渠道与品牌</p>
+        <h1 className="mt-2 font-display text-xl font-bold">渠道设置</h1>
+        <p className="mt-1.5 text-xs leading-relaxed text-ink-soft">
+          渠道密钥加密落库（只显示末四位），保存即时生效。当前生效：
+          <span className="ml-1 font-mono text-xs text-ink">{data.providerLabel}</span>
         </p>
       </section>
 
@@ -127,29 +123,35 @@ export function SettingsView({
               {list.map((channel, index) => (
                 <li
                   key={channel.id}
-                  className="rounded-xl border border-line bg-paper-card px-4 py-4 transition-colors hover:border-line-dark"
+                  className="rounded-xl border border-line bg-paper-card px-4 py-3.5 transition-colors hover:border-line-dark"
                 >
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                    <span className="w-7 font-mono text-[11px] text-ink-faint">
-                      {String(index + 1).padStart(2, "0")}
-                    </span>
-                    <span className="font-display min-w-0 flex-1 truncate text-base font-bold">
-                      {channel.name}
-                      {!channel.enabled && (
-                        <span className="stamp stamp-quiet ml-2 text-[10px] text-ink-faint">停用</span>
+                  {/* 三段布局:左 序号+名称+徽章 / 中 模型·地址·密钥线索 / 右 操作组 */}
+                  <div className="flex items-center gap-4">
+                    <div className="flex w-[190px] shrink-0 items-center gap-2.5 max-md:w-auto max-md:min-w-0">
+                      <span className="shrink-0 font-mono text-[11px] text-ink-faint">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <span className="font-display min-w-0 truncate text-[15px] font-bold">
+                        {channel.name}
+                      </span>
+                      {channel.type === "image" && channel.imageEditSupport && (
+                        <span className="stamp stamp-quiet shrink-0 text-[10px] text-seal">图生图</span>
                       )}
-                    </span>
-                    <span className="font-mono text-[11px] text-ink-soft">{channel.model ?? "—"}</span>
-                    <span className="hidden max-w-[220px] truncate font-mono text-[11px] text-ink-faint lg:inline">
+                      {!channel.enabled && (
+                        <span className="stamp stamp-quiet shrink-0 text-[10px] text-ink-faint">停用</span>
+                      )}
+                    </div>
+                    <div
+                      className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-faint"
+                      title={[channel.model ?? "—", channel.baseUrl, channel.apiKeyHint].join(" · ")}
+                    >
+                      <span className="text-ink-soft">{channel.model ?? "—"}</span>
+                      {" · "}
                       {channel.baseUrl.replace(/^https?:\/\//, "")}
-                    </span>
-                    <span className="max-w-[90px] truncate font-mono text-[11px] text-ink-faint">
+                      {" · "}
                       {channel.apiKeyHint}
-                    </span>
-                    {channel.type === "image" && channel.imageEditSupport && (
-                      <span className="stamp stamp-quiet text-[10px] text-seal">图生图</span>
-                    )}
-                    <div className="flex items-center gap-2">
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
                       <button
                         className="btn-ghost px-2.5 py-1 font-mono text-[11px]"
                         onClick={() => void test(channel)}
@@ -229,44 +231,54 @@ export function SettingsView({
         <ul className="space-y-2">
           {kits.map((kit) => {
             const swatch = THEME_SWATCH[kit.themeId] ?? THEME_SWATCH.darkroom!;
+            const metaText = [
+              swatch.label,
+              kit.styleKeywords.slice(0, 3).join(" · ") || "无风格词",
+              kit.logoAssetId ? "有 Logo" : "无 Logo",
+            ].join(" · ");
             return (
               <li
                 key={kit.id}
-                className="flex items-center gap-4 rounded-xl border border-line bg-paper-card px-4 py-4 transition-colors hover:border-line-dark"
+                className="rounded-xl border border-line bg-paper-card px-4 py-3.5 transition-colors hover:border-line-dark"
               >
-                <span
-                  className="h-9 w-9 shrink-0 rounded-sm border border-line-dark"
-                  style={{ background: swatch.bg }}
-                  title={swatch.label}
-                >
-                  <span
-                    className="block h-full w-full scale-[0.62] rounded-sm"
-                    style={{ background: swatch.accent }}
-                  />
-                </span>
-                <span className="font-display min-w-0 flex-1 truncate text-base font-bold">
-                  {kit.name}
-                  {kit.builtIn && <span className="stamp stamp-quiet ml-2 text-[10px] text-ink-faint">内置</span>}
-                </span>
-                <span className="hidden font-mono text-[11px] text-ink-soft md:inline">{swatch.label}</span>
-                <span className="hidden font-mono text-[11px] text-ink-faint lg:inline">
-                  {kit.styleKeywords.slice(0, 3).join(" · ") || "无风格词"}
-                </span>
-                <span className="font-mono text-[11px] text-ink-faint">
-                  {kit.logoAssetId ? "有 Logo" : "无 Logo"}
-                </span>
-                <div className="flex items-center gap-2">
-                  <button className="btn-ghost px-2.5 py-1 font-mono text-[11px]" onClick={() => setEditingKit(kit)}>
-                    编辑
-                  </button>
-                  {!kit.builtIn && (
-                    <button
-                      className="btn-ghost px-2.5 py-1 font-mono text-[11px] hover:!border-seal hover:!text-seal"
-                      onClick={() => void removeKit(kit)}
+                {/* 三段布局:左 色板+名称+徽章 / 中 主题·风格词·Logo / 右 操作组 */}
+                <div className="flex items-center gap-4">
+                  <div className="flex w-[190px] shrink-0 items-center gap-2.5 max-md:w-auto max-md:min-w-0">
+                    <span
+                      className="h-8 w-8 shrink-0 rounded-sm border border-line-dark"
+                      style={{ background: swatch.bg }}
+                      title={swatch.label}
                     >
-                      删除
+                      <span
+                        className="block h-full w-full scale-[0.62] rounded-sm"
+                        style={{ background: swatch.accent }}
+                      />
+                    </span>
+                    <span className="font-display min-w-0 truncate text-[15px] font-bold">
+                      {kit.name}
+                      {kit.builtIn && <span className="stamp stamp-quiet ml-2 text-[10px] text-ink-faint">内置</span>}
+                    </span>
+                  </div>
+                  <div className="min-w-0 flex-1 truncate font-mono text-[11px] text-ink-faint" title={metaText}>
+                    <span className="text-ink-soft">{swatch.label}</span>
+                    {" · "}
+                    {kit.styleKeywords.slice(0, 3).join(" · ") || "无风格词"}
+                    {" · "}
+                    {kit.logoAssetId ? "有 Logo" : "无 Logo"}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button className="btn-ghost px-2.5 py-1 font-mono text-[11px]" onClick={() => setEditingKit(kit)}>
+                      编辑
                     </button>
-                  )}
+                    {!kit.builtIn && (
+                      <button
+                        className="btn-ghost px-2.5 py-1 font-mono text-[11px] hover:!border-seal hover:!text-seal"
+                        onClick={() => void removeKit(kit)}
+                      >
+                        删除
+                      </button>
+                    )}
+                  </div>
                 </div>
               </li>
             );

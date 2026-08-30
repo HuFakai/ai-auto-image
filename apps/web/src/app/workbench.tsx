@@ -134,7 +134,7 @@ export function Workbench({ initial, brandKits, stats }: Props) {
   const [trayGroup, setTrayGroup] = useState<"type" | "brand" | null>(null);
   const [lightbox, setLightbox] = useState<{ img: string; name: string } | null>(null);
   const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trayRowRef = useRef<HTMLDivElement | null>(null);
 
   /* 内容类型映射（轮询刷新不携带 recipe，用首屏解析结果回填） */
   const recipeMap = useRef<Map<string, Recipe | undefined>>(
@@ -155,7 +155,6 @@ export function Workbench({ initial, brandKits, stats }: Props) {
     return () => {
       document.removeEventListener("keydown", onKey);
       if (clickTimer.current) clearTimeout(clickTimer.current);
-      if (closeTimer.current) clearTimeout(closeTimer.current);
     };
   }, []);
 
@@ -262,6 +261,13 @@ export function Workbench({ initial, brandKits, stats }: Props) {
   /* 托盘交互：单击 = 选中（260ms 后收起），双击 = 大图 */
   function openTray(group: "type" | "brand") {
     setTrayGroup((current) => (current === group ? null : group));
+    // 展开后让当前选中卡滚到可视中心
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const el = trayRowRef.current?.querySelector(".tray-card.sel");
+        el?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+      }, 60);
+    });
   }
   function selectTrayCard(group: "type" | "brand", id: string) {
     if (group === "type") {
@@ -270,8 +276,11 @@ export function Workbench({ initial, brandKits, stats }: Props) {
       setBrandTheme(id);
       setBrandKitId(brandKits.find((kit) => kit.themeId === id)?.id ?? "");
     }
-    if (closeTimer.current) clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => setTrayGroup(null), 260);
+    // 选中后保持托盘展开,并让选中卡滚动到可视中心(后面的选项不被遮挡)
+    requestAnimationFrame(() => {
+      const el = trayRowRef.current?.querySelector(".tray-card.sel");
+      el?.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    });
   }
   function onTrayCardClick(group: "type" | "brand", id: string) {
     if (clickTimer.current) clearTimeout(clickTimer.current);
@@ -390,7 +399,7 @@ export function Workbench({ initial, brandKits, stats }: Props) {
             <p className="tray-hint">
               {(trayGroup === "type" ? "内容类型" : "品牌手册") + " · 单击卡片 = 选中 · 双击 = 查看大图"}
             </p>
-            <div className="tray-row">
+            <div className="tray-row" ref={trayRowRef}>
               {trayItems.map((item) => (
                 <div
                   key={item.id || "none"}
