@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Recipe } from "@aai/shared-schemas";
 import type { RunDetailPage, RunDetailPayload } from "@/lib/types";
@@ -14,6 +14,50 @@ const ADAPT_TARGETS = [
 ] as const;
 
 type AdaptPlatformChoice = (typeof ADAPT_TARGETS)[number]["platform"];
+
+/** 发布文案（与 workflow-engine PlatformCopy 结构对齐） */
+interface PublishCopy {
+  title: string;
+  body: string;
+  tags: string[];
+  source: "llm" | "template";
+}
+
+/** 归一化重绘区域（0–1，与 repaint 接口对齐） */
+interface RepaintRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** 标签统一带 # 前缀（模板/模型来源可能不一致） */
+function withHashTag(tag: string): string {
+  return tag.startsWith("#") ? tag : `#${tag}`;
+}
+
+/** 复制文本：优先 Clipboard API，失败回退 textarea + execCommand */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const ok = document.execCommand("copy");
+      textarea.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
 
 function runStamp(status: string): { text: string; className: string } {
   switch (status) {
@@ -179,10 +223,15 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
       <section className="rise" style={{ animationDelay: "120ms" }}>
         <div className="rule-double mb-5 flex items-baseline justify-between pt-2">
           <h2 className="font-display text-lg font-bold">页面</h2>
-          <span className="kicker">
-            {readyCount} 已成{failedCount > 0 ? ` · ${failedCount} 失败` : ""}
-            {detail.pages.some((p) => (p.revision ?? 1) > 1) ? " · 含返修版本" : ""}
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="kicker">
+              {readyCount} 已成{failedCount > 0 ? ` · ${failedCount} 失败` : ""}
+              {detail.pages.some((p) => (p.revision ?? 1) > 1) ? " · 含返修版本" : ""}
+            </span>
+            {detail.status === "succeeded" && isDeterministic && (
+              <RerenderAllButton runId={detail.runId} pages={detail.pages} onDone={refresh} />
+            )}
+          </div>
         </div>
         <div className="grid grid-cols-1 gap-7 sm:grid-cols-2 lg:grid-cols-3">
           {detail.pages.map((page, index) => (
@@ -190,6 +239,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
               key={page.index}
               page={page}
               no={index + 1}
+              runId={detail.runId}
               isDeterministic={isDeterministic}
               editing={editingPage === page.index}
               onToggleEdit={() => setEditingPage(editingPage === page.index ? null : page.index)}
@@ -206,6 +256,9 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           )}
         </div>
       </section>
+
+      {/* 发布文案：基于 storyboard，deterministic 与 native 都可展示 */}
+      {detail.status === "succeeded" && <PublishCopyCard runId={detail.runId} />}
 
       {/* 平台适配包：确定性模式零模型费用一键重排其他平台 */}
       {detail.status === "succeeded" && (
@@ -314,6 +367,7 @@ function Metric({ label, value }: { label: string; value: string }) {
 function PageFrame({
   page,
   no,
+  runId,
   isDeterministic,
   editing,
   onToggleEdit,
@@ -321,21 +375,24 @@ function PageFrame({
 }: {
   page: RunDetailPage;
   no: number;
+  runId: string;
   isDeterministic: boolean;
   editing: boolean;
   onToggleEdit: () => void;
   onDone: () => Promise<void>;
 }) {
+  // 框选状态放在 PageFrame 层：切换/取消时一并复位
+  const [selecting, setSelecting] = useState(false);
+  function closeSelecting() {
+    setSelecting(false);
+  }
+
   if (page.status === "ready" && page.assetId) {
     const revised = (page.revision ?? 1) > 1;
     return (
       <figure className="photo-frame p-2.5 pb-0">
         <div className={revised ? "" : "frame-ready"}>
-          <img
-            src={`/api/assets/${page.assetId}`}
-            alt={`第 ${no} 页：${page.headline}`}
-            className="w-full border border-line/60"
-          />
+          <RegionImage runId={runId} page={page} no={no} selecting={selecting} onCancelSelect={closeSelecting} onDone={onDone} />
         </div>
         <figcaption className="flex items-center justify-between px-1 py-2.5">
           <span className="font-mono text-[10px] text-ink-faint" title={page.model ? `生成模型：${page.model}` : undefined}>
@@ -344,9 +401,18 @@ function PageFrame({
             {page.model ? ` · ${page.model}` : ""}
           </span>
           <span className="truncate px-2 text-xs text-ink-soft">{page.headline}</span>
-          <button className="btn-ghost shrink-0 px-2 py-0.5 font-mono text-[10px]" onClick={onToggleEdit}>
-            {editing ? "收起" : "返修"}
-          </button>
+          <span className="flex shrink-0 items-center gap-1">
+            <button
+              className="btn-ghost px-2 py-0.5 font-mono text-[10px] hover:!border-seal hover:!text-seal"
+              onClick={() => setSelecting((prev) => !prev)}
+              title="框选画面区域做局部重绘（需要支持图生图的渠道）"
+            >
+              {selecting ? "取消框选" : "区域重绘"}
+            </button>
+            <button className="btn-ghost shrink-0 px-2 py-0.5 font-mono text-[10px]" onClick={onToggleEdit}>
+              {editing ? "收起" : "返修"}
+            </button>
+          </span>
         </figcaption>
         {editing && (
           <RegenPanel page={page} no={no} isDeterministic={isDeterministic} onDone={onDone} />
@@ -372,6 +438,184 @@ function PageFrame({
       </span>
       <p className="truncate px-4 text-xs text-ink-soft">{page.headline}</p>
       <span className="font-mono text-[10px] tracking-[0.3em] text-seal/70">制中…</span>
+    </div>
+  );
+}
+
+/**
+ * 区域重绘：页面图片上叠加遮罩，mousedown 拖动画出归一化矩形，
+ * 松开后输入描述 → POST repaint（同步等待，最长 120s）。
+ * 切换模式 / 取消时由 selecting 变化统一复位。
+ */
+function RegionImage({
+  runId,
+  page,
+  no,
+  selecting,
+  onCancelSelect,
+  onDone,
+}: {
+  runId: string;
+  page: RunDetailPage;
+  no: number;
+  selecting: boolean;
+  onCancelSelect: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [rect, setRect] = useState<RepaintRect | null>(null);
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  // 进入/退出框选模式时清理框选与输入状态
+  useEffect(() => {
+    setDragStart(null);
+    setRect(null);
+    setPrompt("");
+    setMessage(null);
+  }, [selecting]);
+
+  /** 客户端坐标 → 图片容器内归一化坐标（0–1） */
+  function pointFrom(clientX: number, clientY: number): { x: number; y: number } | null {
+    const box = frameRef.current?.getBoundingClientRect();
+    if (!box || box.width === 0 || box.height === 0) return null;
+    return {
+      x: Math.min(1, Math.max(0, (clientX - box.left) / box.width)),
+      y: Math.min(1, Math.max(0, (clientY - box.top) / box.height)),
+    };
+  }
+
+  function handleMouseDown(event: React.MouseEvent<HTMLDivElement>) {
+    if (!selecting || busy || event.button !== 0) return;
+    event.preventDefault();
+    const point = pointFrom(event.clientX, event.clientY);
+    if (!point) return;
+    setDragStart(point);
+    setRect({ x: point.x, y: point.y, w: 0, h: 0 });
+  }
+
+  function handleMouseMove(event: React.MouseEvent<HTMLDivElement>) {
+    if (!dragStart || busy) return;
+    const point = pointFrom(event.clientX, event.clientY);
+    if (!point) return;
+    setRect({
+      x: Math.min(dragStart.x, point.x),
+      y: Math.min(dragStart.y, point.y),
+      w: Math.abs(point.x - dragStart.x),
+      h: Math.abs(point.y - dragStart.y),
+    });
+  }
+
+  function handleMouseUp() {
+    if (!dragStart || busy) return;
+    setDragStart(null);
+    // 拖动太小视为误触，丢弃矩形
+    if (rect && (rect.w < 0.02 || rect.h < 0.02)) setRect(null);
+  }
+
+  function handleMouseLeave() {
+    if (dragStart && !busy) {
+      setDragStart(null);
+      setRect(null);
+    }
+  }
+
+  async function submitRepaint() {
+    if (!rect || busy || !prompt.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/runs/${runId}/pages/${page.index}/repaint`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ rect, prompt: prompt.trim() }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      onCancelSelect();
+      await onDone();
+    } catch (caught) {
+      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <div ref={frameRef} className="relative">
+        <img
+          src={`/api/assets/${page.assetId}`}
+          alt={`第 ${no} 页：${page.headline}`}
+          className={`w-full border border-line/60 ${selecting ? "pointer-events-none select-none" : ""}`}
+          draggable={false}
+        />
+        {selecting && (
+          <div
+            className="absolute inset-0 cursor-crosshair bg-ink/20"
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseLeave}
+          >
+            {rect && rect.w > 0 && rect.h > 0 && (
+              <div
+                className="absolute border-2 border-seal bg-seal/25"
+                style={{
+                  left: `${rect.x * 100}%`,
+                  top: `${rect.y * 100}%`,
+                  width: `${rect.w * 100}%`,
+                  height: `${rect.h * 100}%`,
+                }}
+              />
+            )}
+            {dragStart && rect && (
+              <span className="absolute left-1 top-1 bg-paper/90 px-1.5 py-0.5 font-mono text-[10px] text-ink">
+                x {(rect.x * 100).toFixed(0)}% · y {(rect.y * 100).toFixed(0)}% · 宽 {(rect.w * 100).toFixed(0)}% · 高{" "}
+                {(rect.h * 100).toFixed(0)}%
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+      {selecting && rect && !dragStart && (
+        <div className="border-t border-line bg-paper-deep/40 p-3">
+          <span className="field-label">第 {no} 页 · 区域重绘</span>
+          <input
+            className="field-input mt-1 !text-sm"
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+            placeholder="区域内改成什么，例如：把背景换成黄昏色调"
+            disabled={busy}
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              className="btn-ink px-3 py-1.5 font-mono text-[11px]"
+              onClick={() => void submitRepaint()}
+              disabled={busy || !prompt.trim()}
+              title="调用支持图生图的渠道执行局部重绘，会产生一次图片调用费用"
+            >
+              {busy ? "AI 重绘中（约 1–2 分钟）" : "确认重绘"}
+            </button>
+            <button className="btn-ghost px-3 py-1.5 font-mono text-[11px]" onClick={() => setRect(null)} disabled={busy}>
+              重选
+            </button>
+            <button className="btn-ghost px-3 py-1.5 font-mono text-[11px]" onClick={onCancelSelect} disabled={busy}>
+              取消
+            </button>
+          </div>
+          {message && <p className="mt-2 font-mono text-[10px] text-ink-soft">{message}</p>}
+        </div>
+      )}
+      {selecting && !rect && !dragStart && !busy && (
+        <p className="border-t border-line bg-paper-deep/40 px-3 py-2 font-mono text-[10px] text-ink-soft">
+          在图上按住鼠标拖出要重绘的区域。
+        </p>
+      )}
     </div>
   );
 }
@@ -487,6 +731,192 @@ function RegenPanel({
       </div>
       {message && <p className="mt-2 font-mono text-[10px] text-ink-soft">{message}</p>}
     </div>
+  );
+}
+
+/**
+ * 发布文案卡片：标题 / 正文 / 标签，一键复制与 AI 润色。
+ * 文案基于 storyboard（与图无关），deterministic 与 native 都显示。
+ */
+function PublishCopyCard({ runId }: { runId: string }) {
+  const [copy, setCopy] = useState<PublishCopy | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [polishing, setPolishing] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const response = await fetch(`/api/runs/${runId}/copy`, { cache: "no-store" });
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `HTTP ${response.status}`);
+        }
+        if (alive) setCopy((await response.json()) as PublishCopy);
+      } catch (caught) {
+        if (alive) setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [runId]);
+
+  /** AI 润色：?mode=llm，后端 20s 超时或无模型时自动降级模板（source 标注） */
+  async function polish() {
+    if (polishing) return;
+    setPolishing(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/runs/${runId}/copy?mode=llm`, { cache: "no-store" });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      setCopy((await response.json()) as PublishCopy);
+    } catch (caught) {
+      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+    } finally {
+      setPolishing(false);
+    }
+  }
+
+  /** 复制全部：标题 + 空行 + 正文 + 空行 + #tag… */
+  async function copyAll() {
+    if (!copy || copied) return;
+    const text = [copy.title, "", copy.body, "", copy.tags.map(withHashTag).join(" ")].join("\n");
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } else {
+      setMessage("复制失败，请手动选择文本复制。");
+    }
+  }
+
+  return (
+    <section className="rise" style={{ animationDelay: "140ms" }}>
+      <div className="rule-double mb-5 flex items-baseline justify-between pt-2">
+        <h2 className="font-display text-lg font-bold">发布文案</h2>
+        <span className="kicker">COPY · 标题 / 正文 / 标签</span>
+      </div>
+      <div className="border border-line bg-paper-deep/30 p-5">
+        {loading ? (
+          <p className="font-mono text-[11px] text-ink-faint">文案生成中…</p>
+        ) : copy ? (
+          <>
+            <div className="flex items-start justify-between gap-4">
+              <h3 className="font-display text-xl font-black leading-snug">{copy.title}</h3>
+              <span className="stamp stamp-quiet shrink-0 text-ink-faint">
+                {copy.source === "llm" ? "AI" : "模板"}
+              </span>
+            </div>
+            <p className="mt-3 whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-ink">{copy.body}</p>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {copy.tags.map((tag) => (
+                <span key={tag} className="border border-line bg-paper px-2 py-0.5 font-mono text-[11px] text-ink-soft">
+                  {withHashTag(tag)}
+                </span>
+              ))}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <button className="btn-ink px-4 py-1.5 font-mono text-[11px] tracking-[0.1em]" onClick={() => void copyAll()}>
+                {copied ? "已复制 ✓" : "一键复制全部"}
+              </button>
+              <button
+                className="btn-ghost px-4 py-1.5 font-mono text-[11px] hover:!border-seal hover:!text-seal"
+                onClick={() => void polish()}
+                disabled={polishing}
+                title="用文本模型重新生成发布文案；无可用模型或超时时自动回退模板"
+              >
+                {polishing ? "润色中…约 10-20 秒" : "AI 润色"}
+              </button>
+              {message && <span className="font-mono text-[11px] text-ink-soft">{message}</span>}
+            </div>
+          </>
+        ) : (
+          <p className="font-mono text-[11px] text-ink-faint">{message ?? "暂无文案。"}</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * 按当前品牌重排全部页（deterministic 专属）：
+ * 逐页调用 rerender（零模型费用），headline/body 取详情数据里该页现值。
+ */
+function RerenderAllButton({
+  runId,
+  pages,
+  onDone,
+}: {
+  runId: string;
+  pages: RunDetailPage[];
+  onDone: () => Promise<void>;
+}) {
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const readyPages = pages.filter((page) => page.status === "ready" && page.assetId);
+
+  async function rerenderAll() {
+    if (progress) return;
+    const total = readyPages.length;
+    if (total === 0) {
+      setMessage("没有可重排的页面。");
+      return;
+    }
+    if (!window.confirm(`将逐页重新排版（零生成费用，耗时约 ${total * 2} 秒）。继续？`)) return;
+    setMessage(null);
+    setProgress({ done: 0, total });
+    for (let i = 0; i < readyPages.length; i++) {
+      const page = readyPages[i]!;
+      try {
+        const response = await fetch(`/api/runs/${runId}/pages/${page.index}/rerender`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            headline: page.headline,
+            body: (page.expectedCopy ?? []).slice(1).map((line) => line.trim()).filter(Boolean),
+          }),
+        });
+        if (!response.ok) {
+          const body = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `HTTP ${response.status}`);
+        }
+      } catch (caught) {
+        setMessage(
+          `第 ${i + 1} 页失败：${caught instanceof Error ? caught.message : caught}，已完成 ${i}/${total}`,
+        );
+        setProgress(null);
+        await onDone();
+        return;
+      }
+      setProgress({ done: i + 1, total });
+    }
+    setProgress(null);
+    setMessage(`已按当前品牌重排全部 ${total} 页。`);
+    await onDone();
+  }
+
+  if (readyPages.length === 0) return null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <button
+        className="btn-ghost px-3 py-1 font-mono text-[11px]"
+        onClick={() => void rerenderAll()}
+        disabled={Boolean(progress)}
+        title="只重排文字版式，沿用现有视觉层，零模型费用"
+      >
+        {progress ? `重排中 ${progress.done}/${progress.total}…` : "按品牌重排全部页"}
+      </button>
+      {message && <span className="font-mono text-[10px] text-ink-soft">{message}</span>}
+    </span>
   );
 }
 
