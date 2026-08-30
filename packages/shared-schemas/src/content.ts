@@ -207,6 +207,16 @@ export type Storyboard = z.infer<typeof StoryboardSchema>;
  * 而图片资产按归一化后的 0-based page_index 存储。
  * 所有从节点持久化值解析 Storyboard 的消费方都必须先调用本函数，防止页文错位。
  */
+/** 版式中文名（详情页徽标展示用；default 不显示） */
+export const LAYOUT_LABELS: Record<string, string> = {
+  "big-number": "数据大字",
+  timeline: "时间线",
+  table: "对比表格",
+  index: "目录",
+  quote: "引言",
+  process: "流程步骤",
+};
+
 export function normalizeSlideIndices(storyboard: Storyboard): Storyboard {
   storyboard.slides.forEach((slide, index) => {
     slide.index = index;

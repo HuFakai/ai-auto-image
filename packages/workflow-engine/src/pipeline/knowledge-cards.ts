@@ -219,8 +219,11 @@ async function executeKnowledgeCardRun(
     await runPool(pageTasks, effective);
     await throwIfAborted(deps, runId, ctx.signal);
 
-    /* generate-covers：封面候选（增强能力，失败不阻塞；Comic 管线不做——漫画首页即封面） */
-    await runCoverStage(deps, ctx, runId, input, storyboard);
+    /* generate-covers：封面候选（增强能力，失败不阻塞；Comic 管线不做——漫画首页即封面）。
+       仅当创作时勾选「生成封面候选」才自动生成；未开启可用详情页手动补生成。 */
+    if (input.generateCoverCandidates) {
+      await runCoverStage(deps, ctx, runId, input, storyboard);
+    }
 
     /* render-slides：仅确定性模式 */
     if (input.textRenderingMode === "deterministic") {

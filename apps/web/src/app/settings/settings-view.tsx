@@ -319,6 +319,9 @@ function ChannelForm({
   const [imageEditSupport, setImageEditSupport] = useState(
     isNew ? false : (editing as ChannelView).imageEditSupport,
   );
+  const [imageConcurrencyMax, setImageConcurrencyMax] = useState<string>(
+    isNew ? "" : String((editing as ChannelView).imageConcurrencyMax ?? ""),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -339,6 +342,9 @@ function ChannelForm({
         payload.responseFormat = responseFormat;
         payload.imageEditSupport = imageEditSupport;
         if (resolution) payload.resolution = resolution;
+        const parsedConcurrency = Number.parseInt(imageConcurrencyMax, 10);
+        payload.imageConcurrencyMax =
+          Number.isFinite(parsedConcurrency) && parsedConcurrency >= 1 ? parsedConcurrency : null;
       }
       const response = isNew
         ? await fetch("/api/channels", {
@@ -445,6 +451,21 @@ function ChannelForm({
               />
               支持图片编辑（图生图）——漫画角色一致性、参考图生成将优先使用该渠道
             </label>
+            <div>
+              <span className="field-label">图片生成并发（1–16，留空使用全局默认）</span>
+              <input
+                type="number"
+                min={1}
+                max={16}
+                value={imageConcurrencyMax}
+                onChange={(event) => setImageConcurrencyMax(event.target.value)}
+                placeholder="全局默认"
+                className="field-input mt-1 w-40"
+              />
+              <p className="mt-1 font-mono text-[10px] text-ink-faint">
+                该渠道同时进行的图片生成请求数上限；实际并发 = min(请求值, 服务器上限, 本渠道上限)
+              </p>
+            </div>
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <span className="field-label">比例参数风格</span>

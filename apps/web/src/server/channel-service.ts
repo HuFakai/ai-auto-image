@@ -31,6 +31,7 @@ export type ChannelInput = z.infer<typeof ChannelInputSchema>;
 
 export const ChannelPatchSchema = ChannelInputSchema.partial().extend({
   enabled: z.boolean().optional(),
+  imageConcurrencyMax: z.number().int().min(1).max(16).nullable().optional(),
 });
 export type ChannelPatch = z.infer<typeof ChannelPatchSchema>;
 

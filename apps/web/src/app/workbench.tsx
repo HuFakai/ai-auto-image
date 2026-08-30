@@ -68,6 +68,7 @@ export function Workbench({ initial, brandKits }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [requireApproval, setRequireApproval] = useState(false);
+  const [generateCovers, setGenerateCovers] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
 
   const isComicRecipe = recipe === "comic_story" || recipe === "strip_comic";
@@ -153,6 +154,7 @@ export function Workbench({ initial, brandKits }: Props) {
             : {}),
           ...(brandKitId ? { brandKitId } : {}),
           requireApproval,
+          generateCoverCandidates: generateCovers,
         }),
       });
       if (!response.ok) {
@@ -414,6 +416,18 @@ export function Workbench({ initial, brandKits }: Props) {
                       />
                     </div>
                   </div>
+                )}
+
+                {!isComicRecipe && (
+                  <label className="flex cursor-pointer items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={generateCovers}
+                      onChange={(event) => setGenerateCovers(event.target.checked)}
+                      className="accent-[#b5382d]"
+                    />
+                    生成 3 个封面候选供挑选（额外消耗 3 次图片额度；漫画不适用）
+                  </label>
                 )}
 
                 <label className="flex cursor-pointer items-center gap-2 text-sm">

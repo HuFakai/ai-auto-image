@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { normalizeSlideIndices } from "@aai/shared-schemas";
+import { normalizeSlideIndices, resolveSlideLayout } from "@aai/shared-schemas";
 import type { ComicStoryboard, Storyboard } from "@aai/shared-schemas";
 import type { Runtime } from "./runtime";
 import type { RunDetailPayload, RunListItem } from "@/lib/types";
@@ -139,6 +139,10 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
           index: slide.index,
           role: slide.role,
           headline: slide.headline,
+          layout: resolveSlideLayout({
+            layout: (slide as { layout?: string }).layout,
+            layoutData: (slide as { layoutData?: unknown }).layoutData,
+          }).layout,
           status: "ready" as const,
           assetId: current.id,
           mode: typeof metadata.mode === "string" ? metadata.mode : undefined,

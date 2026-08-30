@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { LAYOUT_LABELS } from "@aai/shared-schemas";
 import type { Recipe } from "@aai/shared-schemas";
 import type { RunDetailPage, RunDetailPayload } from "@/lib/types";
 import { RECIPE_LABELS } from "@/lib/types";
@@ -405,6 +406,11 @@ function PageFrame({
             图{String(no).padStart(2, "0")} · {page.role}
             {revised ? ` · 第${page.revision}版` : ""}
             {page.model ? ` · ${page.model}` : ""}
+            {page.layout && page.layout !== "default" && LAYOUT_LABELS[page.layout] && (
+              <span className="ml-1 rounded bg-ink px-1.5 py-0.5 text-[9px] tracking-wider text-paper">
+                {LAYOUT_LABELS[page.layout]}
+              </span>
+            )}
           </span>
           <span className="truncate px-2 text-xs text-ink-soft">{page.headline}</span>
           <span className="flex shrink-0 items-center gap-1">

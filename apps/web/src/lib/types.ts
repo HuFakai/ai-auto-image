@@ -65,6 +65,8 @@ export interface RunListItem {
 }
 
 export interface RunDetailPage {
+  /** 版式标记（确定性模式；default 不展示） */
+  layout?: string;
   index: number;
   role: string;
   headline: string;

@@ -67,5 +67,7 @@ export const CreateRunInputSchema = z.object({
   brandKitId: z.string().optional(),
   /** 审批门：完成后进入 awaiting_approval，人工确认后才算终稿（可导出） */
   requireApproval: z.boolean().default(false),
+  /** 生成 3 个封面候选（独立工序，消耗图片额度；默认关闭，可在详情页手动补生成） */
+  generateCoverCandidates: z.boolean().default(false),
 });
 export type CreateRunInput = z.infer<typeof CreateRunInputSchema>;
