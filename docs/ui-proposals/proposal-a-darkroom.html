@@ -9,7 +9,7 @@
   :root{
     --bg:#141210; --panel:#1C1916; --card:#211D19; --line:#35302A;
     --ink:#EDE7DA; --ink-soft:#9A9184; --ink-faint:#6B6459;
-    --red:#E05038; --red-dim:#8A3526;
+    --red:#FF2442; --red-dim:#B81C34; /* 小红书红 */
     --mono:"SF Mono",ui-monospace,Menlo,Consolas,monospace;
   }
   *{margin:0;padding:0;box-sizing:border-box}
@@ -154,7 +154,7 @@
     background:var(--red);color:#fff;border:none;border-radius:9px;padding:10px 20px;
     font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s;white-space:nowrap
   }
-  .btn-go:hover{background:#EE5F46}
+  .btn-go:hover{background:#FF3B55}
   .bar .row2{
     display:flex;gap:6px;padding:8px 12px 12px;flex-wrap:wrap;align-items:center
   }
@@ -172,6 +172,38 @@
   .param.toggle.on::before{background:var(--red-dim)}
   .bar .expand{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink-faint);background:none;border:none;cursor:pointer}
   .bar .expand:hover{color:var(--ink)}
+
+  /* ── 预览托盘(类型/品牌选择)── */
+  .bar .tray{display:none;border-top:1px solid var(--line);padding:12px 14px 14px}
+  .bar .tray.open{display:block;animation:trayIn .22s ease}
+  @keyframes trayIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  .tray-hint{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--ink-faint);margin-bottom:9px}
+  .tray-row{display:flex;gap:10px;overflow-x:auto;padding-bottom:4px;scrollbar-width:thin}
+  .tcard{
+    flex:none;width:92px;cursor:pointer;border:1px solid var(--line);border-radius:9px;
+    overflow:hidden;background:var(--card);transition:.15s;position:relative
+  }
+  .tcard:hover{border-color:var(--ink-faint);transform:translateY(-2px)}
+  .tcard.sel{border-color:var(--red);box-shadow:0 0 0 1px var(--red)}
+  .tcard img{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
+  .tcard .n{
+    font-size:10.5px;color:var(--ink-soft);text-align:center;padding:5px 4px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+  }
+  .tcard.sel .n{color:var(--red)}
+  .tcard.sel::after{
+    content:"✓";position:absolute;top:5px;right:5px;width:17px;height:17px;border-radius:50%;
+    background:var(--red);color:#fff;font-size:11px;display:grid;place-items:center
+  }
+  /* ── 大图 lightbox ── */
+  .lightbox{
+    position:fixed;inset:0;background:rgba(8,7,6,.88);z-index:50;display:none;
+    align-items:center;justify-content:center;flex-direction:column;gap:14px;backdrop-filter:blur(6px)
+  }
+  .lightbox.open{display:flex}
+  .lightbox img{max-height:76vh;max-width:86vw;border-radius:12px;border:1px solid var(--line)}
+  .lightbox .cap{font-size:14px;color:var(--ink)}
+  .lightbox .cap small{display:block;text-align:center;color:var(--ink-faint);font-family:var(--mono);font-size:11px;margin-top:4px}
 
   @media (max-width:860px){
     .shell{grid-template-columns:56px 1fr}
@@ -249,11 +281,15 @@
         <input placeholder="输入主题,例如:三分钟看懂量子纠缠 — 回车或点「开始创作」">
         <button class="btn-go">开始创作</button>
       </div>
+      <div class="tray" id="tray">
+        <div class="tray-hint" id="tray-hint">单击卡片 = 选中此选项 · 双击 = 查看大图</div>
+        <div class="tray-row" id="tray-row"></div>
+      </div>
       <div class="row2">
-        <button class="param">类型 <b>知识卡片</b></button>
+        <button class="param" id="chip-type">类型 <b id="chip-type-val">知识卡片</b> ▾</button>
         <button class="param">文字 <b>原生中文</b></button>
         <button class="param">比例 <b>3:4</b></button>
-        <button class="param">品牌 <b>暗房工作室</b></button>
+        <button class="param" id="chip-brand">品牌 <b id="chip-brand-val">暗房工作室</b> ▾</button>
         <button class="param toggle on">封面候选</button>
         <button class="param toggle">审批门</button>
         <button class="expand">粘贴长文 · 从 URL 导入 ▾</button>
@@ -261,5 +297,91 @@
     </div>
   </div>
 </div>
+
+<div class="lightbox" id="lightbox">
+  <img id="lb-img" alt="">
+  <div class="cap"><span id="lb-name"></span><small>单击任意处关闭</small></div>
+</div>
+
+<script>
+  const TYPES = [
+    { id: "knowledge_cards", name: "知识卡片", img: "previews/types/knowledge_cards.png" },
+    { id: "comic_story", name: "科普漫画", img: "previews/types/comic_story.png" },
+    { id: "quote_cards", name: "金句卡", img: "previews/types/quote_cards.png" },
+    { id: "checklist_cards", name: "清单卡", img: "previews/types/checklist_cards.png" },
+    { id: "comparison_cards", name: "对比卡", img: "previews/types/comparison_cards.png" },
+    { id: "product_showcase", name: "产品种草", img: "previews/types/product_showcase.png" },
+    { id: "book_recommendations", name: "图书推荐", img: "previews/types/book_recommendations.png" },
+    { id: "article_digest", name: "长文拆解", img: "previews/types/article_digest.png" },
+    { id: "strip_comic", name: "四格漫画", img: "previews/types/strip_comic.png" },
+  ];
+  const BRANDS = [
+    { id: "darkroom", name: "暗房工作室", img: "previews/brands/darkroom.png" },
+    { id: "paper_minimal", name: "纸感极简", img: "previews/brands/paper_minimal.png" },
+    { id: "high_contrast", name: "高对比营销", img: "previews/brands/high_contrast.png" },
+    { id: "morandi", name: "莫兰迪生活", img: "previews/brands/morandi.png" },
+    { id: "tech_dark", name: "科技深色", img: "previews/brands/tech_dark.png" },
+    { id: "book_paper", name: "图书纸张", img: "previews/brands/book_paper.png" },
+  ];
+
+  const tray = document.getElementById("tray");
+  const row = document.getElementById("tray-row");
+  const hint = document.getElementById("tray-hint");
+  let activeGroup = null;
+  let selected = { type: "知识卡片", brand: "暗房工作室" };
+  let clickTimer = null;
+
+  function renderTray(group) {
+    const items = group === "type" ? TYPES : BRANDS;
+    const sel = group === "type" ? selected.type : selected.brand;
+    row.innerHTML = "";
+    for (const item of items) {
+      const card = document.createElement("div");
+      card.className = "tcard" + (item.name === sel ? " sel" : "");
+      card.innerHTML = `<img src="${item.img}" alt="${item.name}"><div class="n">${item.name}</div>`;
+      // 单击 = 选中;双击 = 大图(用计时器区分两次单击与双击)
+      card.addEventListener("click", () => {
+        clearTimeout(clickTimer);
+        clickTimer = setTimeout(() => {
+          selected[group === "type" ? "type" : "brand"] = item.name;
+          document.getElementById(group === "type" ? "chip-type-val" : "chip-brand-val").textContent = item.name;
+          row.querySelectorAll(".tcard").forEach((c) => c.classList.remove("sel"));
+          card.classList.add("sel");
+          setTimeout(closeTray, 240);  // 选中后收起
+        }, 260);
+      });
+      card.addEventListener("dblclick", () => {
+        clearTimeout(clickTimer);
+        document.getElementById("lb-img").src = item.img;
+        document.getElementById("lb-name").textContent = item.name;
+        document.getElementById("lightbox").classList.add("open");
+      });
+      row.appendChild(card);
+    }
+    hint.textContent = (group === "type" ? "内容类型" : "品牌手册") + " · 单击卡片 = 选中 · 双击 = 查看大图";
+  }
+  function openTray(group) {
+    if (activeGroup === group) return closeTray();
+    activeGroup = group;
+    renderTray(group);
+    tray.classList.add("open");
+  }
+  function closeTray() {
+    tray.classList.remove("open");
+    activeGroup = null;
+  }
+  document.getElementById("chip-type").addEventListener("click", () => openTray("type"));
+  document.getElementById("chip-brand").addEventListener("click", () => openTray("brand"));
+  document.getElementById("lightbox").addEventListener("click", () =>
+    document.getElementById("lightbox").classList.remove("open"),
+  );
+  // Esc 关闭大图/托盘
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      document.getElementById("lightbox").classList.remove("open");
+      closeTray();
+    }
+  });
+</script>
 </body>
 </html>
