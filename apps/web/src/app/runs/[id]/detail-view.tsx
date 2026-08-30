@@ -1,9 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Recipe } from "@aai/shared-schemas";
 import type { RunDetailPage, RunDetailPayload } from "@/lib/types";
 import { RECIPE_LABELS } from "@/lib/types";
+
+/** 适配目标（小红书为原始平台不参与适配）；与 shared-schemas PLATFORM_PRESETS 对齐 */
+const ADAPT_TARGETS = [
+  { platform: "douyin", label: "抖音/视频号", aspect: "9:16" },
+  { platform: "wechat", label: "公众号", aspect: "16:9" },
+  { platform: "instagram", label: "Instagram", aspect: "1:1" },
+] as const;
+
+type AdaptPlatformChoice = (typeof ADAPT_TARGETS)[number]["platform"];
 
 function runStamp(status: string): { text: string; className: string } {
   switch (status) {
@@ -196,6 +206,11 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           )}
         </div>
       </section>
+
+      {/* 平台适配包：确定性模式零模型费用一键重排其他平台 */}
+      {detail.status === "succeeded" && (
+        <PlatformAdaptCard runId={detail.runId} isDeterministic={isDeterministic} input={detail.input} />
+      )}
 
       {/* 生成信息（全部参数可追溯） */}
       <section className="rise border-t-2 border-ink pt-5" style={{ animationDelay: "180ms" }}>
@@ -472,5 +487,145 @@ function RegenPanel({
       </div>
       {message && <p className="mt-2 font-mono text-[10px] text-ink-soft">{message}</p>}
     </div>
+  );
+}
+
+/**
+ * 平台适配包卡片：已完成作品一键导出其他平台规格。
+ * deterministic 模式 → POST /api/runs/:id/adapt 零模型费用重排并下载 ZIP；
+ * native 模式 → 以目标比例创建新 run 重新生成（消耗生成额度）。
+ */
+function PlatformAdaptCard({
+  runId,
+  isDeterministic,
+  input,
+}: {
+  runId: string;
+  isDeterministic: boolean;
+  input: RunDetailPayload["input"];
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  /** 适配包下载：响应为 ZIP 流，x-adapt-missing-pages 头携带被跳过的页 */
+  async function adapt(platform: AdaptPlatformChoice) {
+    if (busy) return;
+    setBusy(platform);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/runs/${runId}/adapt`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ platform }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string; hint?: string };
+        throw new Error(body.hint ?? body.error ?? `HTTP ${response.status}`);
+      }
+      const missing = (response.headers.get("x-adapt-missing-pages") ?? "")
+        .split(",")
+        .filter(Boolean)
+        .map((s) => Number(s) + 1);
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `adapt-${platform}.zip`;
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setMessage(missing.length > 0 ? `已下载；第 ${missing.join("、")} 页缺视觉层已跳过。` : "适配包已下载。");
+    } catch (caught) {
+      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** native 模式：读取当前 run input，改比例后创建新 run 重新生成 */
+  async function regenerateAs(target: (typeof ADAPT_TARGETS)[number]) {
+    if (busy) return;
+    if (!window.confirm(`将以 ${target.aspect}（${target.label}）重新生成整套作品，将消耗生成额度。继续？`)) return;
+    setBusy(target.platform);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/runs", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...input, aspectRatio: target.aspect }),
+      });
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error ?? `HTTP ${response.status}`);
+      }
+      const { runId: newRunId } = (await response.json()) as { runId: string };
+      router.push(`/runs/${newRunId}`);
+    } catch (caught) {
+      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="rise" style={{ animationDelay: "150ms" }}>
+      <div className="rule-double mb-5 flex items-baseline justify-between pt-2">
+        <h2 className="font-display text-lg font-bold">平台适配包</h2>
+        <span className="kicker">ADAPT · 一次创作 · 多平台分发</span>
+      </div>
+      <div className="border border-line bg-paper-deep/30 p-5">
+        {isDeterministic ? (
+          <>
+            <p className="font-mono text-[11px] text-ink-soft">
+              确定性模式：按目标平台比例重新排版，沿用模型视觉层，零模型费用，不改动原作资产。
+            </p>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {ADAPT_TARGETS.map((target) => (
+                <div key={target.platform} className="flex items-center justify-between gap-3 border border-line bg-paper px-4 py-3">
+                  <div>
+                    <p className="text-sm font-bold">{target.label}</p>
+                    <p className="font-mono text-[10px] text-ink-faint">{target.aspect}</p>
+                  </div>
+                  <button
+                    className="btn-ghost shrink-0 px-3 py-1.5 font-mono text-[11px] hover:!border-seal hover:!text-seal"
+                    onClick={() => void adapt(target.platform)}
+                    disabled={Boolean(busy)}
+                  >
+                    {busy === target.platform ? "排版中…" : "生成并下载"}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="font-mono text-[11px] text-ink-soft">
+              原生中文模式的画面已含文字，无法免费重排；可按目标比例重新生成整套作品（消耗生成额度）。
+            </p>
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {ADAPT_TARGETS.map((target) => (
+                <div key={target.platform} className="flex items-center justify-between gap-3 border border-line bg-paper px-4 py-3">
+                  <div>
+                    <p className="text-sm font-bold">{target.label}</p>
+                    <p className="font-mono text-[10px] text-ink-faint">以 {target.aspect} 重新生成</p>
+                  </div>
+                  <button
+                    className="btn-ghost shrink-0 px-3 py-1.5 font-mono text-[11px]"
+                    onClick={() => void regenerateAs(target)}
+                    disabled={Boolean(busy)}
+                    title={`复制当前参数，以 ${target.aspect} 创建新运行`}
+                  >
+                    {busy === target.platform ? "创建中…" : `以 ${target.aspect} 重新生成`}
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        {message && <p className="mt-3 font-mono text-[11px] text-ink-soft">{message}</p>}
+      </div>
+    </section>
   );
 }

@@ -8,6 +8,18 @@ export type Platform = z.infer<typeof PlatformSchema>;
 export const AspectRatioSchema = z.enum(["3:4", "9:16", "1:1", "16:9"]);
 export type AspectRatio = z.infer<typeof AspectRatioSchema>;
 
+/**
+ * 多平台一键适配预设：已完成的作品按目标平台比例确定性重排（零模型费用）。
+ * xiaohongshu 是原始创作平台（不参与适配，直接用现有导出）。
+ */
+export const PLATFORM_PRESETS = {
+  xiaohongshu: { aspectRatio: "3:4", label: "小红书" },
+  douyin: { aspectRatio: "9:16", label: "抖音/视频号" },
+  wechat: { aspectRatio: "16:9", label: "公众号" },
+  instagram: { aspectRatio: "1:1", label: "Instagram" },
+} as const satisfies Record<string, { aspectRatio: AspectRatio; label: string }>;
+export type AdaptPlatform = keyof typeof PLATFORM_PRESETS;
+
 /** 比例对应的标准画布尺寸（宽 × 高） */
 export const CANVAS_SIZES: Record<AspectRatio, { width: number; height: number }> = {
   "3:4": { width: 1242, height: 1656 },

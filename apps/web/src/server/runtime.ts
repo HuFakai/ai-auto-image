@@ -240,8 +240,10 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     },
     async refreshChannels(): Promise<void> {
       const assembled = await channelService.assembleRoutes();
-      pipelineDeps.textRoutes = assembled.textRoutes;
-      pipelineDeps.imageRoutes = assembled.imageRoutes;
+      // 渠道全部禁用/为空时回落 Mock 路由：保证系统可用（否则任务会以"无可用路由"必败）
+      const mock = mockRoutes();
+      pipelineDeps.textRoutes = assembled.textRoutes.length > 0 ? assembled.textRoutes : [mock.text];
+      pipelineDeps.imageRoutes = assembled.imageRoutes.length > 0 ? assembled.imageRoutes : [mock.image];
       pipelineDeps.visualQuality = assembled.visualQuality;
       config.providerMode = assembled.mode;
       config.providerLabel = assembled.label;
