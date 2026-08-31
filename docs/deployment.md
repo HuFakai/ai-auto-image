@@ -50,6 +50,14 @@ REGISTER_ENABLED=0
 DOCKER_NETWORK=1panel-network
 ```
 
+渠道 API Key 在库里是 AES-256-GCM 加密的，**唯一的解密密钥 = `APP_SECRET` 环境变量**；未设置时仍兼容回退到 `DATA_DIR/.secret`，但生产环境必须显式设置 `APP_SECRET`。
+
+开发库中的渠道数据是用开发机的 `apps/web/data/.secret`（64 位随机 hex）加密的，该值**已固化到开发机 `.env` 的 `APP_SECRET=`**。因此：
+
+- **服务器 `.env` 的 `APP_SECRET` 必须填与开发机 `.env` 完全相同的值**（从开发机 `.env` 复制 `APP_SECRET=` 那一行）——否则渠道密钥全部解不开（表现为渠道测试报解密失败）。
+- 若不沿用旧渠道：服务器可设全新的 `APP_SECRET`，启动后在「渠道设置」重新录入各渠道 API Key。
+- 密码哈希（登录）与该密钥无关（scrypt 单向哈希，不涉及解密）。
+
 如果暂时不接 Redis，`REDIS_URL` 可以为空；Compose 仍要求 `DATABASE_URL`，因为生产路径不应回退到 PGlite。
 
 模型渠道可以通过 `.env` 首次自动导入，也可以在应用的渠道设置页录入。支付和模型密钥不要提交 Git，不要写入日志或部署截图。
