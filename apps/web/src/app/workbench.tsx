@@ -25,7 +25,7 @@ interface Props {
 export function statusStamp(status: string): { text: string; className: string } {
   switch (status) {
     case "succeeded":
-      return { text: "已讫", className: "stamp text-seal" };
+      return { text: "已完成", className: "stamp text-seal" };
     case "running":
       return { text: "制中", className: "stamp text-seal animate-pulse" };
     case "queued":
@@ -727,7 +727,7 @@ function ToggleParam({
   );
 }
 
-/* ── 作品显影卡：封面 hover 显影 + 状态章 + mono meta ── */
+/* ── 作品卡：保持封面原色 + 状态章 + mono meta ── */
 function DevelopCard({ run, delay }: { run: WorkbenchRun; delay: number }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -756,11 +756,11 @@ function DevelopCard({ run, delay }: { run: WorkbenchRun; delay: number }) {
           <img
             src={`/api/assets/${run.coverAssetId}`}
             alt={`《${run.topic}》封面`}
-            className="cover-img absolute inset-0 h-full w-full object-cover brightness-[.42] saturate-[.9] group-hover:brightness-100 group-hover:saturate-105"
+            className="cover-img absolute inset-0 h-full w-full object-cover"
           />
         ) : (
           <div
-            className="cover-img absolute inset-0 brightness-[.42] saturate-[.9] transition-[filter] duration-500 group-hover:brightness-100 group-hover:saturate-100"
+            className="cover-img absolute inset-0"
             style={{ background: RECIPE_GRADIENTS[run.recipe ?? "knowledge_cards"] }}
           >
             <span className="absolute top-[16%] left-0 right-0 text-center font-display text-[44px] font-black text-white">
@@ -771,12 +771,6 @@ function DevelopCard({ run, delay }: { run: WorkbenchRun; delay: number }) {
             </span>
           </div>
         )}
-        {/* 渐变叠加标题 */}
-        <div className="absolute inset-0 flex items-end bg-gradient-to-b from-transparent from-55% to-[#0a0908]/70 p-3.5 transition-opacity duration-300">
-          <p className="line-clamp-2 text-[15px] font-bold leading-snug text-white [text-shadow:0_1px_8px_rgba(0,0,0,.5)]">
-            {run.topic}
-          </p>
-        </div>
         {/* 状态章 */}
         <span
           className={`absolute left-2.5 top-2.5 rounded-[5px] border px-2 py-[3px] font-mono text-[10px] tracking-[0.1em] backdrop-blur-[4px] ${stampClass} ${
@@ -785,6 +779,10 @@ function DevelopCard({ run, delay }: { run: WorkbenchRun; delay: number }) {
         >
           {stampText}
         </span>
+      </div>
+      {/* 标题独立于图片，避免用暗色半透明遮罩压住作品 */}
+      <div className="border-t border-line/70 px-3.5 pb-1.5 pt-2.5">
+        <p className="line-clamp-2 text-[15px] font-bold leading-snug text-ink">{run.topic}</p>
       </div>
       {/* meta 行 */}
       <div className="flex items-center justify-between px-3 py-2 font-mono text-[11px] text-ink-faint">

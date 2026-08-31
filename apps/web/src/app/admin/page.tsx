@@ -22,11 +22,13 @@ export default async function AdminOverviewPage() {
   void admin;
   const runtime = await getRuntime();
   const DAY_MS = 24 * 60 * 60 * 1000;
+  const CHART_DAYS = 30;
   const nowMs = Date.now();
-  const [allTime, today, week, byChannel, statusCounts, ledgerSums, userCount] = await Promise.all([
+  const [allTime, today, week, daily, byChannel, statusCounts, ledgerSums, userCount] = await Promise.all([
     runtime.orderRepo.revenueByDay(0),
     runtime.orderRepo.revenueByDay(nowMs - DAY_MS),
     runtime.orderRepo.revenueByDay(nowMs - 7 * DAY_MS),
+    runtime.orderRepo.revenueByDay(nowMs - CHART_DAYS * DAY_MS),
     runtime.orderRepo.revenueByChannel(),
     runtime.orderRepo.statusCounts(),
     runtime.ledgerRepo.sumByReason(),
@@ -34,7 +36,14 @@ export default async function AdminOverviewPage() {
   ]);
   const sum = (rows: Array<{ totalCents: number }>) => rows.reduce((acc, row) => acc + row.totalCents, 0);
   const byReason = Object.fromEntries(ledgerSums.map((row) => [row.reason, row.total]));
-  const dailyMax = Math.max(1, ...allTime.map((row) => row.totalCents));
+  const dailyByDay = new Map(daily.map((row) => [row.day, row]));
+  const dailyRows = Array.from({ length: CHART_DAYS }, (_, index) => {
+    const day = new Date(nowMs - (CHART_DAYS - 1 - index) * DAY_MS).toISOString().slice(0, 10);
+    const row = dailyByDay.get(day);
+    return { day, totalCents: row?.totalCents ?? 0, count: row?.count ?? 0 };
+  });
+  const dailyMax = Math.max(1, ...dailyRows.map((row) => row.totalCents));
+  const hasRecentRevenue = dailyRows.some((row) => row.totalCents > 0);
   const consumed = -(byReason["consume"] ?? 0);
 
   return (
@@ -61,20 +70,27 @@ export default async function AdminOverviewPage() {
             <h2 className="font-display text-base font-bold">每日收入</h2>
             <span className="kicker">近 30 天</span>
           </div>
-          {allTime.length === 0 ? (
+          {!hasRecentRevenue ? (
             <p className="rounded-xl border border-dashed border-line-dark bg-paper-card/40 px-5 py-8 text-center text-sm text-ink-faint">
-              还没有已支付订单。
+              {allTime.length === 0 ? "还没有已支付订单。" : "近 30 天没有已支付订单。"}
             </p>
           ) : (
-            <div className="flex h-36 items-end gap-1 rounded-xl border border-line bg-paper-card p-3">
-              {allTime.slice(-30).map((row) => (
-                <div key={row.day} className="group relative flex-1" title={`${row.day} ¥${yuan(row.totalCents)}（${row.count} 笔）`}>
+            <div className="revenue-chart rounded-xl border border-line bg-paper-card p-3">
+              <div className="revenue-bars" aria-label="近 30 天每日收入">
+                {dailyRows.map((row) => (
+                  <div key={row.day} className="revenue-bar-slot" title={`${row.day} ¥${yuan(row.totalCents)}（${row.count} 笔）`}>
                   <div
-                    className="w-full rounded-sm bg-seal/70 transition-colors group-hover:bg-seal"
-                    style={{ height: `${Math.max(4, (row.totalCents / dailyMax) * 110)}px` }}
+                    className={`revenue-bar ${row.totalCents === 0 ? "is-zero" : ""}`}
+                    style={{ height: `${row.totalCents === 0 ? 2 : Math.max(6, (row.totalCents / dailyMax) * 110)}px` }}
                   />
                 </div>
-              ))}
+                ))}
+              </div>
+              <div className="revenue-axis" aria-hidden="true">
+                {[0, Math.floor((CHART_DAYS - 1) / 2), CHART_DAYS - 1].map((index) => (
+                  <span key={dailyRows[index]!.day}>{dailyRows[index]!.day.slice(5)}</span>
+                ))}
+              </div>
             </div>
           )}
         </section>

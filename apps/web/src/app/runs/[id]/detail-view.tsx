@@ -32,6 +32,12 @@ interface RepaintRect {
   h: number;
 }
 
+type ReadyPreviewPage = RunDetailPage & { status: "ready"; assetId: string };
+
+function isReadyPreviewPage(page: RunDetailPage): page is ReadyPreviewPage {
+  return page.status === "ready" && typeof page.assetId === "string" && page.assetId.length > 0;
+}
+
 /** 标签统一带 # 前缀（模板/模型来源可能不一致） */
 function withHashTag(tag: string): string {
   return tag.startsWith("#") ? tag : `#${tag}`;
@@ -70,7 +76,7 @@ function runStamp(status: string): { text: string; className: string } {
     case "awaiting_approval":
       return { text: "待批", className: "stamp text-[#F0B429]" };
     case "succeeded":
-      return { text: "已讫", className: "stamp text-[#5FA36B]" };
+      return { text: "已完成", className: "stamp text-[#5FA36B]" };
     case "running":
       return { text: "制中", className: "stamp text-seal animate-pulse" };
     case "queued":
@@ -89,8 +95,10 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
   const [cancelling, setCancelling] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [editingPage, setEditingPage] = useState<number | null>(null);
+  const [previewPageIndex, setPreviewPageIndex] = useState<number | null>(null);
 
   const active = detail.status === "running" || detail.status === "queued";
+  const previewPages = detail.pages.filter(isReadyPreviewPage);
 
   const refresh = useCallback(async () => {
     try {
@@ -110,6 +118,37 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
     const timer = setInterval(refresh, detail.coverJobPending ? 5000 : 15000);
     return () => clearInterval(timer);
   }, [active, editingPage, refresh, detail.coverJobPending]);
+
+  // 大图预览期间锁定背景滚动，并支持键盘切换；页面刷新后若当前页消失则关闭预览。
+  useEffect(() => {
+    if (previewPageIndex !== null && !previewPages.some((page) => page.index === previewPageIndex)) {
+      setPreviewPageIndex(null);
+      return;
+    }
+    if (previewPageIndex === null) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setPreviewPageIndex(null);
+        return;
+      }
+      const currentPosition = previewPages.findIndex((page) => page.index === previewPageIndex);
+      if (currentPosition < 0) return;
+      if (event.key === "ArrowLeft" && currentPosition > 0) {
+        event.preventDefault();
+        setPreviewPageIndex(previewPages[currentPosition - 1]!.index);
+      } else if (event.key === "ArrowRight" && currentPosition < previewPages.length - 1) {
+        event.preventDefault();
+        setPreviewPageIndex(previewPages[currentPosition + 1]!.index);
+      }
+    }
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [detail.pages, previewPageIndex, previewPages]);
 
   async function cancel() {
     if (cancelling) return;
@@ -272,6 +311,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
               no={index + 1}
               runId={detail.runId}
               isDeterministic={isDeterministic}
+              onPreview={() => setPreviewPageIndex(page.index)}
               editing={editingPage === page.index}
               onToggleEdit={() => setEditingPage(editingPage === page.index ? null : page.index)}
               onDone={async () => {
@@ -299,7 +339,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           <InfoRow label="文字模式" value={detail.generation.textRenderingMode === "native" ? "原生中文（模型出图）" : "确定性排版（程序合成）"} />
           <InfoRow label="比例 · 平台" value={`${detail.generation.aspectRatio} · ${detail.generation.platform}`} />
           <InfoRow
-            label="Brand Kit"
+            label="品牌手册"
             value={
               detail.generation.brandKit
                 ? `${detail.generation.brandKit.name}（${detail.generation.brandKit.themeId}）${
@@ -380,7 +420,106 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         <DeleteRunButton runId={detail.runId} />
       </aside>
       </div>
+      {previewPageIndex !== null && (
+        <PagePreviewLightbox
+          pages={previewPages}
+          activePageIndex={previewPageIndex}
+          onClose={() => setPreviewPageIndex(null)}
+          onSelect={setPreviewPageIndex}
+        />
+      )}
     </>
+  );
+}
+
+/** 页面预览：大图区域配缩略图托盘，交互与创作条的类型/品牌预览保持一致。 */
+function PagePreviewLightbox({
+  pages,
+  activePageIndex,
+  onClose,
+  onSelect,
+}: {
+  pages: ReadyPreviewPage[];
+  activePageIndex: number;
+  onClose: () => void;
+  onSelect: (pageIndex: number) => void;
+}) {
+  const activePosition = pages.findIndex((page) => page.index === activePageIndex);
+  const activePage = activePosition >= 0 ? pages[activePosition] : undefined;
+  if (!activePage) return null;
+
+  function move(delta: number) {
+    const nextPage = pages[activePosition + delta];
+    if (nextPage) onSelect(nextPage.index);
+  }
+
+  return (
+    <div
+      className="lightbox open page-preview-lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="页面图片预览"
+      onClick={onClose}
+    >
+      <div className="page-preview-shell" onClick={(event) => event.stopPropagation()}>
+        <div className="page-preview-head">
+          <div className="min-w-0">
+            <p className="kicker">页面预览 · {activePosition + 1} / {pages.length}</p>
+            <h2 className="mt-1 truncate font-display text-lg font-bold text-ink">{activePage.headline}</h2>
+          </div>
+          <button type="button" className="btn-ghost shrink-0 px-3 py-1.5 font-mono text-[11px]" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+
+        <div className="page-preview-stage">
+          <button
+            type="button"
+            className="page-preview-nav"
+            onClick={() => move(-1)}
+            disabled={activePosition === 0}
+            aria-label="上一页"
+          >
+            ←
+          </button>
+          <img src={`/api/assets/${activePage.assetId}`} alt={`第 ${activePosition + 1} 页：${activePage.headline}`} />
+          <button
+            type="button"
+            className="page-preview-nav"
+            onClick={() => move(1)}
+            disabled={activePosition === pages.length - 1}
+            aria-label="下一页"
+          >
+            →
+          </button>
+        </div>
+
+        <div className="page-preview-caption">
+          <span className="font-mono text-[11px] text-ink-soft">
+            图{String(activePosition + 1).padStart(2, "0")} · {activePage.role}
+            {activePage.revision && activePage.revision > 1 ? ` · 第${activePage.revision}版` : ""}
+          </span>
+          <span className="font-mono text-[10px] text-ink-faint">当前版本 · 可切换页面</span>
+        </div>
+
+        <div className="tray-row page-preview-tray" aria-label="页面缩略图">
+          {pages.map((page, index) => (
+            <button
+              type="button"
+              key={page.index}
+              className={`tray-card ${page.index === activePage.index ? "sel" : ""}`}
+              onClick={() => onSelect(page.index)}
+              aria-label={`查看第 ${index + 1} 页`}
+              aria-current={page.index === activePage.index ? "page" : undefined}
+            >
+              <img src={`/api/assets/${page.assetId}`} alt="" />
+              <span className="tray-name block">图{String(index + 1).padStart(2, "0")}</span>
+            </button>
+          ))}
+        </div>
+        <p className="page-preview-help">单击缩略图切换 · ← → 切页 · Esc 或单击外部关闭</p>
+      </div>
+    </div>
   );
 }
 
@@ -407,6 +546,7 @@ function PageFrame({
   no,
   runId,
   isDeterministic,
+  onPreview,
   editing,
   onToggleEdit,
   onDone,
@@ -415,6 +555,7 @@ function PageFrame({
   no: number;
   runId: string;
   isDeterministic: boolean;
+  onPreview: () => void;
   editing: boolean;
   onToggleEdit: () => void;
   onDone: () => Promise<void>;
@@ -430,7 +571,15 @@ function PageFrame({
     return (
       <figure className="photo-frame p-2.5 pb-0">
         <div className={revised ? "" : "frame-ready"}>
-          <RegionImage runId={runId} page={page} no={no} selecting={selecting} onCancelSelect={closeSelecting} onDone={onDone} />
+          <RegionImage
+            runId={runId}
+            page={page}
+            no={no}
+            selecting={selecting}
+            onCancelSelect={closeSelecting}
+            onPreview={onPreview}
+            onDone={onDone}
+          />
         </div>
         <figcaption className="flex items-center justify-between px-1 py-2.5">
           <span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-ink-faint">
@@ -495,6 +644,7 @@ function RegionImage({
   no,
   selecting,
   onCancelSelect,
+  onPreview,
   onDone,
 }: {
   runId: string;
@@ -502,6 +652,7 @@ function RegionImage({
   no: number;
   selecting: boolean;
   onCancelSelect: () => void;
+  onPreview: () => void;
   onDone: () => Promise<void>;
 }) {
   const frameRef = useRef<HTMLDivElement | null>(null);
@@ -510,8 +661,6 @@ function RegionImage({
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  // 非框选状态单击图片 → 大图预览（Esc / 单击遮罩关闭）
-  const [preview, setPreview] = useState(false);
 
   // 进入/退出框选模式时清理框选与输入状态
   useEffect(() => {
@@ -520,15 +669,6 @@ function RegionImage({
     setPrompt("");
     setMessage(null);
   }, [selecting]);
-
-  useEffect(() => {
-    if (!preview) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setPreview(false);
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [preview]);
 
   /** 客户端坐标 → 图片容器内归一化坐标（0–1） */
   function pointFrom(clientX: number, clientY: number): { x: number; y: number } | null {
@@ -608,7 +748,7 @@ function RegionImage({
             selecting ? "pointer-events-none select-none" : "cursor-zoom-in"
           }`}
           draggable={false}
-          onClick={selecting ? undefined : () => setPreview(true)}
+          onClick={selecting ? undefined : onPreview}
           title={selecting ? undefined : "单击查看大图"}
         />
         {selecting && (
@@ -672,18 +812,6 @@ function RegionImage({
         <p className="border-t border-line bg-paper-deep px-3 py-2 font-mono text-[10px] text-ink-soft">
           在图上按住鼠标拖出要重绘的区域。
         </p>
-      )}
-      {/* 大图预览：复用 globals.css 的 .lightbox（fixed 遮罩 + 居中大图） */}
-      {preview && (
-        <div className="lightbox open" onClick={() => setPreview(false)}>
-          <img src={`/api/assets/${page.assetId}`} alt={`第 ${no} 页：${page.headline}`} />
-          <div className="text-sm text-ink">
-            图{String(no).padStart(2, "0")} · {page.headline}
-            <small className="mt-1 block text-center font-mono text-[11px] text-ink-faint">
-              Esc 或单击任意处关闭
-            </small>
-          </div>
-        </div>
       )}
     </div>
   );
@@ -1024,7 +1152,7 @@ function PublishCopyCard({ runId }: { runId: string }) {
       </div>
       <div className="border border-line bg-paper-deep p-5">
         {loading ? (
-          <p className="font-mono text-[11px] text-ink-faint">文案生成中…</p>
+          <p className="font-mono text-[11px] text-ink-faint">读取已保存文案…</p>
         ) : copy ? (
           <>
             <div className="flex items-start justify-between gap-4">

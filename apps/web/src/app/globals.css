@@ -229,7 +229,59 @@ select.field-input option {
   animation: breathe 2.2s ease-in-out infinite;
 }
 
-/* ── 显影网格卡(工作台作品卡)────────────────────────── */
+/* ── 后台每日收入图：固定日期槽位，避免单日收入撑满整块 ─── */
+.revenue-chart {
+  min-width: 0;
+}
+.revenue-bars {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 118px;
+  padding: 4px 2px 0;
+  background: repeating-linear-gradient(
+    to top,
+    transparent 0,
+    transparent 28px,
+    rgba(74, 66, 57, 0.22) 29px,
+    transparent 30px
+  );
+  border-radius: 7px;
+}
+.revenue-bar-slot {
+  display: flex;
+  align-items: flex-end;
+  flex: 1 1 0;
+  min-width: 2px;
+  height: 110px;
+}
+.revenue-bar {
+  width: 100%;
+  min-height: 2px;
+  border-radius: 3px 3px 1px 1px;
+  background: var(--color-seal);
+  opacity: 0.82;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.revenue-bar-slot:hover .revenue-bar {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+.revenue-bar.is-zero {
+  background: var(--color-line-dark);
+  opacity: 0.7;
+}
+.revenue-axis {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 2px 0;
+  color: var(--color-ink-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+/* ── 显影网格卡(工作台/作品库作品卡)─────────────────── */
 .develop-card {
   background: var(--color-paper-card);
   border: 1px solid var(--color-line);
@@ -243,7 +295,7 @@ select.field-input option {
   transform: translateY(-2px);
 }
 .develop-card .cover-img {
-  transition: filter 0.45s ease, transform 0.45s ease;
+  transition: transform 0.45s ease;
 }
 .develop-card:hover .cover-img {
   transform: scale(1.03);
@@ -373,4 +425,107 @@ select.field-input option {
   max-width: 86vw;
   border-radius: 12px;
   border: 1px solid var(--color-line);
+}
+
+/* ── 详情页页面预览：大图 + 与创作条同构的缩略图托盘 ─── */
+.page-preview-lightbox {
+  padding: 20px;
+  overflow-y: auto;
+}
+.page-preview-shell {
+  width: min(1040px, 100%);
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.page-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 2px;
+}
+.page-preview-stage {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 38px;
+  align-items: center;
+  justify-items: center;
+  gap: 12px;
+}
+.page-preview-stage img {
+  display: block;
+  max-width: min(68vw, 680px);
+  max-height: 59vh;
+  width: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  object-fit: contain;
+  box-shadow: 0 20px 70px rgba(0, 0, 0, 0.42);
+}
+.page-preview-nav {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-line);
+  border-radius: 50%;
+  color: var(--color-ink-soft);
+  font-family: var(--font-mono);
+  transition: border-color 0.15s, color 0.15s, transform 0.15s;
+}
+.page-preview-nav:hover:not(:disabled) {
+  border-color: var(--color-seal);
+  color: var(--color-seal);
+  transform: translateY(-1px);
+}
+.page-preview-nav:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+.page-preview-caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+}
+.page-preview-tray {
+  margin: 0;
+  padding: 10px 2px 4px;
+  border-top: 1px solid var(--color-line);
+}
+.page-preview-tray .tray-card {
+  width: 86px;
+}
+.page-preview-tray .tray-card img {
+  aspect-ratio: 3 / 4;
+}
+.page-preview-help {
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--color-ink-faint);
+}
+@media (max-width: 640px) {
+  .page-preview-lightbox {
+    padding: 12px;
+  }
+  .page-preview-shell {
+    max-height: calc(100vh - 24px);
+  }
+  .page-preview-stage {
+    grid-template-columns: 32px minmax(0, 1fr) 32px;
+    gap: 6px;
+  }
+  .page-preview-stage img {
+    max-width: 72vw;
+    max-height: 55vh;
+  }
+  .page-preview-nav {
+    width: 30px;
+    height: 30px;
+  }
 }
