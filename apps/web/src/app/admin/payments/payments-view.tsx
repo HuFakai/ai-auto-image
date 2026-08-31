@@ -24,7 +24,7 @@ interface FieldMeta {
 const FIELD_LABELS: Record<string, Record<string, FieldMeta>> = {
   alipay: {
     appId: { label: "应用 AppID", placeholder: "2021000100000000" },
-    gateway: { label: "网关地址", placeholder: "https://openapi.alipay.com/gateway.do（沙箱 openapi-sandbox.dl.alipaydev.com）" },
+    gateway: { label: "支付宝 API 网关地址", placeholder: "正式：https://openapi.alipay.com/gateway.do；沙箱：https://openapi-sandbox.dl.alipaydev.com/gateway.do" },
     appPrivateKey: { label: "应用私钥（PKCS1/PKCS8 PEM 或 base64）", placeholder: "-----BEGIN PRIVATE KEY-----", secret: true, multiline: true },
     alipayPublicKey: { label: "支付宝公钥（验签用）", placeholder: "-----BEGIN PUBLIC KEY-----", secret: true, multiline: true },
   },
@@ -98,17 +98,20 @@ export function PaymentsView() {
 
   if (!payload) return <p className="font-mono text-xs text-ink-faint">加载中…</p>;
 
+  const notifyBaseUrl = payload.envHint.notifyBaseUrl.replace(/\/$/, "");
+  const alipayNotifyUrl = notifyBaseUrl ? `${notifyBaseUrl}/api/pay/notify/alipay` : "";
+
   return (
     <div className="space-y-8">
       <p className="text-xs leading-relaxed text-ink-soft">
         扫码支付下单与回调均走服务端；密钥加密落库、保存后不再回显。异步通知地址取环境变量
         <span className="ml-1 font-mono text-ink">PAY_NOTIFY_BASE_URL</span>
         {payload.envHint.notifyBaseUrl ? (
-          <span className="ml-1 font-mono text-[#5FA36B]">（当前：{payload.envHint.notifyBaseUrl}）</span>
+          <span className="ml-1 font-mono text-[#5FA36B]">（支付宝通知地址：{alipayNotifyUrl}）</span>
         ) : (
           <span className="ml-1 font-mono text-seal">（未设置：真实渠道仍可下单，但建议配置公网地址以接收回调）</span>
         )}
-        。渠道参数未配置完整时，下单会自动降级为「沙箱模拟」收款。
+        。这里的通知地址不是支付宝 API 网关，也不是支付宝用户授权回调地址；开发/测试环境的真实渠道未配置完整时才可能降级为模拟支付，生产环境会直接拒绝下单。
       </p>
 
       {(["alipay", "wechat"] as const).map((channel) => {

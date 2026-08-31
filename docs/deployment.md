@@ -238,7 +238,29 @@ APP_SECRET 是渠道 API Key 的加密主密钥：
 
 当前项目启动时会在数据库为空时自动导入 TEXT_* / IMAGE_* 渠道；渠道表一旦已有记录，后续修改 .env 不会覆盖数据库中的渠道配置，需要在设置页修改或新增渠道。
 
-### 4.4 不把服务器密钥带进镜像
+### 4.4 支付宝地址配置
+
+支付宝配置中有三类完全不同的地址。以你部署的域名 `https://img.aisenno.com` 为例：
+
+| 配置位置 | 应填写的值 | 作用 |
+| --- | --- | --- |
+| 管理后台 → 支付渠道 → 支付宝 → **支付宝 API 网关地址** | 正式环境：`https://openapi.alipay.com/gateway.do` | 服务端调用 `alipay.trade.precreate` 下单接口；这里不是你的业务域名 |
+| 服务器 `.env` 的 `PAY_NOTIFY_BASE_URL` | `https://img.aisenno.com` | 应用生成支付宝异步通知地址的基地址，不要填写完整的 `/api/pay/notify/alipay` |
+| 支付宝实际异步通知地址 | `https://img.aisenno.com/api/pay/notify/alipay` | 支付宝支付状态变化后以 POST 方式通知应用；当前代码会从上面的基地址自动拼接 |
+| 支付宝开放平台 → **授权回调地址** | 当前项目暂不填写 | 这是用户授权/OAuth 回调，不是当面付异步通知；当前项目没有实现支付宝 OAuth 回调路由 |
+
+因此，当前只使用“支付宝（当面付·订单码）”收款时，建议这样配置：
+
+~~~dotenv
+PAY_NOTIFY_BASE_URL=https://img.aisenno.com
+ALIPAY_GATEWAY=https://openapi.alipay.com/gateway.do
+~~~
+
+支付宝开放平台的“授权回调地址”如果页面允许为空，就保持为空；不要填 `https://img.aisenno.com/api/pay/notify/alipay`，因为该地址只接受支付宝支付异步通知的 POST 请求，不是 OAuth 授权回调。只有后续实现支付宝登录/用户授权功能时，才需要新增专用的 GET 回调路由，并把该路由的完整 HTTPS 地址原样登记到支付宝平台。
+
+如果使用沙箱，管理后台的网关改为支付宝当前沙箱环境提供的网关地址；业务域名和通知地址仍然按实际可公网访问的 HTTPS 域名配置。支付宝官方的 [alipay.trade.precreate 接口文档](https://developer.alibaba.com/docs/api.htm?apiId=862&docType=4)中，正式网关为 `https://openapi.alipay.com/gateway.do`，`notify_url` 是支付宝服务器通知商户服务器的 HTTP/HTTPS 地址；[用户信息授权文档](https://developer.alibaba.com/docs/doc.htm?articleId=105656&docType=1&treeId=346)中的授权回调则用于接收授权结果，需与授权请求中的 `redirect_uri` 匹配。
+
+### 4.5 不把服务器密钥带进镜像
 
 Compose 使用根目录 .env 作为容器运行时环境文件；同时 .dockerignore 已排除 .env，避免密钥进入 Docker 构建上下文。请确认：
 
@@ -262,6 +284,7 @@ stat -c '%a %n' .env 2>/dev/null || stat -f '%Lp %N' .env
 - 强制生产镜像关闭模拟支付。
 - 不安装 Chromium、Playwright 或浏览器运行时。
 - 构建阶段自动执行 `scripts/fetch-fonts.sh`，将 Noto Sans/Serif SC 放入镜像；全新 `git clone` 不需要手工创建字体目录。
+- 将 `apps/web/public` 复制到最终镜像，包含创作页的内容类型和 Brand Kit 预览图；这些静态资源已纳入 Git，不应加入忽略规则。
 
 在服务器执行：
 

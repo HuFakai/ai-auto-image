@@ -27,6 +27,7 @@ ENV NODE_ENV=production \
     JOB_RUNNER_CONCURRENCY=2
 
 COPY --from=build /repo/apps/web/.next/standalone ./
+COPY --from=build /repo/apps/web/public ./apps/web/public
 COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /repo/packages/storage/drizzle ./drizzle
 COPY --from=build /repo/packages/render-engine/assets/fonts ./fonts
