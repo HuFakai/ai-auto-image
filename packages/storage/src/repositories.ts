@@ -1,4 +1,4 @@
-import { and, eq, inArray, notInArray, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, like, notInArray, or, sql } from "drizzle-orm";
 import {
   JOB_TERMINAL_STATUSES,
   type JobStatus,
@@ -22,22 +22,35 @@ import {
   newSessionId,
   newUsageId,
   newUserId,
+  newPlanId,
+  newPackageId,
+  newOrderId,
+  newWalletId,
+  newSubscriptionId,
+  newLedgerId,
 } from "./ids";
 import {
   assetRelations,
   assets,
   brandKits,
   channels,
+  creditLedger,
+  creditPackages,
   jobEvents,
   jobs,
   nodeRuns,
+  orders,
+  paymentConfigs,
+  plans,
   projects,
   promptVersions,
   providerAttempts,
   providerUsages,
   revisions,
   sessions,
+  subscriptions,
   users,
+  wallets,
   workflowRuns,
 } from "./schema";
 
@@ -104,6 +117,14 @@ export interface CreateRunInputRow {
 
 export class RunRepo {
   private readonly client: DbClient;
+  /** 节点成功且产生图片时触发（计费扣点等）；钩子异常不阻断流水线 */
+  private readonly nodeSucceededHooks: Array<(event: { runId: string; nodeRunId: string; images: number }) => Promise<void>> = [];
+
+  /** 注册「节点成功产出图片」回调（进程内单次注册，如计费服务） */
+  onNodeSucceeded(hook: (event: { runId: string; nodeRunId: string; images: number }) => Promise<void>): void {
+    this.nodeSucceededHooks.push(hook);
+  }
+
   constructor(db: Db) {
     this.client = db as DbClient;
   }
@@ -224,6 +245,7 @@ export class RunRepo {
       model?: string;
     } = {},
   ) {
+    const images = extra.images ?? 0;
     await this.client
       .update(nodeRuns)
       .set({
@@ -232,11 +254,25 @@ export class RunRepo {
         outputRef: extra.outputRef ?? null,
         promptTokens: extra.promptTokens ?? 0,
         completionTokens: extra.completionTokens ?? 0,
-        images: extra.images ?? 0,
+        images,
         costUsd: extra.costUsd ?? null,
         ...(extra.model ? { model: extra.model } : {}),
       })
       .where(eq(nodeRuns.id, id));
+    if (images > 0 && this.nodeSucceededHooks.length > 0) {
+      const row = await one(this.client.select({ runId: nodeRuns.runId }).from(nodeRuns).where(eq(nodeRuns.id, id)).limit(1));
+      if (row) {
+        for (const hook of this.nodeSucceededHooks) {
+          try {
+            await hook({ runId: row.runId, nodeRunId: id, images });
+          } catch (error) {
+            console.log(
+              JSON.stringify({ ts: new Date().toISOString(), level: "error", msg: "node succeeded hook failed", error: String(error) }),
+            );
+          }
+        }
+      }
+    }
   }
 
   /** 覆写节点输出（例如返修后同步 Storyboard 文案） */
@@ -1111,6 +1147,21 @@ export class UserRepo {
     await this.client.update(users).set({ status, updatedAt: now() }).where(eq(users.id, id));
     return this.require(id);
   }
+
+  async updateRole(id: string, role: "admin" | "user") {
+    await this.client.update(users).set({ role, updatedAt: now() }).where(eq(users.id, id));
+    return this.require(id);
+  }
+
+  /** 管理端用户列表（用户名搜索） */
+  async listAdmin(q?: string, limit = 100) {
+    return this.client
+      .select()
+      .from(users)
+      .where(q ? like(users.username, `%${q}%`) : sql`true`)
+      .orderBy(desc(users.createdAt))
+      .limit(Math.min(limit, 200));
+  }
 }
 
 export interface CreateSessionInput {
@@ -1168,5 +1219,612 @@ export class SessionRepo {
   /** 清理全部过期会话（可定期调用） */
   async deleteExpired(): Promise<void> {
     await this.client.delete(sessions).where(sql`${sessions.expiresAt} < ${now()}`);
+  }
+}
+
+/* ── 计费：套餐 / 订单 / 钱包 / 订阅 / 流水 / 支付渠道配置 ────── */
+
+export interface CreatePlanInput {
+  code: string;
+  name: string;
+  description?: string;
+  priceCents: number;
+  periodDays?: number;
+  creditsPerPeriod: number;
+  features?: string[];
+  active?: boolean;
+  sortOrder?: number;
+}
+
+export class PlanRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async list(activeOnly = false) {
+    const rows = await this.client
+      .select()
+      .from(plans)
+      .where(activeOnly ? eq(plans.active, 1) : sql`true`)
+      .orderBy(plans.sortOrder, plans.createdAt);
+    return rows;
+  }
+
+  async require(id: string) {
+    const row = await one(this.client.select().from(plans).where(eq(plans.id, id)).limit(1));
+    if (!row) throw new Error(`plan not found: ${id}`);
+    return row;
+  }
+
+  async findByCode(code: string) {
+    return one(this.client.select().from(plans).where(eq(plans.code, code)).limit(1));
+  }
+
+  async create(input: CreatePlanInput) {
+    const id = newPlanId();
+    const ts = now();
+    await this.client.insert(plans).values({
+      id,
+      code: input.code,
+      name: input.name,
+      description: input.description ?? "",
+      priceCents: input.priceCents,
+      periodDays: input.periodDays ?? 30,
+      creditsPerPeriod: input.creditsPerPeriod,
+      featuresJson: JSON.stringify(input.features ?? []),
+      active: input.active === false ? 0 : 1,
+      sortOrder: input.sortOrder ?? 0,
+      createdAt: ts,
+      updatedAt: ts,
+    });
+    return this.require(id);
+  }
+
+  async update(id: string, patch: Partial<CreatePlanInput>) {
+    const row = await this.require(id);
+    await this.client
+      .update(plans)
+      .set({
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.priceCents !== undefined ? { priceCents: patch.priceCents } : {}),
+        ...(patch.periodDays !== undefined ? { periodDays: patch.periodDays } : {}),
+        ...(patch.creditsPerPeriod !== undefined ? { creditsPerPeriod: patch.creditsPerPeriod } : {}),
+        ...(patch.features !== undefined ? { featuresJson: JSON.stringify(patch.features) } : {}),
+        ...(patch.active !== undefined ? { active: patch.active ? 1 : 0 } : {}),
+        ...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
+        updatedAt: now(),
+      })
+      .where(eq(plans.id, id));
+    void row;
+    return this.require(id);
+  }
+
+  /** 删除（有订单引用时由调用方捕获外键错误转为 409） */
+  async delete(id: string): Promise<void> {
+    await this.client.delete(plans).where(eq(plans.id, id));
+  }
+
+  /** 内置套餐兜底 seed：仅在表为空时插入 */
+  async ensureDefaults(): Promise<number> {
+    const rows = await this.client.select({ n: sql<string>`count(*)` }).from(plans).limit(1);
+    if (Number(rows[0]?.n ?? 0) > 0) return 0;
+    const defaults: CreatePlanInput[] = [
+      {
+        code: "basic",
+        name: "基础会员",
+        description: "适合轻度创作的入门套餐",
+        priceCents: 1990,
+        creditsPerPeriod: 260,
+        features: ["每月 260 点（约 260 张图）", "全部内容类型", "品牌手册"],
+        sortOrder: 1,
+      },
+      {
+        code: "pro",
+        name: "专业会员",
+        description: "高频创作者首选，点数单价更优",
+        priceCents: 4990,
+        creditsPerPeriod: 700,
+        features: ["每月 700 点（约 700 张图）", "全部内容类型", "品牌手册", "封面候选", "优先渲染队列"],
+        sortOrder: 2,
+      },
+    ];
+    for (const item of defaults) await this.create(item);
+    return defaults.length;
+  }
+}
+
+export interface CreatePackageInput {
+  name: string;
+  credits: number;
+  bonusCredits?: number;
+  priceCents: number;
+  active?: boolean;
+  sortOrder?: number;
+}
+
+export class CreditPackageRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async list(activeOnly = false) {
+    return this.client
+      .select()
+      .from(creditPackages)
+      .where(activeOnly ? eq(creditPackages.active, 1) : sql`true`)
+      .orderBy(creditPackages.sortOrder, creditPackages.createdAt);
+  }
+
+  async require(id: string) {
+    const row = await one(this.client.select().from(creditPackages).where(eq(creditPackages.id, id)).limit(1));
+    if (!row) throw new Error(`credit package not found: ${id}`);
+    return row;
+  }
+
+  async create(input: CreatePackageInput) {
+    const id = newPackageId();
+    const ts = now();
+    await this.client.insert(creditPackages).values({
+      id,
+      name: input.name,
+      credits: input.credits,
+      bonusCredits: input.bonusCredits ?? 0,
+      priceCents: input.priceCents,
+      active: input.active === false ? 0 : 1,
+      sortOrder: input.sortOrder ?? 0,
+      createdAt: ts,
+      updatedAt: ts,
+    });
+    return this.require(id);
+  }
+
+  async update(id: string, patch: Partial<CreatePackageInput>) {
+    await this.require(id);
+    await this.client
+      .update(creditPackages)
+      .set({
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.credits !== undefined ? { credits: patch.credits } : {}),
+        ...(patch.bonusCredits !== undefined ? { bonusCredits: patch.bonusCredits } : {}),
+        ...(patch.priceCents !== undefined ? { priceCents: patch.priceCents } : {}),
+        ...(patch.active !== undefined ? { active: patch.active ? 1 : 0 } : {}),
+        ...(patch.sortOrder !== undefined ? { sortOrder: patch.sortOrder } : {}),
+        updatedAt: now(),
+      })
+      .where(eq(creditPackages.id, id));
+    return this.require(id);
+  }
+
+  async delete(id: string): Promise<void> {
+    await this.client.delete(creditPackages).where(eq(creditPackages.id, id));
+  }
+
+  async ensureDefaults(): Promise<number> {
+    const rows = await this.client.select({ n: sql<string>`count(*)` }).from(creditPackages).limit(1);
+    if (Number(rows[0]?.n ?? 0) > 0) return 0;
+    const defaults: CreatePackageInput[] = [
+      { name: "体验包", credits: 100, bonusCredits: 0, priceCents: 1000, sortOrder: 1 },
+      { name: "标准包", credits: 500, bonusCredits: 50, priceCents: 5000, sortOrder: 2 },
+      { name: "专业包", credits: 1000, bonusCredits: 150, priceCents: 10000, sortOrder: 3 },
+    ];
+    for (const item of defaults) await this.create(item);
+    return defaults.length;
+  }
+}
+
+export type CreateOrderInput = {
+  userId: string;
+  type: "subscription" | "credits";
+  planId?: string | null;
+  packageId?: string | null;
+  title: string;
+  amountCents: number;
+  credits: number;
+  channel: "alipay" | "wechat" | "mock";
+  /** 二维码内容（渠道返回的 code_url / qr_code）；mock 为空 */
+  qrCode?: string | null;
+  expiresAt?: number | null;
+};
+
+export class OrderRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async create(input: CreateOrderInput) {
+    const id = newOrderId();
+    const ts = now();
+    await this.client.insert(orders).values({
+      id,
+      orderNo: id.replace("ord_", "NO"),
+      userId: input.userId,
+      type: input.type,
+      planId: input.planId ?? null,
+      packageId: input.packageId ?? null,
+      title: input.title,
+      amountCents: input.amountCents,
+      credits: input.credits,
+      channel: input.channel,
+      status: "pending",
+      qrCode: input.qrCode ?? null,
+      expiresAt: input.expiresAt ?? null,
+      createdAt: ts,
+      updatedAt: ts,
+    });
+    return this.require(id);
+  }
+
+  async require(id: string) {
+    const row = await one(this.client.select().from(orders).where(eq(orders.id, id)).limit(1));
+    if (!row) throw new Error(`order not found: ${id}`);
+    return row;
+  }
+
+  async findByOrderNo(orderNo: string) {
+    return one(this.client.select().from(orders).where(eq(orders.orderNo, orderNo)).limit(1));
+  }
+
+  /**
+   * 幂等支付完成：仅 pending → paid 允许转换，返回 null 表示已被处理过。
+   * 终态（paid/failed/refunded/expired）不可覆盖，天然挡住渠道重复通知。
+   */
+  async markPaid(id: string, channelTradeNo: string | null) {
+    const ts = now();
+    const rows = await this.client
+      .update(orders)
+      .set({
+        status: "paid",
+        channelTradeNo,
+        paidAt: ts,
+        updatedAt: ts,
+      })
+      .where(and(eq(orders.id, id), eq(orders.status, "pending")))
+      .returning({ id: orders.id });
+    if (rows.length === 0) return null;
+    return this.require(id);
+  }
+
+  async updateStatus(id: string, status: "failed" | "refunded" | "expired" | "pending", failReason?: string) {
+    await this.client
+      .update(orders)
+      .set({ status, updatedAt: now(), ...(failReason !== undefined ? { failReason } : {}) })
+      .where(eq(orders.id, id));
+    return this.require(id);
+  }
+
+  async listByUser(userId: string, limit = 20) {
+    return this.client
+      .select()
+      .from(orders)
+      .where(eq(orders.userId, userId))
+      .orderBy(desc(orders.createdAt))
+      .limit(limit);
+  }
+
+  async listAdmin(filter: { status?: string; channel?: string; userId?: string; q?: string; limit?: number; offset?: number }) {
+    const conditions = [];
+    if (filter.status) conditions.push(eq(orders.status, filter.status));
+    if (filter.channel) conditions.push(eq(orders.channel, filter.channel));
+    if (filter.userId) conditions.push(eq(orders.userId, filter.userId));
+    if (filter.q) conditions.push(like(orders.title, `%${filter.q}%`));
+    return this.client
+      .select()
+      .from(orders)
+      .where(conditions.length > 0 ? and(...conditions) : sql`true`)
+      .orderBy(desc(orders.createdAt))
+      .limit(Math.min(filter.limit ?? 50, 200))
+      .offset(filter.offset ?? 0);
+  }
+
+  async countAll() {
+    const rows = await this.client.select({ n: sql<string>`count(*)` }).from(orders).limit(1);
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  /** 已支付订单按日收入（后台收入统计） */
+  async revenueByDay(sinceMs: number) {
+    const rows = await this.client
+      .select({
+        day: sql<string>`to_char(to_timestamp(${orders.paidAt} / 1000), 'YYYY-MM-DD')`,
+        totalCents: sql<string>`coalesce(sum(${orders.amountCents}), 0)`,
+        count: sql<string>`count(*)`,
+      })
+      .from(orders)
+      .where(and(eq(orders.status, "paid"), gte(orders.paidAt, sinceMs)))
+      .groupBy(sql`1`)
+      .orderBy(sql`1`);
+    return rows.map((row) => ({ day: row.day, totalCents: Number(row.totalCents), count: Number(row.count) }));
+  }
+
+  /** 已支付收入按渠道汇总 */
+  async revenueByChannel() {
+    const rows = await this.client
+      .select({
+        channel: orders.channel,
+        totalCents: sql<string>`coalesce(sum(${orders.amountCents}), 0)`,
+        count: sql<string>`count(*)`,
+      })
+      .from(orders)
+      .where(eq(orders.status, "paid"))
+      .groupBy(orders.channel);
+    return rows.map((row) => ({ channel: row.channel, totalCents: Number(row.totalCents), count: Number(row.count) }));
+  }
+
+  /** 订单状态分布 */
+  async statusCounts() {
+    const rows = await this.client
+      .select({ status: orders.status, count: sql<string>`count(*)` })
+      .from(orders)
+      .groupBy(orders.status);
+    return rows.map((row) => ({ status: row.status, count: Number(row.count) }));
+  }
+}
+
+export class WalletRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async findByUser(userId: string) {
+    return one(this.client.select().from(wallets).where(eq(wallets.userId, userId)).limit(1));
+  }
+
+  /** 首次访问创建钱包（starterCredits 记为初始余额）；返回是否新建 */
+  async ensure(userId: string, starterCredits: number): Promise<{ wallet: WalletRow; created: boolean }> {
+    const ts = now();
+    const inserted = await this.client
+      .insert(wallets)
+      .values({
+        id: newWalletId(),
+        userId,
+        balance: Math.max(0, starterCredits),
+        totalGranted: Math.max(0, starterCredits),
+        updatedAt: ts,
+      })
+      .onConflictDoNothing({ target: wallets.userId })
+      .returning();
+    if (inserted.length > 0) return { wallet: inserted[0] as WalletRow, created: true };
+    const wallet = await this.findByUser(userId);
+    if (!wallet) throw new Error(`wallet not found for user ${userId}`);
+    return { wallet, created: false };
+  }
+
+  /** 入账（正数）。返回最新余额。 */
+  async credit(userId: string, delta: number): Promise<number> {
+    const rows = await this.client
+      .update(wallets)
+      .set({
+        balance: sql`${wallets.balance} + ${delta}`,
+        totalGranted: sql`${wallets.totalGranted} + ${delta}`,
+        updatedAt: now(),
+      })
+      .where(eq(wallets.userId, userId))
+      .returning({ balance: wallets.balance });
+    return rows[0]!.balance;
+  }
+
+  /**
+   * 扣减（正数）。余额充足时全扣；不足时扣到 0 兜底（并发下可能发生，流水 note 说明）。
+   * 返回 { deducted, balanceAfter }。
+   */
+  async debit(userId: string, amount: number): Promise<{ deducted: number; balanceAfter: number }> {
+    const full = await this.client
+      .update(wallets)
+      .set({
+        balance: sql`${wallets.balance} - ${amount}`,
+        totalConsumed: sql`${wallets.totalConsumed} + ${amount}`,
+        updatedAt: now(),
+      })
+      .where(and(eq(wallets.userId, userId), gte(wallets.balance, amount)))
+      .returning({ balance: wallets.balance });
+    if (full.length > 0) return { deducted: amount, balanceAfter: full[0]!.balance };
+    const partial = await this.client
+      .update(wallets)
+      .set({ balance: 0, totalConsumed: sql`${wallets.totalConsumed} + ${wallets.balance}`, updatedAt: now() })
+      .where(and(eq(wallets.userId, userId), gte(wallets.balance, 1)))
+      .returning({ balance: wallets.balance });
+    if (partial.length === 0) return { deducted: 0, balanceAfter: 0 };
+    return { deducted: amount - partial[0]!.balance, balanceAfter: 0 };
+  }
+
+  /** 批量取钱包（管理端用户列表） */
+  async forUsers(userIds: string[]): Promise<Map<string, WalletRow>> {
+    const map = new Map<string, WalletRow>();
+    if (userIds.length === 0) return map;
+    const rows = await this.client.select().from(wallets).where(inArray(wallets.userId, userIds));
+    for (const row of rows) map.set(row.userId, row);
+    return map;
+  }
+}
+
+type WalletRow = typeof wallets.$inferSelect;
+
+export interface CreateSubscriptionInput {
+  userId: string;
+  planId: string;
+  startedAt: number;
+  expiresAt: number;
+  lastGrantAt: number;
+}
+
+export class SubscriptionRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async activeFor(userId: string) {
+    return one(
+      this.client
+        .select()
+        .from(subscriptions)
+        .where(and(eq(subscriptions.userId, userId), eq(subscriptions.status, "active")))
+        .orderBy(desc(subscriptions.createdAt))
+        .limit(1),
+    );
+  }
+
+  async require(id: string) {
+    const row = await one(this.client.select().from(subscriptions).where(eq(subscriptions.id, id)).limit(1));
+    if (!row) throw new Error(`subscription not found: ${id}`);
+    return row;
+  }
+
+  async create(input: CreateSubscriptionInput) {
+    const id = newSubscriptionId();
+    const ts = now();
+    await this.client.insert(subscriptions).values({
+      id,
+      userId: input.userId,
+      planId: input.planId,
+      status: "active",
+      startedAt: input.startedAt,
+      expiresAt: input.expiresAt,
+      lastGrantAt: input.lastGrantAt,
+      createdAt: ts,
+      updatedAt: ts,
+    });
+    return this.require(id);
+  }
+
+  /** 续费顺延：expiresAt 与 lastGrantAt 直接替换（服务层负责叠加计算） */
+  async extend(id: string, expiresAt: number, lastGrantAt: number) {
+    await this.client
+      .update(subscriptions)
+      .set({ expiresAt, lastGrantAt, updatedAt: now() })
+      .where(eq(subscriptions.id, id));
+    return this.require(id);
+  }
+
+  /** 批量取生效订阅（管理端用户列表） */
+  async listActiveForUsers(userIds: string[]) {
+    if (userIds.length === 0) return [];
+    return this.client
+      .select()
+      .from(subscriptions)
+      .where(and(inArray(subscriptions.userId, userIds), eq(subscriptions.status, "active")));
+  }
+
+  async expireOverdue(nowMs: number): Promise<void> {
+    await this.client
+      .update(subscriptions)
+      .set({ status: "expired", updatedAt: nowMs })
+      .where(and(eq(subscriptions.status, "active"), sql`${subscriptions.expiresAt} < ${nowMs}`));
+  }
+}
+
+export type LedgerEntryInput = {
+  userId: string;
+  delta: number;
+  balanceAfter: number;
+  reason: "starter" | "purchase" | "subscription_grant" | "consume" | "admin_adjust" | "refund";
+  refType?: string | null;
+  refId?: string | null;
+  note?: string | null;
+};
+
+export class LedgerRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async append(entry: LedgerEntryInput) {
+    const id = newLedgerId();
+    await this.client.insert(creditLedger).values({
+      id,
+      userId: entry.userId,
+      delta: entry.delta,
+      balanceAfter: entry.balanceAfter,
+      reason: entry.reason,
+      refType: entry.refType ?? null,
+      refId: entry.refId ?? null,
+      note: entry.note ?? null,
+      createdAt: now(),
+    });
+    return id;
+  }
+
+  async listByUser(userId: string, limit = 20, offset = 0) {
+    return this.client
+      .select()
+      .from(creditLedger)
+      .where(eq(creditLedger.userId, userId))
+      .orderBy(desc(creditLedger.createdAt))
+      .limit(Math.min(limit, 100))
+      .offset(offset);
+  }
+
+  async listAdmin(limit = 50, offset = 0, userId?: string) {
+    return this.client
+      .select()
+      .from(creditLedger)
+      .where(userId ? eq(creditLedger.userId, userId) : sql`true`)
+      .orderBy(desc(creditLedger.createdAt))
+      .limit(Math.min(limit, 200))
+      .offset(offset);
+  }
+
+  /** 按原因汇总（对账用） */
+  async sumByReason(sinceMs?: number) {
+    const rows = await this.client
+      .select({
+        reason: creditLedger.reason,
+        total: sql<string>`coalesce(sum(${creditLedger.delta}), 0)`,
+      })
+      .from(creditLedger)
+      .where(sinceMs ? gte(creditLedger.createdAt, sinceMs) : sql`true`)
+      .groupBy(creditLedger.reason);
+    return rows.map((row) => ({ reason: row.reason, total: Number(row.total) }));
+  }
+}
+
+export class PaymentConfigRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async get(channel: string) {
+    return one(this.client.select().from(paymentConfigs).where(eq(paymentConfigs.id, channel)).limit(1));
+  }
+
+  async list() {
+    return this.client.select().from(paymentConfigs).orderBy(paymentConfigs.id);
+  }
+
+  async upsert(channel: string, patch: { enabled?: boolean; configJson?: string; secretsEncrypted?: string | null }) {
+    const ts = now();
+    await this.client
+      .insert(paymentConfigs)
+      .values({
+        id: channel,
+        enabled: patch.enabled === true ? 1 : 0,
+        configJson: patch.configJson ?? "{}",
+        secretsEncrypted: patch.secretsEncrypted ?? null,
+        createdAt: ts,
+        updatedAt: ts,
+      })
+      .onConflictDoUpdate({
+        target: paymentConfigs.id,
+        set: {
+          ...(patch.enabled !== undefined ? { enabled: patch.enabled ? 1 : 0 } : {}),
+          ...(patch.configJson !== undefined ? { configJson: patch.configJson } : {}),
+          ...(patch.secretsEncrypted !== undefined ? { secretsEncrypted: patch.secretsEncrypted } : {}),
+          updatedAt: ts,
+        },
+      });
+    return this.require(channel);
+  }
+
+  async require(channel: string) {
+    const row = await this.get(channel);
+    if (!row) throw new Error(`payment config not found: ${channel}`);
+    return row;
   }
 }

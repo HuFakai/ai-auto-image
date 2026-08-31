@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { CreateRunInput } from "@aai/shared-schemas";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser, userActionLimit } from "@/server/auth";
+import { requireCredits } from "@/server/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,10 @@ export async function POST(_request: Request, ctx: { params: Promise<{ id: strin
       { status: 429, headers: { "Retry-After": "60" } },
     );
   }
+
+  // 计费预检：封面候选约消耗 3 点（3 张候选图）
+  const billingGuard = await requireCredits(user.id, 3);
+  if (billingGuard) return billingGuard;
 
   const runtime = await getRuntime();
   let run;

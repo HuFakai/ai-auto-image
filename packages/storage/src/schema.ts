@@ -350,11 +350,157 @@ export const sessions = pgTable(
   ],
 );
 
+/* ── 计费：套餐 / 订单 / 钱包 / 订阅 / 点数流水 ─────────────────
+ * 计价约定：1 点 = 0.1 元；金额一律存「分」（amountCents）；
+ * 点数为整数；默认生成一张图片消耗 1 点。 */
+
+/** 订阅套餐（按周期授予点数） */
+export const plans = pgTable(
+  "plans",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    priceCents: integer("price_cents").notNull(),
+    periodDays: integer("period_days").notNull().default(30),
+    creditsPerPeriod: integer("credits_per_period").notNull(),
+    featuresJson: text("features_json").notNull().default("[]"),
+    active: integer("active").notNull().default(1),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_plans_code").on(t.code)],
+);
+
+/** 点数充值包（一次性买断） */
+export const creditPackages = pgTable("credit_packages", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  credits: integer("credits").notNull(),
+  bonusCredits: integer("bonus_credits").notNull().default(0),
+  priceCents: integer("price_cents").notNull(),
+  active: integer("active").notNull().default(1),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: createdAt(),
+  updatedAt: epochColumn("updated_at").notNull(),
+});
+
+/** 支付订单；type: subscription | credits；channel: alipay | wechat | mock */
+export const orders = pgTable(
+  "orders",
+  {
+    id: text("id").primaryKey(),
+    /** 商户订单号（唯一，传给支付渠道的 out_trade_no） */
+    orderNo: text("order_no").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    planId: text("plan_id").references(() => plans.id, { onDelete: "set null" }),
+    packageId: text("package_id").references(() => creditPackages.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    credits: integer("credits").notNull().default(0),
+    channel: text("channel").notNull(),
+    status: text("status").notNull().default("pending"),
+    qrCode: text("qr_code"),
+    channelTradeNo: text("channel_trade_no"),
+    failReason: text("fail_reason"),
+    paidAt: epochColumn("paid_at"),
+    expiresAt: epochColumn("expires_at"),
+    createdAt: createdAt(),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_orders_no").on(t.orderNo),
+    index("idx_orders_user").on(t.userId, t.createdAt),
+    index("idx_orders_status").on(t.status),
+  ],
+);
+
+/** 用户点数钱包（一人一行；点数余额与累计口径） */
+export const wallets = pgTable(
+  "wallets",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    balance: integer("balance").notNull().default(0),
+    totalGranted: integer("total_granted").notNull().default(0),
+    totalConsumed: integer("total_consumed").notNull().default(0),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [uniqueIndex("uq_wallets_user").on(t.userId)],
+);
+
+/** 订阅关系（一人可有多条历史，active 至多一条由服务层保证） */
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => plans.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("active"),
+    startedAt: epochColumn("started_at").notNull(),
+    expiresAt: epochColumn("expires_at").notNull(),
+    /** 上次周期发点时间；到期续费顺延 */
+    lastGrantAt: epochColumn("last_grant_at").notNull(),
+    createdAt: createdAt(),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [index("idx_subscriptions_user").on(t.userId, t.status)],
+);
+
+/** 点数流水：余额变动的唯一事实来源（审计/对账用） */
+export const creditLedger = pgTable(
+  "credit_ledger",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** 正入负出；余额以 0 兜底时与实际 delta 一致 */
+    delta: integer("delta").notNull(),
+    balanceAfter: integer("balance_after").notNull(),
+    /** starter | purchase | subscription_grant | consume | admin_adjust | refund */
+    reason: text("reason").notNull(),
+    refType: text("ref_type"),
+    refId: text("ref_id"),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("idx_credit_ledger_user").on(t.userId, t.createdAt)],
+);
+
+/** 支付渠道参数（alipay | wechat）；非敏感参数存 config_json，密钥经 AES 加密存 secrets */
+export const paymentConfigs = pgTable("payment_configs", {
+  id: text("id").primaryKey(),
+  enabled: integer("enabled").notNull().default(0),
+  configJson: text("config_json").notNull().default("{}"),
+  secretsEncrypted: text("secrets_encrypted"),
+  createdAt: createdAt(),
+  updatedAt: epochColumn("updated_at").notNull(),
+});
+
 export type Channel = typeof channels.$inferSelect;
 export type BrandKit = typeof brandKits.$inferSelect;
 export type Revision = typeof revisions.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
+export type Plan = typeof plans.$inferSelect;
+export type CreditPackage = typeof creditPackages.$inferSelect;
+export type Order = typeof orders.$inferSelect;
+export type Wallet = typeof wallets.$inferSelect;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type CreditLedgerRow = typeof creditLedger.$inferSelect;
+export type PaymentConfig = typeof paymentConfigs.$inferSelect;
 
 export const workflowRunsRelations = relations(workflowRuns, ({ many }) => ({
   nodeRuns: many(nodeRuns),

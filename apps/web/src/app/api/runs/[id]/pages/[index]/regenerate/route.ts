@@ -3,6 +3,7 @@ import { z } from "zod";
 import { PAGE_REGEN_KIND } from "@aai/workflow-engine";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser } from "@/server/auth";
+import { requireCredits } from "@/server/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,10 @@ export async function POST(
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid input", issues: parsed.error.issues.slice(0, 4) }, { status: 400 });
   }
+
+  // 计费预检：返修重出一张图消耗 1 点
+  const billingGuard = await requireCredits(user.id, 1);
+  if (billingGuard) return billingGuard;
 
   const runtime = await getRuntime();
   let run;

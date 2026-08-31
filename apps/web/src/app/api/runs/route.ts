@@ -5,6 +5,7 @@ import { brandKitConfigFromRow } from "@/server/brand-kit-views";
 import { getRuntime } from "@/server/runtime";
 import { listRunItems } from "@/server/run-views";
 import { requireApiUser, userActionLimit } from "@/server/auth";
+import { requireCredits } from "@/server/billing";
 import type { RunListItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,10 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
+
+  // 计费预检：生成一张图片消耗 1 点，余额不足直接拒绝（402）
+  const billingGuard = await requireCredits(user.id, 1);
+  if (billingGuard) return billingGuard;
 
   // Brand Kit：按 id 解析配置快照（创建时冻结进 run input，含水印/签名/色板/布局等新字段）
   const brandKitId = typeof body.brandKitId === "string" ? body.brandKitId : undefined;

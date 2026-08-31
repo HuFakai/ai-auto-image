@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { TextRenderingModeSchema } from "@aai/shared-schemas";
 import type { Recipe } from "@aai/shared-schemas";
 import { RECIPE_LABELS } from "@/lib/types";
@@ -129,6 +130,8 @@ export function Workbench({ initial, brandKits, stats }: Props) {
   const [generateCovers, setGenerateCovers] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<"all" | "pending" | "approved" | "rejected">("all");
   const [typeFilter, setTypeFilter] = useState<Recipe | "all">("all");
+  const [balance, setBalance] = useState<number | null>(null);
+  const [insufficient, setInsufficient] = useState(false);
 
   /* 托盘与 lightbox */
   const [trayGroup, setTrayGroup] = useState<"type" | "brand" | null>(null);
@@ -143,6 +146,27 @@ export function Workbench({ initial, brandKits, stats }: Props) {
 
   const isComicRecipe = recipe === "comic_story" || recipe === "strip_comic";
   const brandName = BRAND_PREVIEWS.find((item) => item.id === brandTheme)?.name ?? "不使用";
+
+  /* 点数余额：随轮询轻量刷新（充值/扣点后下一轮即更新） */
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch("/api/billing/summary", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { balance: number };
+        if (!cancelled) setBalance(payload.balance);
+      } catch {
+        /* 下一轮再取 */
+      }
+    };
+    void load();
+    const timer = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   /* Esc 关闭大图 / 托盘；卸载时清理计时器 */
   useEffect(() => {
@@ -209,6 +233,7 @@ export function Workbench({ initial, brandKits, stats }: Props) {
     }
     setSubmitting(true);
     setError(null);
+    setInsufficient(false);
     const productInfo = {
       ...(productName.trim() ? { name: productName.trim().slice(0, 200) } : {}),
       ...(productSellingPoints.trim()
@@ -247,7 +272,8 @@ export function Workbench({ initial, brandKits, stats }: Props) {
         }),
       });
       if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        const body = (await response.json().catch(() => ({}))) as { error?: string; code?: string };
+        if (body.code === "insufficient_credits") setInsufficient(true);
         throw new Error(body.error ?? `HTTP ${response.status}`);
       }
       const created = (await response.json()) as { runId: string };
@@ -321,6 +347,15 @@ export function Workbench({ initial, brandKits, stats }: Props) {
           <div className="font-mono text-[22px] font-bold leading-tight">{stats.images}</div>
           <div className="text-xs text-ink-faint">已生成图片</div>
         </div>
+        <div className="ml-auto max-md:ml-0">
+          <div className="font-mono text-[22px] font-bold leading-tight">
+            {balance === null ? "—" : balance}
+            <span className="ml-1 text-xs font-normal text-ink-faint">点</span>
+          </div>
+          <Link href="/pricing" className="text-xs text-ink-faint underline decoration-line-dark underline-offset-4 transition-colors hover:text-seal">
+            点数余额 · 充值
+          </Link>
+        </div>
       </div>
 
       {/* 筛选 chips */}
@@ -370,7 +405,16 @@ export function Workbench({ initial, brandKits, stats }: Props) {
       {/* 底部悬浮创作条 */}
       <div className="createbar-shell">
         <div className="createbar">
-          {error && <p className="px-4 pt-2.5 font-mono text-xs text-seal">⚠ {error}</p>}
+          {error && (
+            <p className="px-4 pt-2.5 font-mono text-xs text-seal">
+              ⚠ {error}{" "}
+              {insufficient && (
+                <Link href="/pricing" className="underline underline-offset-4 hover:text-ink">
+                  去充值 →
+                </Link>
+              )}
+            </p>
+          )}
           {notice && <p className="px-4 pt-2.5 font-mono text-xs text-ink-soft">✓ {notice}</p>}
 
           {/* row1：主题 + 开始创作 */}

@@ -6,14 +6,21 @@ import {
   AssetStore,
   BrandKitRepo,
   ChannelRepo,
+  CreditPackageRepo,
   JobRepo,
+  LedgerRepo,
+  OrderRepo,
+  PaymentConfigRepo,
+  PlanRepo,
   ProjectRepo,
   PromptRepo,
   ProviderRepo,
   RevisionRepo,
   RunRepo,
   SessionRepo,
+  SubscriptionRepo,
   UserRepo,
+  WalletRepo,
   openDatabase,
   type OpenDatabase,
 } from "@aai/storage";
@@ -27,6 +34,8 @@ import {
   type TextRoute,
 } from "@aai/workflow-engine";
 import { autoImportFromEnv, ChannelService, mockRoutes } from "./channel-service";
+import { BillingService } from "./billing";
+import { PayService } from "./pay/service";
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -104,6 +113,15 @@ export interface Runtime {
   revisionRepo: RevisionRepo;
   userRepo: UserRepo;
   sessionRepo: SessionRepo;
+  planRepo: PlanRepo;
+  packageRepo: CreditPackageRepo;
+  orderRepo: OrderRepo;
+  walletRepo: WalletRepo;
+  subscriptionRepo: SubscriptionRepo;
+  ledgerRepo: LedgerRepo;
+  paymentConfigRepo: PaymentConfigRepo;
+  billing: BillingService;
+  pay: PayService;
   assetStore: AssetStore;
   imageApiSemaphore: Semaphore;
   runner: JobRunner;
@@ -203,11 +221,40 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     providerLabel: "Mock（未配置渠道）",
   };
 
+  const planRepo = new PlanRepo(db.db);
+  const packageRepo = new CreditPackageRepo(db.db);
+  const orderRepo = new OrderRepo(db.db);
+  const walletRepo = new WalletRepo(db.db);
+  const subscriptionRepo = new SubscriptionRepo(db.db);
+  const ledgerRepo = new LedgerRepo(db.db);
+  const paymentConfigRepo = new PaymentConfigRepo(db.db);
+  const seeded = await planRepo.ensureDefaults() + (await packageRepo.ensureDefaults());
+  if (seeded > 0) {
+    console.log(
+      JSON.stringify({ ts: new Date().toISOString(), level: "info", msg: `seeded ${seeded} default billing plan(s)/package(s)` }),
+    );
+  }
+  const runRepo = new RunRepo(db.db);
+  const billing = new BillingService(walletRepo, ledgerRepo, planRepo, subscriptionRepo, runRepo);
+  // 生图实时扣点：节点成功产出图片 → 钱包扣 1 点/张（RunRepo 钩子内已捕获异常，不阻断流水线）
+  runRepo.onNodeSucceeded(billing.nodeImageHook());
+  const pay = new PayService({
+    dataDir,
+    paymentConfigRepo,
+    orderRepo,
+    planRepo,
+    packageRepo,
+    billing,
+    logError: (msg, extra = {}) => {
+      console.log(JSON.stringify({ ts: new Date().toISOString(), level: "error", msg, ...extra }));
+    },
+  });
+
   const runtime: Runtime = {
     config,
     db,
     projectRepo: new ProjectRepo(db.db),
-    runRepo: new RunRepo(db.db),
+    runRepo,
     jobRepo: new JobRepo(db.db),
     promptRepo: new PromptRepo(db.db),
     assetRepo: new AssetRepo(db.db),
@@ -218,6 +265,15 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     revisionRepo: new RevisionRepo(db.db),
     userRepo: new UserRepo(db.db),
     sessionRepo: new SessionRepo(db.db),
+    planRepo,
+    packageRepo,
+    orderRepo,
+    walletRepo,
+    subscriptionRepo,
+    ledgerRepo,
+    paymentConfigRepo,
+    billing,
+    pay,
     assetStore: new AssetStore(assetsDir),
     imageApiSemaphore: new Semaphore(serverMaxConcurrency),
     runner: new JobRunner(new JobRepo(db.db), {

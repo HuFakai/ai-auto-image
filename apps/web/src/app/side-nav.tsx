@@ -24,12 +24,34 @@ const ITEMS = [
     ),
   },
   {
+    href: "/pricing",
+    label: "充值",
+    icon: (
+      <svg viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v10M9.5 9.5h5M9.5 12.5h5" />
+      </svg>
+    ),
+  },
+  {
     href: "/settings",
-    label: "渠道设置",
+    label: "品牌手册",
     icon: (
       <svg viewBox="0 0 24 24">
         <circle cx="12" cy="12" r="3" />
         <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1" />
+      </svg>
+    ),
+  },
+  {
+    href: "/admin",
+    label: "管理后台",
+    icon: (
+      <svg viewBox="0 0 24 24">
+        <rect x="3" y="3" width="8" height="8" rx="1.5" />
+        <rect x="13" y="3" width="8" height="8" rx="1.5" />
+        <rect x="3" y="13" width="8" height="8" rx="1.5" />
+        <rect x="13" y="13" width="8" height="8" rx="1.5" />
       </svg>
     ),
   },
@@ -49,7 +71,7 @@ export function SideNav({ isAdmin, username }: { isAdmin: boolean; username: str
       </Link>
       {ITEMS.map((item) => {
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-        const hidden = item.href === "/settings" && !isAdmin;
+        const hidden = (item.href === "/settings" || item.href === "/admin") && !isAdmin;
         if (hidden) return null;
         return (
           <Link

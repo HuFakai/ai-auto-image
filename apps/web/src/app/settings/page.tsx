@@ -6,18 +6,10 @@ import { SettingsView } from "./settings-view";
 
 export const dynamic = "force-dynamic";
 
+/** 品牌手册设置（模型渠道已迁至 /admin/channels） */
 export default async function SettingsPage() {
   const admin = await requireAdmin();
   if (!admin) redirect("/");
   const runtime = await getRuntime();
-  return (
-    <SettingsView
-      initial={{
-        channels: await runtime.channelService.list(),
-        providerMode: runtime.config.providerMode,
-        providerLabel: runtime.config.providerLabel,
-      }}
-      initialKits={(await runtime.brandKitRepo.list()).map(toBrandKitView)}
-    />
-  );
+  return <SettingsView initialKits={(await runtime.brandKitRepo.list()).map(toBrandKitView)} />;
 }
