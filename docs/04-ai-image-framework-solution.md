@@ -16,7 +16,7 @@
 
 1. 初期使用 SQLite，核心功能稳定后再迁移 PostgreSQL、Redis 和独立 Worker。
 2. 通过 Docker 部署到服务器，控制 CPU、内存、磁盘和常驻进程数量。
-3. 图片生成支持用户自定义并发，同时受到服务端安全上限和 Provider 限流约束。
+3. 文本和图片模型只使用渠道级并发配置，默认 `0` 不限制。
 4. `grok-imagine-image-2.0` 和 `gpt-image-2` 作为可配置的主力图片模型。
 5. 默认使用模型直接生成包含中文的完整图片。
 6. 文字确定性渲染是可控兜底，默认关闭；需要时可以按系统、项目、Run 或单页开启。
@@ -364,48 +364,33 @@ export type TextRenderingMode =
 
 模板必须版本化并产生指纹；同一 `RenderSnapshot` 在相同字体、素材和变量下应得到可解释的相同结果。
 
-## 8. 用户自定义图片并发
+## 8. 模型渠道并发
 
-### 8.1 两类并发分开控制
+### 8.1 唯一限流入口
 
-不能只设置一个全局并发数字。至少拆分为：
+并发配置只保留在“管理后台 → 模型渠道”：
 
-1. `imageApiConcurrency`：同时请求远程图片模型的数量。
-2. `postprocessConcurrency`：同时执行 Sharp 解码、缩放、合成和压缩的数量。
+1. `0`：默认值，不限制该渠道并发。
+2. 正整数：该渠道在所有用户、所有任务之间共享的模型调用上限。
 
-图片生成容易受 Provider 限流影响，高清图片后处理容易造成内存峰值，二者必须分别限流。
+文本生成、结构化输出、发布文案、图片生成、图生图、封面、返修和视觉检查都通过渠道绑定的同一并发门。项目、Run、服务器环境变量和 Job Runner 不再叠加模型并发限制。
 
-### 8.2 有效并发计算
-
-```text
-effectiveImageConcurrency = min(
-  userRequestedConcurrency,
-  serverSafeMax,
-  providerRouteMax,
-  budgetMax,
-  availableJobSlots
-)
-```
-
-建议配置：
+### 8.2 配置示例
 
 ```yaml
-image:
-  textRenderingMode: native
-  primaryModel: grok-imagine-image-2.0
-  fallbackModel: gpt-image-2
-  requestedConcurrency: 1
-  serverSafeMaxConcurrency: 4
-  postprocessConcurrency: 1
-  maxPagesPerRun: 12
+channels:
+  - name: primary-text
+    type: text
+    concurrencyMax: 0
+  - name: primary-image
+    type: image
+    concurrencyMax: 0
 ```
 
-用户可以在项目或本次 Run 中设置 `requestedConcurrency`，但不能突破服务端上限。服务端需要展示“请求并发”和“实际并发”，并在降级时显示原因，例如 Provider 限流、内存阈值或全局任务槽已满。
+某个网关未来出现明确的速率限制时，只修改对应渠道为正整数即可，不影响其他文本或图片渠道。
 
 ### 8.3 资源保护
 
-- 首期默认图片 API 并发为 1，逐步压测后再提高。
-- Sharp/libvips 并发独立设置，避免生成任务完成后多个大图同时解码。
 - 每个 Run 限制页面数、单图像素上限、总输出大小和重试次数。
 - 服务器磁盘达到阈值时暂停新任务，不删除用户资产。
 - 不在服务器运行大模型，所有文本和图片生成通过远程 API。
@@ -424,7 +409,7 @@ image:
 7. 生成 Storyboard 和 PagePlan
 8. 应用 BrandKit / VisualMemory
 9. 冻结 RunSnapshot
-10. 按有效并发生成页面图片
+10. 并行生成页面图片（仅服从渠道级并发门）
 11. 原生保存，或确定性模式排版合成
 12. 执行质量检查
 13. 单页返修、替换或人工审核
@@ -544,7 +529,7 @@ Linux Docker Host
 
 - 空闲应用内存目标不高于 250 MB。
 - 单个高清页面合成期间峰值内存目标不高于 700 MB。
-- 默认只允许一个图片 API 任务并发和一个 Sharp 后处理任务并发。
+- 模型渠道默认 `0` 不限制；仅在实际网关需要时配置正整数上限。
 - 使用多阶段 Docker 构建，不带源码缓存、测试依赖和浏览器。
 - 配置健康检查、结构化日志、日志轮转、磁盘阈值和优雅停机。
 - `/data` 必须使用持久卷并定期备份，备份前执行 SQLite checkpoint。
@@ -587,7 +572,7 @@ Linux Docker Host
 ### 阶段 1：图文 MVP
 
 - 实现 `knowledge_cards`、`product_promo`、`commerce_carousel`。
-- 完成 Brief、Storyboard、PagePlan、图片并发和 ZIP 导出。
+- 完成 Brief、Storyboard、PagePlan、渠道级并发和 ZIP 导出。
 - 实现原生模式默认路径、确定性模式显式开关和单页返修。
 - 完成基础质量检查和人工确认。
 
@@ -598,7 +583,7 @@ Linux Docker Host
 - 加入 CharacterBible、SceneBible 和参考图管理。
 - 实现漫画 Recipe、多页连续性和上一页参考。
 - 增加品牌模板、视觉记忆、对比度和文字质量检查。
-- 通过压力测试确定默认并发和安全上限。
+- 通过压力测试判断哪些模型渠道需要设置正整数并发上限。
 
 退出条件：漫画和多页视觉任务不会破坏基础图文任务，资产血缘和返修可解释。
 
@@ -618,7 +603,7 @@ Linux Docker Host
 | 原生中文偶发错字或排版异常 | 默认原生但保留质量检查、单页重生和确定性兜底 |
 | 直接复制视频项目导致领域耦合 | 只提取协议、状态、审计和可靠性模式；重新定义 Page/Asset |
 | OpenAI 与 Grok 返回结构变化 | Wire Adapter + 能力声明 + Contract Test，业务不读取原始响应 |
-| 用户把并发调得过高 | `min()` 有效并发、服务端上限、Provider 限流和内存保护 |
+| 渠道无限并发触发外部网关限流 | 在对应模型渠道设置正整数上限，保留 429 退避与调用审计 |
 | SQLite 写锁或损坏 | 单进程 Runner、WAL、短事务、备份和明确迁移触发条件 |
 | 首期引入浏览器导致镜像膨胀 | 生产采用 Satori/SVG + Sharp，不安装 Playwright/Chromium |
 | 自动发布造成账号或合规风险 | 首期导出/草稿优先，正式发布必须单独授权并支持幂等 |

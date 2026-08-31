@@ -21,8 +21,6 @@ export interface JobRunnerOptions {
   watchdogIntervalMs?: number;
   /** running 任务多久无进展视为停滞 */
   stallTimeoutMs?: number;
-  /** 同时执行的 handler 数上限（阶段 0 默认 1） */
-  maxConcurrent?: number;
 }
 
 interface RunningEntry {
@@ -43,13 +41,13 @@ export class JobRunner {
   private timer: NodeJS.Timeout | null = null;
   private watchdogTimer: NodeJS.Timeout | null = null;
   private stopped = true;
+  private ticking = false;
 
   readonly holder: string;
   private readonly leaseMs: number;
   private readonly pollIntervalMs: number;
   private readonly watchdogIntervalMs: number;
   private readonly stallTimeoutMs: number;
-  private readonly maxConcurrent: number;
 
   constructor(
     private readonly jobRepo: JobRepo,
@@ -60,7 +58,6 @@ export class JobRunner {
     this.pollIntervalMs = options.pollIntervalMs ?? 500;
     this.watchdogIntervalMs = options.watchdogIntervalMs ?? 30_000;
     this.stallTimeoutMs = options.stallTimeoutMs ?? 2_100_000;
-    this.maxConcurrent = options.maxConcurrent ?? 1;
   }
 
   register(kind: string, handler: JobHandler): void {
@@ -77,7 +74,7 @@ export class JobRunner {
       this.timer = setInterval(() => void this.tick(), this.pollIntervalMs);
       this.watchdogTimer = setInterval(() => void this.runWatchdog(), this.watchdogIntervalMs);
     });
-    logger.info("job runner started", { holder: this.holder, maxConcurrent: this.maxConcurrent });
+    logger.info("job runner started", { holder: this.holder });
   }
 
   async stop(): Promise<void> {
@@ -126,20 +123,28 @@ export class JobRunner {
   }
 
   private async tick(): Promise<void> {
-    if (this.running.size >= this.maxConcurrent) return;
-    const job = await this.jobRepo.claimNext(this.holder, this.leaseMs);
-    if (!job) return;
-    const handler = this.handlers.get(job.kind);
-    if (!handler) {
-      await this.jobRepo.updateStatus(job.id, "failed", { lastError: `no handler for kind ${job.kind}` });
-      return;
-    }
+    if (this.ticking) return;
+    this.ticking = true;
+    // 一次轮询尽快认领当前全部排队任务；模型调用是否排队只由各渠道绑定的并发门决定。
+    try {
+      while (!this.stopped) {
+        const job = await this.jobRepo.claimNext(this.holder, this.leaseMs);
+        if (!job) return;
+        const handler = this.handlers.get(job.kind);
+        if (!handler) {
+          await this.jobRepo.updateStatus(job.id, "failed", { lastError: `no handler for kind ${job.kind}` });
+          continue;
+        }
 
-    const controller = new AbortController();
-    this.running.set(job.id, { jobId: job.id, controller });
-    void this.execute(job.id, job.runId, handler, controller).finally(() => {
-      this.running.delete(job.id);
-    });
+        const controller = new AbortController();
+        this.running.set(job.id, { jobId: job.id, controller });
+        void this.execute(job.id, job.runId, handler, controller).finally(() => {
+          this.running.delete(job.id);
+        });
+      }
+    } finally {
+      this.ticking = false;
+    }
   }
 
   private async execute(

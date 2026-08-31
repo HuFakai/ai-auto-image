@@ -4,7 +4,6 @@ import type { z } from "zod";
 import {
   ContentBriefSchema,
   StoryboardSchema,
-  effectiveImageConcurrency,
   normalizeSlideLayout,
   resolveSlideLayout,
   type ContentBrief,
@@ -19,7 +18,6 @@ import {
   toAiError,
   withModelFallbacks,
   type ImageModel,
-  type Semaphore,
   type TextModel,
   type VisualQualityModel,
 } from "@aai/ai-core";
@@ -65,9 +63,6 @@ export interface WorkflowDeps {
   imageRoutes: ImageRoute[];
   /** 原生模式下的文字审查模型（可选：无可用视觉模型时跳过检查） */
   visualQuality: VisualQualityModel | null;
-  imageApiSemaphore: Semaphore;
-  serverMaxConcurrency: number;
-  postprocessMax: number;
   assetsDir: string;
   exportsDir: string;
   /** 确定性渲染模板版本（冻结进 RunSnapshot） */
@@ -133,7 +128,7 @@ async function retryExistingImageNode(
 
 /**
  * 阶段 0 Spike 流水线（docs/phases/00 §7）：
- * parse-input → generate-brief → generate-storyboard → generate-images（按有效并发并行）
+ * parse-input → generate-brief → generate-storyboard → generate-images（并行，渠道可选限流）
  * → render-slides（仅确定性模式）→ package-export。
  *
  * 所有节点幂等：Job 重试或应用重启恢复时，已成功的节点与页面直接跳过，
@@ -174,14 +169,6 @@ async function executeKnowledgeCardRun(
   input: CreateRunInput,
 ): Promise<void> {
   const existingNodes = (await deps.runRepo.listNodeRuns(runId)) as unknown as NodeRowLike[];
-    const providerMaxValues = deps.imageRoutes
-      .map((route) => route.config.imageConcurrencyMax)
-      .filter((value): value is number => typeof value === "number");
-    const effective = effectiveImageConcurrency({
-      requested: input.requestedImageConcurrency,
-      serverMax: deps.serverMaxConcurrency,
-      providerMax: providerMaxValues.length > 0 ? Math.min(...providerMaxValues) : undefined,
-    });
 
     /* parse-input */
     if (!succeededNode(existingNodes, "parse-input")) {
@@ -196,16 +183,24 @@ async function executeKnowledgeCardRun(
       });
     }
 
-    /* RunSnapshot：冻结模式、并发、路由与模板版本 */
+    /* RunSnapshot：冻结模式、渠道并发、路由与模板版本 */
     await deps.runRepo.setSnapshot(
       runId,
       JSON.stringify({
         textRenderingMode: input.textRenderingMode,
         concurrency: {
-          requested: input.requestedImageConcurrency,
-          serverMax: deps.serverMaxConcurrency,
-          effective,
-          postprocessMax: deps.postprocessMax,
+          channels: [
+            ...deps.textRoutes.map((route) => ({
+              id: route.config.id,
+              type: "text" as const,
+              max: route.config.concurrencyMax,
+            })),
+            ...deps.imageRoutes.map((route) => ({
+              id: route.config.id,
+              type: "image" as const,
+              max: route.config.concurrencyMax,
+            })),
+          ],
         },
         routes: [...deps.textRoutes, ...deps.imageRoutes].map((route) => ({
           id: route.config.id,
@@ -255,7 +250,7 @@ async function executeKnowledgeCardRun(
     const expectedImageCount = pageImageCount + (input.generateCoverCandidates ? 3 : 0);
     await reserveCreditsToTarget(deps, runId, expectedImageCount);
 
-    /* generate-images：按有效并发并行；已成功页面跳过 */
+    /* generate-images：所有页面并行发起；模型渠道自身决定是否限流 */
     const failedPages: number[] = [];
     const pageTasks = storyboard.slides.map((slide) => async () => {
       const rows = (await deps.runRepo.listNodeRuns(runId)) as unknown as NodeRowLike[];
@@ -265,9 +260,9 @@ async function executeKnowledgeCardRun(
       if (await retryExistingImageNode(deps, rows, runId, slide.index)) {
         return;
       }
-      await generatePage(deps, ctx, runId, input, storyboard, slide, pageCount, effective, failedPages);
+      await generatePage(deps, ctx, runId, input, storyboard, slide, pageCount, failedPages);
     });
-    await runPool(pageTasks, effective);
+    await Promise.all(pageTasks.map((task) => task()));
     await throwIfAborted(deps, runId, ctx.signal);
 
     /* generate-covers：封面候选（增强能力，失败不阻塞；Comic 管线不做——漫画首页即封面）。
@@ -313,7 +308,6 @@ async function generatePage(
   storyboard: Storyboard,
   slide: StoryboardSlide,
   pageCount: number,
-  effective: number,
   failedPages: number[],
 ): Promise<void> {
   const mode = input.textRenderingMode;
@@ -357,18 +351,16 @@ async function generatePage(
       signal: ctx.signal,
       run: async (fallbackRoute) => {
         const route = deps.imageRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
-        return deps.imageApiSemaphore.run(async () => {
-          ctx.onProgress();
-          const images = await route.image.generate({
-            prompt: plan.imagePrompt,
-            aspectRatio: input.aspectRatio,
-            n: 1,
-            signal: ctx.signal,
-          });
-          usedModel = route.model;
-          usageAcc = mergeUsageInto(usageAcc, images[0]?.usage);
-          return images;
+        ctx.onProgress();
+        const images = await route.image.generate({
+          prompt: plan.imagePrompt,
+          aspectRatio: input.aspectRatio,
+          n: 1,
+          signal: ctx.signal,
         });
+        usedModel = route.model;
+        usageAcc = mergeUsageInto(usageAcc, images[0]?.usage);
+        return images;
       },
       onAttempt: async (record) => {
         await deps.providerRepo.recordAttempt({
@@ -453,7 +445,6 @@ async function generatePage(
       costUsd: usageAcc.costUsd,
     });
     void startedAt;
-    void effective;
   } catch (error) {
     const aiError = toAiError(error);
     await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
@@ -510,10 +501,10 @@ async function renderAllSlides(
   const renderNode = await deps.runRepo.createNodeRun(runId, "render-slides");
   await deps.runRepo.startNode(renderNode.id, { model: deps.templateVersion });
   try {
-    for (const slide of storyboard.slides) {
+    await Promise.all(storyboard.slides.map(async (slide) => {
       const rows = (await deps.runRepo.listNodeRuns(runId)) as unknown as NodeRowLike[];
       const pageNode = succeededPageNode(rows, slide.index);
-      if (!pageNode) continue;
+      if (!pageNode) return;
 
       const output = JSON.parse(pageNode.outputRef ?? "{}") as {
         assetId?: string;
@@ -557,7 +548,7 @@ async function renderAllSlides(
           layout: resolveSlideLayout(slide).layout,
         }),
       });
-    }
+    }));
     await deps.runRepo.succeedNode(renderNode.id, {
       outputRef: JSON.stringify({ templateVersion: deps.templateVersion }),
     });
@@ -773,19 +764,4 @@ function mergeUsageInto(acc: ModelUsage, incoming: ModelUsage | undefined): Mode
         ? undefined
         : (acc.costUsd ?? 0) + (incoming.costUsd ?? 0),
   };
-}
-
-async function runPool(tasks: Array<() => Promise<void>>, concurrency: number): Promise<void> {
-  let cursor = 0;
-  const workers = Array.from(
-    { length: Math.max(1, Math.min(concurrency, tasks.length)) },
-    async () => {
-      while (cursor < tasks.length) {
-        const task = tasks[cursor++];
-        if (!task) return;
-        await task();
-      }
-    },
-  );
-  await Promise.all(workers);
 }

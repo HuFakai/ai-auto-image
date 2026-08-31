@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { Semaphore } from "@aai/ai-core";
 import {
   AssetRepo,
   AssetStore,
@@ -61,9 +60,6 @@ export async function createHarness(options: { mock?: MockProviderOptions } = {}
     textRoutes: [{ config: mock.bundle.config, model: "mock-text", text: mock.bundle.text! }],
     imageRoutes: [{ config: mock.bundle.config, model: "mock-image", image: mock.bundle.image! }],
     visualQuality: mock.bundle.visualQuality,
-    imageApiSemaphore: new Semaphore(4),
-    serverMaxConcurrency: 4,
-    postprocessMax: 1,
     assetsDir: assetsRoot,
     exportsDir: exportsRoot,
     templateVersion: "darkroom-knowledge@1",
@@ -79,11 +75,9 @@ export async function createHarness(options: { mock?: MockProviderOptions } = {}
     assetStore: deps.assetStore,
     textRoutes: deps.textRoutes as TextRoute[],
     imageRoutes: deps.imageRoutes as ImageRoute[],
-    imageApiSemaphore: deps.imageApiSemaphore,
     visualQuality: mock.bundle.visualQuality,
     assetsDir: assetsRoot,
     exportsDir: exportsRoot,
-    serverMaxConcurrency: deps.serverMaxConcurrency,
   };
   const pageRegenDeps: PageRegenDeps = {
     runRepo: deps.runRepo,
@@ -93,8 +87,6 @@ export async function createHarness(options: { mock?: MockProviderOptions } = {}
     revisionRepo,
     assetStore: deps.assetStore,
     imageRoutes: deps.imageRoutes,
-    imageApiSemaphore: deps.imageApiSemaphore,
-    postprocessMax: deps.postprocessMax,
     assetsDir: assetsRoot,
     visualQuality: mock.bundle.visualQuality,
   };
@@ -106,7 +98,6 @@ export async function createHarness(options: { mock?: MockProviderOptions } = {}
     assetStore: deps.assetStore,
     textRoutes: deps.textRoutes,
     imageRoutes: deps.imageRoutes,
-    imageApiSemaphore: deps.imageApiSemaphore,
     assetsDir: assetsRoot,
   };
 

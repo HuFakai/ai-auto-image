@@ -14,6 +14,24 @@ interface NodeRow {
   model: string | null;
 }
 
+function channelConcurrencyFromSnapshot(value: unknown): RunDetailPayload["concurrency"] {
+  if (!value || typeof value !== "object") return null;
+  const channels = (value as { channels?: unknown }).channels;
+  if (!Array.isArray(channels)) return null;
+  const normalized = channels.flatMap((channel) => {
+    if (!channel || typeof channel !== "object") return [];
+    const row = channel as { id?: unknown; type?: unknown; max?: unknown };
+    if (
+      typeof row.id !== "string" ||
+      (row.type !== "text" && row.type !== "image") ||
+      typeof row.max !== "number"
+    ) return [];
+    const type: "text" | "image" = row.type;
+    return [{ id: row.id, type, max: Math.max(0, Math.trunc(row.max)) }];
+  });
+  return normalized.length > 0 ? { channels: normalized } : null;
+}
+
 /** 从持久化状态推导运行列表（供 SSR 与 GET /api/runs 复用） */
 export async function listRunItems(
   runtime: Runtime,
@@ -68,7 +86,7 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
   const nodes = (await runtime.runRepo.listNodeRuns(runId)) as unknown as NodeRow[];
   const snapshot = run.snapshotJson
     ? (JSON.parse(run.snapshotJson) as {
-        concurrency?: RunDetailPayload["concurrency"];
+        concurrency?: unknown;
         routes?: Array<{ id: string; kind?: string; model: string }>;
         templateVersion?: string;
       })
@@ -224,7 +242,7 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
     errorSummary: run.errorSummary,
     createdAt: run.createdAt,
     input,
-    concurrency: snapshot?.concurrency ?? null,
+    concurrency: channelConcurrencyFromSnapshot(snapshot?.concurrency),
     totals,
     job: job
       ? { id: job.id, status: job.status, attempts: job.attempts, recoveries: job.recoveries }

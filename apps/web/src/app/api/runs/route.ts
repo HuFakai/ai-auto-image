@@ -63,7 +63,6 @@ export async function POST(request: Request) {
   }
 
   const runtime = await getRuntime();
-  const effective = runtime.effectiveConcurrency(input.requestedImageConcurrency);
   const project = await runtime.projectRepo.create({ title: input.topic.slice(0, 60), userId: user.id });
   const run = await runtime.runRepo.create({
     projectId: project.id,
@@ -87,8 +86,6 @@ export async function POST(request: Request) {
     {
       runId: run.id,
       jobId: job.id,
-      requestedConcurrency: input.requestedImageConcurrency,
-      effectiveConcurrency: effective,
     },
     { status: 201 },
   );
@@ -103,7 +100,5 @@ export async function GET() {
     runs,
     providerLabel: runtime.config.providerLabel,
     providerMode: runtime.config.providerMode,
-    serverMaxConcurrency: runtime.config.serverMaxConcurrency,
-    defaultConcurrency: runtime.config.defaultConcurrency,
   });
 }

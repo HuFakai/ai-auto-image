@@ -6,7 +6,6 @@ import {
   LayoutDataSchema,
   StoryboardSchema,
   StoryboardSlideSchema,
-  effectiveImageConcurrency,
   normalizeSlideLayout,
   resolveSlideLayout,
   type StoryboardSlide,
@@ -58,20 +57,11 @@ describe("StoryboardSchema", () => {
 });
 
 describe("CreateRunInputSchema defaults", () => {
-  it("fills platform/ratio/mode/concurrency defaults", () => {
+  it("fills platform/ratio/mode defaults", () => {
     const parsed = CreateRunInputSchema.parse({ topic: " hello " });
     expect(parsed.platform).toBe("xiaohongshu");
     expect(parsed.aspectRatio).toBe("3:4");
     expect(parsed.textRenderingMode).toBe("native");
-    expect(parsed.requestedImageConcurrency).toBe(1);
-  });
-});
-
-describe("effectiveImageConcurrency", () => {
-  it("takes the minimum of all limits", () => {
-    expect(effectiveImageConcurrency({ requested: 8, serverMax: 4 })).toBe(4);
-    expect(effectiveImageConcurrency({ requested: 2, serverMax: 4, providerMax: 3 })).toBe(2);
-    expect(effectiveImageConcurrency({ requested: 4, serverMax: 2, providerMax: 8 })).toBe(2);
   });
 });
 

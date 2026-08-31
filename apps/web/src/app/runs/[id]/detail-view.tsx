@@ -265,9 +265,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         <p className="mt-2 font-mono text-xs text-ink-soft">
           {detail.input.aspectRatio} · {detail.input.platform} ·{" "}
           {isDeterministic ? "确定性排版" : "原生中文"}
-          {detail.concurrency
-            ? ` · 并发 ${detail.concurrency.effective}（请求 ${detail.concurrency.requested} / 上限 ${detail.concurrency.serverMax}）`
-            : ""}
+          {detail.concurrency ? " · 并发由模型渠道控制" : ""}
           {active ? ` · ${readyCount}/${detail.pages.length || "?"}` : ""}
         </p>
         {detail.status === "succeeded" && detail.reviewStatus !== "pending" && (
@@ -369,10 +367,12 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
             }
           />
           <InfoRow
-            label="并发（请求/生效/上限）"
+            label="模型渠道并发"
             value={
               detail.concurrency
-                ? `${detail.concurrency.requested} / ${detail.concurrency.effective} / ${detail.concurrency.serverMax}`
+                ? detail.concurrency.channels
+                    .map((channel) => `${channel.type === "text" ? "文本" : "图片"}：${channel.max === 0 ? "不限制" : channel.max}`)
+                    .join(" · ")
                 : "—"
             }
           />

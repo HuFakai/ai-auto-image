@@ -27,7 +27,7 @@ pnpm dev
 - 未设置 `DATABASE_URL`：使用进程内 PGlite；当前 Web runtime 不把 PGlite 数据库句柄持久化到 `DATA_DIR`，适合本地快速试验和测试。
 - 设置 `DATABASE_URL`：使用 `postgres.js` 连接远程 PostgreSQL，启动时自动执行 `packages/storage/drizzle/` 中的迁移。
 - 未配置真实文本/图片渠道：可使用 Mock Provider 完成零费用占位图卡流程。
-- `native` 是默认文字模式；`deterministic` 需要显式选择，用于程序化叠加准确中文；图片 API 并发由用户请求、服务器上限和 Provider 上限共同裁剪。
+- `native` 是默认文字模式；`deterministic` 需要显式选择，用于程序化叠加准确中文；文本和图片模型仅服从后台渠道级并发配置，默认 `0` 不限制。
 
 首次打开应用后，可在 Studio 的渠道设置中分别配置文本和图片渠道；Brand Kit、计费和支付配置分别由设置页/管理后台维护。
 
@@ -44,20 +44,10 @@ pnpm dev
 | `TEXT_*` / `IMAGE_*` | 首次启动自动导入的文本/图片渠道配置 |
 | `OPENAI_API_KEY` / `XAI_API_KEY` | 官方 Provider 备用密钥；当前首启自动导入建议仍使用显式 `TEXT_*` / `IMAGE_*` |
 | `DATA_DIR` / `ASSETS_DIR` / `EXPORTS_DIR` | 运行时数据、生成资产和导出文件目录 |
-| `IMAGE_GENERATION_CONCURRENCY_DEFAULT` | 未单独请求时的图片并发默认值 |
-| `IMAGE_GENERATION_CONCURRENCY_MAX` | 服务器图片 API 并发硬上限 |
-| `IMAGE_POSTPROCESS_CONCURRENCY_MAX` | Sharp/Satori 后处理并发上限 |
-| `JOB_RUNNER_CONCURRENCY` | 进程内 Job Runner 并发 |
 | `STARTER_CREDITS` | 新用户初始点数 |
 | `PAY_NOTIFY_BASE_URL` 及支付变量 | 支付宝/微信支付预下单、验签和回调 |
 
-本地模板默认图片并发为 1、上限为 4；生产 Compose 当前设置为默认 2、上限 4。实际有效图片并发为：
-
-```text
-min(用户请求并发, IMAGE_GENERATION_CONCURRENCY_MAX, Provider imageConcurrencyMax)
-```
-
-`IMAGE_POSTPROCESS_CONCURRENCY_MAX` 单独限制本地图片处理，不与远程图片请求共用同一个信号量。
+文本和图片模型不再读取全局并发环境变量。唯一的模型限流入口位于“管理后台 → 模型渠道 → 模型调用并发上限”：默认值 `0` 表示不限制，正整数表示该渠道在所有用户、所有任务之间共享的并发上限。文本生成、图片生成、图生图、封面、返修和发布文案都会服从同一渠道配置。
 
 ## 4. 常用命令
 
@@ -86,7 +76,7 @@ pnpm verify:xai
 
 ```text
 apps/web/                  Next.js Studio、API、登录、计费与进程内 Runner
-packages/shared-schemas/   Brief、Storyboard、Recipe、渲染、并发和状态 Schema
+packages/shared-schemas/   Brief、Storyboard、Recipe、渲染和状态 Schema
 packages/ai-core/          Provider 接口、路由回退、错误归一、信号量
 packages/provider-openai/  OpenAI-compatible Wire 与官方 OpenAI 适配
 packages/provider-xai/     xAI/Grok 适配

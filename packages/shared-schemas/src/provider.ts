@@ -33,8 +33,8 @@ export const ProviderRouteConfigSchema = z.object({
   timeoutMs: z.number().int().positive().default(120_000),
   maxAttempts: z.number().int().min(1).default(3),
   headers: z.record(z.string(), z.string()).optional(),
-  /** 该路由图片调用并发上限（能力表），参与 effective 并发计算 */
-  imageConcurrencyMax: z.number().int().min(1).optional(),
+  /** 该模型渠道的调用并发上限；0 表示不限制 */
+  concurrencyMax: z.number().int().min(0).default(0),
 });
 export type ProviderRouteConfig = z.infer<typeof ProviderRouteConfigSchema>;
 

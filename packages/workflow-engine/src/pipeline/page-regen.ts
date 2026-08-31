@@ -29,8 +29,6 @@ export interface PageRegenDeps {
   revisionRepo: RevisionRepo;
   assetStore: AssetStore;
   imageRoutes: ImageRoute[];
-  imageApiSemaphore: { run: <T>(fn: () => Promise<T>) => Promise<T> };
-  postprocessMax: number;
   assetsDir: string;
   visualQuality: VisualQualityModel | null;
   /** 可选计费回调：返修 Provider 调用前预留 1 点 */
@@ -156,16 +154,14 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
         signal: ctx.signal,
         run: async (fallbackRoute) => {
           const route = deps.imageRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
-          return deps.imageApiSemaphore.run(async () => {
-            ctx.onProgress();
-            const images = await route.image.generate({
-              prompt: plan.imagePrompt,
-              aspectRatio: input.aspectRatio,
-              n: 1,
-              signal: ctx.signal,
-            });
-            return images;
+          ctx.onProgress();
+          const images = await route.image.generate({
+            prompt: plan.imagePrompt,
+            aspectRatio: input.aspectRatio,
+            n: 1,
+            signal: ctx.signal,
           });
+          return images;
         },
         onAttempt: async (record) => {
           await deps.providerRepo.recordAttempt({

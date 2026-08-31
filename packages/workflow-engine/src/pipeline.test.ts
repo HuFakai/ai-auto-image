@@ -39,9 +39,14 @@ describe("knowledge card pipeline (mock)", () => {
     expect(assets.filter((a) => a.kind === "generated")).toHaveLength(4);
     expect(assets.find((a) => a.kind === "export-manifest")).toBeDefined();
 
-    // RunSnapshot 冻结了并发与路由
-    const snapshot = JSON.parse(finalRun.snapshotJson ?? "{}") as { concurrency?: { effective?: number } };
-    expect(snapshot.concurrency?.effective).toBe(1);
+    // RunSnapshot 冻结了渠道级并发；Mock 默认 0（不限制）
+    const snapshot = JSON.parse(finalRun.snapshotJson ?? "{}") as {
+      concurrency?: { channels?: Array<{ type: string; max: number }> };
+    };
+    expect(snapshot.concurrency?.channels).toEqual([
+      { id: "mock", type: "text", max: 0 },
+      { id: "mock", type: "image", max: 0 },
+    ]);
 
     // 4 张正文页 + 3 张封面候选（generate-covers 增强工序）
     expect((await harness.runRepo.runTotals(runId)).images).toBe(7);

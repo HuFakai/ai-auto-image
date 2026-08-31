@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { Semaphore, type TextModel, type VisualQualityModel } from "@aai/ai-core";
+import type { TextModel, VisualQualityModel } from "@aai/ai-core";
 import {
   AssetRepo,
   AssetStore,
@@ -36,12 +36,6 @@ import {
 import { autoImportFromEnv, ChannelService, mockRoutes } from "./channel-service";
 import { BillingService } from "./billing";
 import { PayService } from "./pay/service";
-
-function envInt(name: string, fallback: number): number {
-  const raw = process.env[name];
-  const value = raw ? Number.parseInt(raw, 10) : Number.NaN;
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
 
 /** 加载仓库根目录 .env（Next 只自动读 apps/web 下的 env 文件）；已存在的环境变量优先 */
 function loadRootEnvFile(): void {
@@ -84,9 +78,6 @@ export interface RuntimeConfig {
   sqlitePath: string;
   assetsDir: string;
   exportsDir: string;
-  serverMaxConcurrency: number;
-  defaultConcurrency: number;
-  postprocessMax: number;
   providerMode: "mock" | "partial" | "real";
   providerLabel: string;
 }
@@ -123,14 +114,11 @@ export interface Runtime {
   billing: BillingService;
   pay: PayService;
   assetStore: AssetStore;
-  imageApiSemaphore: Semaphore;
   runner: JobRunner;
   /** 重新从数据库装配渠道路由（渠道增删改、启停、排序后调用） */
   refreshChannels(): Promise<void>;
   /** 导出文案等附加能力使用的首选文本模型（未配置时 null） */
   preferredTextModel(): TextModel | null;
-  /** 计算某次请求的有效并发（min(requested, serverMax, providerMax)） */
-  effectiveConcurrency(requested: number): number;
 }
 
 declare global {
@@ -161,9 +149,6 @@ async function initRuntime(): Promise<Runtime> {
     sqlitePath: process.env.SQLITE_PATH ?? path.join(dataDir, "db", "app.db"),
     assetsDir: process.env.ASSETS_DIR ?? path.join(dataDir, "assets"),
     exportsDir: process.env.EXPORTS_DIR ?? path.join(dataDir, "exports"),
-    serverMaxConcurrency: envInt("IMAGE_GENERATION_CONCURRENCY_MAX", 4),
-    defaultConcurrency: envInt("IMAGE_GENERATION_CONCURRENCY_DEFAULT", 1),
-    postprocessMax: envInt("IMAGE_POSTPROCESS_CONCURRENCY_MAX", 1),
   };
 
   const db = await openDatabase({ url: process.env.DATABASE_URL, migrationsFolder: resolveMigrationsDir() });
@@ -181,13 +166,10 @@ interface RuntimePaths {
   sqlitePath: string;
   assetsDir: string;
   exportsDir: string;
-  serverMaxConcurrency: number;
-  defaultConcurrency: number;
-  postprocessMax: number;
 }
 
 async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runtime> {
-  const { dataDir, sqlitePath, assetsDir, exportsDir, serverMaxConcurrency, defaultConcurrency, postprocessMax } = paths;
+  const { dataDir, sqlitePath, assetsDir, exportsDir } = paths;
   const channelService = new ChannelService(new ChannelRepo(db.db), dataDir);
   const brandKitRepo = new BrandKitRepo(db.db);
   const seededKits = await brandKitRepo.seedBuiltIns();
@@ -214,9 +196,6 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     sqlitePath,
     assetsDir,
     exportsDir,
-    serverMaxConcurrency,
-    defaultConcurrency,
-    postprocessMax,
     providerMode: "mock",
     providerLabel: "Mock（未配置渠道）",
   };
@@ -275,23 +254,7 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     billing,
     pay,
     assetStore: new AssetStore(assetsDir),
-    imageApiSemaphore: new Semaphore(serverMaxConcurrency),
-    runner: new JobRunner(new JobRepo(db.db), {
-      maxConcurrent: envInt("JOB_RUNNER_CONCURRENCY", 1),
-    }),
-    effectiveConcurrency(requested: number): number {
-      const providerMax = pipelineDeps.imageRoutes
-        .map((route) => route.config.imageConcurrencyMax)
-        .filter((value): value is number => typeof value === "number");
-      return Math.max(
-        1,
-        Math.min(
-          requested,
-          serverMaxConcurrency,
-          ...(providerMax.length > 0 ? [Math.min(...providerMax)] : []),
-        ),
-      );
-    },
+    runner: new JobRunner(new JobRepo(db.db)),
     preferredTextModel(): TextModel | null {
       return pipelineDeps.textRoutes[0]?.text ?? null;
     },
@@ -339,9 +302,6 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     set visualQuality(model: PipelineDeps["visualQuality"]) {
       pipelineDeps.visualQuality = model;
     },
-    imageApiSemaphore: runtime.imageApiSemaphore,
-    serverMaxConcurrency,
-    postprocessMax,
     assetsDir,
     exportsDir,
     templateVersion: "darkroom-knowledge@1",
@@ -375,10 +335,8 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     set visualQuality(model: PipelineDeps["visualQuality"]) {
       pipelineDeps.visualQuality = model;
     },
-    imageApiSemaphore: runtime.imageApiSemaphore,
     assetsDir,
     exportsDir,
-    serverMaxConcurrency,
     reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
     releaseImageCredits: (runId) => billing.releaseRunCredits(runId),
   });
@@ -396,8 +354,6 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     set imageRoutes(routes) {
       pipelineDeps.imageRoutes = routes;
     },
-    imageApiSemaphore: runtime.imageApiSemaphore,
-    postprocessMax,
     assetsDir,
     reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
     releaseImageCredits: (runId) => billing.releaseRunCredits(runId),
@@ -427,7 +383,6 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     set imageRoutes(routes) {
       pipelineDeps.imageRoutes = routes;
     },
-    imageApiSemaphore: runtime.imageApiSemaphore,
     assetsDir,
     reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
     releaseImageCredits: (runId) => billing.releaseRunCredits(runId),

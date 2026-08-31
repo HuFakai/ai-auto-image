@@ -26,14 +26,14 @@
 - 数据层已经切换为 PostgreSQL 方言：生产通过 `DATABASE_URL` 连接 PostgreSQL；本地/测试无连接串时使用进程内 PGlite，见 `packages/storage/src/database.ts`。
 - 当前 Schema 共 22 张表，覆盖项目、运行、节点、资产、作业、渠道、品牌、用户、会话、套餐、订单、钱包、订阅、点数流水和支付配置。
 - Dockerfile 已使用多阶段构建、standalone 产物、非 root 用户、健康检查和 `/data` 资产卷；生产 Compose 连接外部 PostgreSQL，Redis 仅作为可选预留。
-- 生产 Compose 已将根目录 `.env` 同时作为插值来源和容器运行时环境来源，固定绑定 `127.0.0.1:1235`，要求显式 `APP_SECRET`，默认内存上限 4G、图片并发 2/上限 4；服务器部署仍需在目标主机实测。
+- 生产 Compose 已将根目录 `.env` 同时作为插值来源和容器运行时环境来源，固定绑定 `127.0.0.1:1235`，要求显式 `APP_SECRET`，默认内存上限 4G；模型调用不设全局并发，只有后台渠道正整数上限会生效，`0` 表示不限制。
 
 ### 2. AI 生成和工作流
 
 - 9 种内容类型：知识卡片、科普漫画、金句卡、清单卡、对比卡、产品种草、图书推荐、长文拆解、四格漫画。
 - 当前运行时按两条管线组织：`comic_story` / `strip_comic` 走漫画管线，其余类型复用知识卡片管线骨架；这意味着“支持类型”已经落地，但不是每种类型都有完全独立的编排器。
 - Provider 层支持自建领域接口、OpenAI-compatible Wire、OpenAI 官方和 xAI/Grok 适配，以及 Mock Provider；文本和图片渠道可以独立配置、排序、启停、测试和回退。
-- 图片主流程支持 `native` 原生文字模式；`deterministic` 确定性文字渲染可显式开启，默认关闭；另有可选的 `auto_fallback` 接口。图片 API 并发和 Sharp 后处理并发分开控制，用户请求值受服务器和 Provider 上限约束。
+- 图片主流程支持 `native` 原生文字模式；`deterministic` 确定性文字渲染可显式开启，默认关闭；另有可选的 `auto_fallback` 接口。文本、图片、图生图和视觉检查统一服从被调用模型渠道的共享并发配置，默认 `0` 不限制。
 - 任务具备租约、心跳、看门狗、幂等键、重启恢复、取消和单页局部重试语义。
 
 ### 3. 编辑、视觉和交付
@@ -56,7 +56,7 @@
 | `pnpm typecheck` | 通过 | Turbo 19/19 个任务成功 |
 | `pnpm build` | 通过 | Next.js standalone 构建成功；有非阻断的 ESLint 插件提示 |
 | `pnpm lint` | 通过 | ESLint 全仓无错误 |
-| `pnpm test` | 通过 | Turbo 19/19 个任务成功；storage 16、workflow-engine 44、web 27 个测试通过 |
+| `pnpm test` | 通过 | Turbo 19/19 个任务成功；storage 17、workflow-engine 44、web 37 个测试通过 |
 | 计费并发集成测试 | 通过 | 两个运行争抢 10 点仅一个可预留；并行结算 3 张图后余额、已消费和运行计数一致 |
 | 支付 mock 安全测试 | 通过 | 生产环境禁止 mock 订单和 `dev-confirm`，真实渠道未配置时返回错误 |
 | `pnpm eval` | 通过 | Mock 12 个用例、48 页；结构化解析和页面渲染指标均达到阈值，平均运行约 0.4 秒 |
@@ -91,7 +91,7 @@
 2. **生产联调部分完成**：当前配置的兼容文本/图片网关已跑通固定真实样本，并修复 DeepSeek reasoning-only 返回与网关 `thinking` 参数差异；目标服务器 Docker、反向代理、中文字体、外部 PostgreSQL/Redis 连通性、官方 OpenAI/xAI 直连和支付宝/微信回调仍需要实测记录。
 3. **权限模型仍是第一版**：已有 admin/user 基础角色和资源归属，但还没有完整 RBAC、管理员操作审计和更严格的跨用户测试；公网开放前需要补齐。
 4. **质量检查仍偏规则与人工**：原生图片中文字视觉审查依赖支持视觉输入的文本渠道；局部重绘 API 已有，框选 UI 尚未闭环。
-5. **部署性能数据未形成报告**：Compose 已设置 4G 内存、默认图片并发 2/上限 4，但当前没有目标服务器的峰值、队列等待和外部 Provider 限流数据。`infra/verify-deployment.sh` 的内存检查仍主要依赖人工观察，真实生成烟测默认关闭以避免意外消费额度。
+5. **部署性能数据未形成报告**：Compose 已设置 4G 内存限制，模型渠道默认不限制并发，但当前没有目标服务器的峰值、队列等待和外部 Provider 限流数据。`infra/verify-deployment.sh` 的内存检查仍主要依赖人工观察，真实生成烟测默认关闭以避免意外消费额度。
 6. **Provider 测试覆盖不均衡**：OpenAI-compatible 的流式解析、multipart 文本、DeepSeek reasoning 开关已有合同测试；官方 OpenAI/xAI 直连端点行为仍需合同测试和带脱敏报告的真实验证。
 
 ## 六、P2 产品化工作

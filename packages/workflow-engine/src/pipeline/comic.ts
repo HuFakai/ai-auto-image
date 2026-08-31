@@ -15,7 +15,6 @@ import {
   withModelFallbacks,
   type VisualQualityModel,
 } from "@aai/ai-core";
-import type { Semaphore } from "@aai/ai-core";
 import type { AssetRepo, JobRepo, ProviderRepo, RevisionRepo, RunRepo, AssetStore } from "@aai/storage";
 import type { ImageRoute, TextRoute } from "./knowledge-cards";
 import { applyBrandOverlays, hasBrandOverlays, renderComicSlide, themeById } from "@aai/render-engine";
@@ -35,11 +34,9 @@ export interface ComicPipelineDeps {
   assetStore: AssetStore;
   textRoutes: TextRoute[];
   imageRoutes: ImageRoute[];
-  imageApiSemaphore: Semaphore;
   visualQuality: VisualQualityModel | null;
   assetsDir: string;
   exportsDir: string;
-  serverMaxConcurrency: number;
   /** 可选计费回调：图片 Provider 调用前预留额度 */
   reserveImageCredits?: (runId: string, amount: number) => Promise<void>;
   /** 可选计费回调：运行结束、失败或取消时释放未结算额度 */
@@ -186,6 +183,12 @@ async function executeComicRun(
     JSON.stringify({
       recipe: input.recipe,
       textRenderingMode: input.textRenderingMode,
+      concurrency: {
+        channels: [
+          ...deps.textRoutes.map((route) => ({ id: route.config.id, type: "text", max: route.config.concurrencyMax })),
+          ...deps.imageRoutes.map((route) => ({ id: route.config.id, type: "image", max: route.config.concurrencyMax })),
+        ],
+      },
       routes: [...deps.textRoutes, ...deps.imageRoutes].map((route) => ({
         id: route.config.id,
         kind: route.config.kind,
@@ -361,7 +364,7 @@ async function executeComicRun(
       failedPages,
     });
   });
-  await runPool(tasks, effectiveConcurrency(deps, input));
+  await Promise.all(tasks.map((task) => task()));
   await throwIfAborted(deps, runId, ctx.signal);
 
   /* render-comic-bubbles：对白气泡程序渲染（确定性模式或统一渲染页脚）。
@@ -496,25 +499,23 @@ async function generateComicPage(
         const route = (args.editCapableRoutes.length > 0 ? args.editCapableRoutes : deps.imageRoutes).find(
           (r) => r.config.id === fallbackRoute.config.id,
         )!;
-        return deps.imageApiSemaphore.run(async () => {
-          ctx.onProgress();
-          let images;
-          // 渠道支持图生图时，以角色定妆图为参考（身份锚定）
-          if (route.image.capabilities().imageEditSingle && args.characterRefBase64) {
-            images = await route.image.edit!({
-              prompt,
-              aspectRatio: input.aspectRatio,
-              baseImage: { base64: args.characterRefBase64 },
-              signal: ctx.signal,
-            });
-            usedModel = route.model;
-          } else {
-            images = await route.image.generate({ prompt, aspectRatio: input.aspectRatio, n: 1, signal: ctx.signal });
-            usedModel = route.model;
-          }
-          usageAcc = mergeUsageLocal(usageAcc, images[0]?.usage);
-          return images;
-        });
+        ctx.onProgress();
+        let images;
+        // 渠道支持图生图时，以角色定妆图为参考（身份锚定）
+        if (route.image.capabilities().imageEditSingle && args.characterRefBase64) {
+          images = await route.image.edit!({
+            prompt,
+            aspectRatio: input.aspectRatio,
+            baseImage: { base64: args.characterRefBase64 },
+            signal: ctx.signal,
+          });
+          usedModel = route.model;
+        } else {
+          images = await route.image.generate({ prompt, aspectRatio: input.aspectRatio, n: 1, signal: ctx.signal });
+          usedModel = route.model;
+        }
+        usageAcc = mergeUsageLocal(usageAcc, images[0]?.usage);
+        return images;
       },
       onAttempt: async (record) => {
         await deps.providerRepo.recordAttempt({
@@ -619,16 +620,6 @@ function mergeUsageLocal(acc: ModelUsage, incoming: ModelUsage | undefined): Mod
   };
 }
 
-function effectiveConcurrency(deps: ComicPipelineDeps, input: CreateRunInput): number {
-  const providerMax = deps.imageRoutes
-    .map((route) => route.config.imageConcurrencyMax)
-    .filter((value): value is number => typeof value === "number");
-  return Math.max(
-    1,
-    Math.min(input.requestedImageConcurrency, deps.serverMaxConcurrency, ...(providerMax.length ? [Math.min(...providerMax)] : [])),
-  );
-}
-
 async function generateImageWithFallbacks(
   deps: ComicPipelineDeps,
   ctx: { signal: AbortSignal; onProgress: () => void },
@@ -647,12 +638,10 @@ async function generateImageWithFallbacks(
     signal: ctx.signal,
     run: async (fallbackRoute) => {
       const route = deps.imageRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
-      return deps.imageApiSemaphore.run(async () => {
-        ctx.onProgress();
-        const images = await route.image.generate({ prompt, aspectRatio: "1:1", n: 1, signal: ctx.signal });
-        usageAcc = mergeUsageLocal(usageAcc, images[0]?.usage);
-        return images;
-      });
+      ctx.onProgress();
+      const images = await route.image.generate({ prompt, aspectRatio: "1:1", n: 1, signal: ctx.signal });
+      usageAcc = mergeUsageLocal(usageAcc, images[0]?.usage);
+      return images;
     },
     onAttempt: async (record) => {
       await deps.providerRepo.recordAttempt({
@@ -778,16 +767,4 @@ function schemaFor(schemaName: string): z.ZodType<unknown> {
     return ComicStoryboardSchema;
   }
   throw new Error(`unknown structured schema: ${schemaName}`);
-}
-
-async function runPool(tasks: Array<() => Promise<void>>, concurrency: number): Promise<void> {
-  let cursor = 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(concurrency, tasks.length)) }, async () => {
-    while (cursor < tasks.length) {
-      const task = tasks[cursor++];
-      if (!task) return;
-      await task();
-    }
-  });
-  await Promise.all(workers);
 }

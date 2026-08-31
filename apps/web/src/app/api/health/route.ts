@@ -13,10 +13,9 @@ export async function GET() {
       provider: runtime.config.providerLabel,
       // 布尔语义字符串，不回显数据库 host（公网反代下防信息泄漏）
       database: "ok",
-      concurrency: {
-        default: runtime.config.defaultConcurrency,
-        serverMax: runtime.config.serverMaxConcurrency,
-        postprocessMax: runtime.config.postprocessMax,
+      modelConcurrency: {
+        source: "model-channels",
+        default: 0,
       },
       time: new Date().toISOString(),
     });

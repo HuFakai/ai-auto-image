@@ -1,5 +1,13 @@
 import { z } from "zod";
-import type { TextModel, VisualQualityModel } from "@aai/ai-core";
+import {
+  createModelConcurrencyGate,
+  limitImageModel,
+  limitTextModel,
+  limitVisualQualityModel,
+  type ModelConcurrencyGate,
+  type TextModel,
+  type VisualQualityModel,
+} from "@aai/ai-core";
 import type { ProviderRouteConfig } from "@aai/shared-schemas";
 import type { Channel, ChannelRepo } from "@aai/storage";
 import {
@@ -28,15 +36,21 @@ export const ChannelInputSchema = z.object({
   responseFormat: z.enum(["url", "b64_json"]).default("b64_json"),
   resolution: z.string().max(20).optional(),
   maxAttempts: z.number().int().min(1).max(5).default(3),
-  imageConcurrencyMax: z.number().int().min(1).max(16).optional(),
+  /** 0 表示不限制；正整数为该渠道所有模型调用共享的并发上限 */
+  concurrencyMax: z.number().int().min(0).default(0),
   /** 该渠道支持图片编辑（图生图）：gpt-image 等 */
   imageEditSupport: z.boolean().default(false),
 });
 export type ChannelInput = z.infer<typeof ChannelInputSchema>;
 
 export const ChannelPatchSchema = ChannelInputSchema.partial().extend({
+  // 覆盖 Create Schema 的 default，避免 PATCH 只切换启停时意外重置其他配置。
+  aspectRatioParam: z.enum(["size", "aspect_ratio"]).optional(),
+  responseFormat: z.enum(["url", "b64_json"]).optional(),
+  maxAttempts: z.number().int().min(1).max(5).optional(),
+  concurrencyMax: z.number().int().min(0).optional(),
+  imageEditSupport: z.boolean().optional(),
   enabled: z.boolean().optional(),
-  imageConcurrencyMax: z.number().int().min(1).max(16).nullable().optional(),
 });
 export type ChannelPatch = z.infer<typeof ChannelPatchSchema>;
 
@@ -55,7 +69,7 @@ function toView(row: Channel): ChannelView {
     resolution: row.resolution,
     enabled: row.enabled === 1,
     maxAttempts: row.maxAttempts,
-    imageConcurrencyMax: row.imageConcurrencyMax,
+    concurrencyMax: row.concurrencyMax ?? 0,
     imageEditSupport: row.imageEditSupport === 1,
     lastTestOk: row.lastTestOk === null ? null : row.lastTestOk === 1,
     lastTestAt: row.lastTestAt,
@@ -67,6 +81,10 @@ function toView(row: Channel): ChannelView {
 
 export class ChannelService {
   private readonly encryptionKey: Buffer;
+  private readonly concurrencyGates = new Map<
+    string,
+    { limit: number; gate: ModelConcurrencyGate | null }
+  >();
 
   constructor(
     private readonly repo: ChannelRepo,
@@ -96,7 +114,7 @@ export class ChannelService {
       responseFormat: input.type === "image" ? input.responseFormat : "b64_json",
       resolution: input.resolution ?? null,
       maxAttempts: input.maxAttempts,
-      imageConcurrencyMax: input.imageConcurrencyMax ?? null,
+      concurrencyMax: input.concurrencyMax,
       imageEditSupport: input.type === "image" && input.imageEditSupport ? 1 : 0,
     });
     return toView(row);
@@ -117,13 +135,14 @@ export class ChannelService {
     if (patch.resolution !== undefined) row.resolution = patch.resolution || null;
     if (patch.enabled !== undefined) row.enabled = patch.enabled ? 1 : 0;
     if (patch.maxAttempts !== undefined) row.maxAttempts = patch.maxAttempts;
-    if (patch.imageConcurrencyMax !== undefined) row.imageConcurrencyMax = patch.imageConcurrencyMax;
+    if (patch.concurrencyMax !== undefined) row.concurrencyMax = patch.concurrencyMax;
     if (patch.imageEditSupport !== undefined) row.imageEditSupport = patch.imageEditSupport ? 1 : 0;
     return toView(await this.repo.update(id, row));
   }
 
   async delete(id: string): Promise<void> {
     await this.repo.delete(id);
+    this.concurrencyGates.delete(id);
   }
 
   async reorder(orderedIds: string[]): Promise<void> {
@@ -177,6 +196,15 @@ export class ChannelService {
 
     for (const row of rows) {
       const apiKey = decryptApiKey(this.encryptionKey, row.apiKeyEncrypted);
+      const concurrencyMax = row.concurrencyMax ?? 0;
+      // 同一渠道的文本、视觉检查或图片能力共享一个门；0 时不创建信号量，完全放行。
+      const cachedGate = this.concurrencyGates.get(row.id);
+      const concurrencyGate = cachedGate?.limit === concurrencyMax
+        ? cachedGate.gate
+        : createModelConcurrencyGate(concurrencyMax);
+      if (!cachedGate || cachedGate.limit !== concurrencyMax) {
+        this.concurrencyGates.set(row.id, { limit: concurrencyMax, gate: concurrencyGate });
+      }
       if (row.type === "text" && row.textModel) {
         const config: ProviderRouteConfig = compatibleRoute({
           baseUrl: row.baseUrl,
@@ -184,6 +212,7 @@ export class ChannelService {
           apiKeyRef: `channel:${row.id}`,
           textModel: row.textModel,
           maxAttempts: row.maxAttempts,
+          concurrencyMax,
           // 推理类模型生成长 JSON（如漫画分镜）可能超过 2 分钟，文本路由放宽超时
           timeoutMs: 300_000,
         });
@@ -198,8 +227,14 @@ export class ChannelService {
               : {}),
           },
         });
-        textRoutes.push({ config, model: bundle.text!.model, text: bundle.text! });
-        if (!visualQuality && bundle.visualQuality) visualQuality = bundle.visualQuality;
+        textRoutes.push({
+          config,
+          model: bundle.text!.model,
+          text: limitTextModel(bundle.text!, concurrencyGate),
+        });
+        if (!visualQuality && bundle.visualQuality) {
+          visualQuality = limitVisualQualityModel(bundle.visualQuality, concurrencyGate);
+        }
       }
       if (row.type === "image" && row.imageModel) {
         const config: ProviderRouteConfig = compatibleRoute({
@@ -208,7 +243,7 @@ export class ChannelService {
           apiKeyRef: `channel:${row.id}`,
           imageModel: row.imageModel,
           maxAttempts: row.maxAttempts,
-          imageConcurrencyMax: row.imageConcurrencyMax ?? undefined,
+          concurrencyMax,
         });
         const bundle = createOpenAICompatProvider({
           config,
@@ -230,7 +265,11 @@ export class ChannelService {
             text: { imageInput: false, structuredOutput: false },
           },
         });
-        imageRoutes.push({ config, model: bundle.image!.model, image: bundle.image! });
+        imageRoutes.push({
+          config,
+          model: bundle.image!.model,
+          image: limitImageModel(bundle.image!, concurrencyGate),
+        });
       }
     }
 
@@ -265,6 +304,7 @@ export async function autoImportFromEnv(service: ChannelService): Promise<number
       aspectRatioParam: "aspect_ratio",
       responseFormat: "b64_json",
       maxAttempts: 3,
+      concurrencyMax: 0,
       imageEditSupport: false,
     });
     imported += 1;
@@ -280,6 +320,7 @@ export async function autoImportFromEnv(service: ChannelService): Promise<number
       responseFormat: (process.env.IMAGE_RESPONSE_FORMAT as "url" | "b64_json") ?? "b64_json",
       resolution: process.env.IMAGE_RESOLUTION,
       maxAttempts: 3,
+      concurrencyMax: 0,
       imageEditSupport: false,
     });
     imported += 1;

@@ -31,8 +31,8 @@ export function ChannelForm({
   const [imageEditSupport, setImageEditSupport] = useState(
     isNew ? false : (editing as ChannelView).imageEditSupport,
   );
-  const [imageConcurrencyMax, setImageConcurrencyMax] = useState<string>(
-    isNew ? "" : String((editing as ChannelView).imageConcurrencyMax ?? ""),
+  const [concurrencyMax, setConcurrencyMax] = useState<string>(
+    isNew ? "0" : String((editing as ChannelView).concurrencyMax),
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,15 +48,13 @@ export function ChannelForm({
         baseUrl,
         ...(apiKey ? { apiKey } : {}),
         ...(type === "text" ? { textModel: model } : { imageModel: model }),
+        concurrencyMax: Math.max(0, Number.parseInt(concurrencyMax, 10) || 0),
       };
       if (type === "image") {
         payload.aspectRatioParam = aspectRatioParam;
         payload.responseFormat = responseFormat;
         payload.imageEditSupport = imageEditSupport;
         if (resolution) payload.resolution = resolution;
-        const parsedConcurrency = Number.parseInt(imageConcurrencyMax, 10);
-        payload.imageConcurrencyMax =
-          Number.isFinite(parsedConcurrency) && parsedConcurrency >= 1 ? parsedConcurrency : null;
       }
       const response = isNew
         ? await fetch("/api/channels", {
@@ -152,6 +150,22 @@ export function ChannelForm({
             />
           </div>
 
+          <div>
+            <span className="field-label">模型调用并发上限（0 = 不限制）</span>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={concurrencyMax}
+              onChange={(event) => setConcurrencyMax(event.target.value)}
+              placeholder="0"
+              className="field-input mt-1 w-40"
+            />
+            <p className="mt-1 font-mono text-[10px] text-ink-faint">
+              仅限制此渠道的同时调用数；默认 0，不限制文本或图片模型并发。
+            </p>
+          </div>
+
           {type === "image" && (
             <>
             <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -163,21 +177,6 @@ export function ChannelForm({
               />
               支持图片编辑（图生图）——漫画角色一致性、参考图生成将优先使用该渠道
             </label>
-            <div>
-              <span className="field-label">图片生成并发（1–16，留空使用全局默认）</span>
-              <input
-                type="number"
-                min={1}
-                max={16}
-                value={imageConcurrencyMax}
-                onChange={(event) => setImageConcurrencyMax(event.target.value)}
-                placeholder="全局默认"
-                className="field-input mt-1 w-40"
-              />
-              <p className="mt-1 font-mono text-[10px] text-ink-faint">
-                该渠道同时进行的图片生成请求数上限；实际并发 = min(请求值, 服务器上限, 本渠道上限)
-              </p>
-            </div>
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <span className="field-label">比例参数风格</span>

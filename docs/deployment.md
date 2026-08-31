@@ -26,13 +26,11 @@ aai-app（Node.js 22、非 root、/data 持久卷）
 | 项目 | 初始值 | 说明 |
 | --- | ---: | --- |
 | 应用容器内存上限 | 4G | 给 PostgreSQL、1Panel、系统和文件缓存留出余量 |
-| 图片 API 默认并发 | 2 | 图片生成主要等待外部 Provider，但后续仍有本地解码/落盘 |
-| 图片 API 服务器上限 | 4 | 用户请求值、Provider 上限和该值取最小值 |
-| Sharp 后处理并发 | 2 | 防止大图合成时内存峰值过高 |
-| 进程内 Job Runner | 2 | 当前单容器执行模型 |
+| 模型渠道并发 | 0（不限制） | 文本和图片渠道分别设置；只有后台渠道正整数上限会生效 |
+| 进程内 Job Runner | 不限制任务数 | 模型调用仍统一经过渠道级并发门 |
 | 文字确定性渲染 | 默认关闭 | 默认走模型原生中文图片；需要精确文字时按 Run 开启 |
 
-先用上述值完成真实链路测试，再根据 docker stats、Provider 限流、图片尺寸和队列等待时间调整。不要一开始就把 24G 内存全部分配给应用，也不要把并发简单设置成 CPU 核数的数倍。
+先以渠道默认 `0` 完成真实链路测试，再根据 Provider 429、响应时间和调用合同，按渠道设置正整数上限。容器仍保留 4G 内存限制，并通过页面数、分辨率、重试次数和资产落盘控制本地资源。
 
 ## 2. 1Panel 和服务器前置检查
 
@@ -202,12 +200,6 @@ IMAGE_MODEL=grok-imagine-image-2.0
 IMAGE_ASPECT_RATIO_PARAM=aspect_ratio
 IMAGE_RESPONSE_FORMAT=url
 # IMAGE_RESOLUTION=2k
-
-# 4 核服务器起步并发
-IMAGE_GENERATION_CONCURRENCY_DEFAULT=2
-IMAGE_GENERATION_CONCURRENCY_MAX=4
-IMAGE_POSTPROCESS_CONCURRENCY_MAX=2
-JOB_RUNNER_CONCURRENCY=2
 
 # 应用端口固定为 1235
 PORT=1235
@@ -379,7 +371,7 @@ curl -fsS https://<你的域名>/api/health
 - 模型名与 Provider 实际支持的模型一致。
 - 图片返回 url 时，服务必须能够立即下载并保存到自己的 /data。
 - 图片返回 b64_json 时，服务直接解码并保存。
-- 先以请求并发 1 生成一套最小内容，确认成功后再测试并发 2。
+- 渠道“模型调用并发上限”保持 `0` 即不限制；只有外部网关明确需要时才填写正整数。
 - 默认先使用 native 原生中文图片模式；需要像素级准确标题、价格、规格或 CTA 时，再在本次 Run 开启 deterministic 文字确定性渲染。
 - 真实模型生成会产生费用，先用低额度测试账号和短主题。
 
@@ -503,8 +495,8 @@ curl -fsS http://127.0.0.1:1235/api/health
 | Docker 构建提示字体目录不存在 | 构建日志和 `scripts/fetch-fonts.sh` | 旧版本未在构建阶段下载字体；更新到包含自动下载的版本后重新构建 |
 | 健康正常但显示 Mock | 设置页渠道列表 | TEXT_*/IMAGE_* 未自动导入，或渠道被禁用 |
 | 渠道密钥解密失败 | APP_SECRET 是否与录入时一致 | 更换了主密钥或迁移时未带旧密钥 |
-| 任务一直排队 | Run/Job 状态、Provider 限流、docker stats | 外部接口慢、并发上限过低或 Provider 限流 |
-| 大图生成后 OOM | docker stats、容器退出码、图片分辨率 | 后处理并发过高；先把默认并发降到 1 |
+| 任务一直排队 | Run/Job 状态、渠道并发配置、Provider 限流 | 外部接口慢、渠道上限过低或 Provider 限流 |
+| 大图生成后 OOM | docker stats、容器退出码、图片分辨率 | 分辨率或单次页数过高；先降低分辨率/页数，必要时给图片渠道设置正整数上限 |
 | 支付状态异常 | 订单、回调验签、点数流水 | 域名回调错误；生产不会启用 mock 支付 |
 | 重启后图片丢失 | docker inspect aai-app 的 Mounts | 误用了临时容器或执行了 down -v |
 
@@ -522,7 +514,7 @@ curl -fsS http://127.0.0.1:1235/api/health
 - [ ] /api/health 返回 ok: true、database: "ok"。
 - [ ] 已完成一次登录、渠道连通性和低额度真实生成测试。
 - [ ] native 原生中文模式和 deterministic 确定性文字兜底各抽样验证。
-- [ ] 已记录应用版本、并发配置、Provider 响应时间、CPU、内存、磁盘和错误日志。
+- [ ] 已记录应用版本、渠道并发配置、Provider 响应时间、CPU、内存、磁盘和错误日志。
 - [ ] 已知 infra/verify-deployment.sh 默认不调用真实模型，真实烟测必须显式授权。
 
 ## 11. 端口、目录和安全命令速查

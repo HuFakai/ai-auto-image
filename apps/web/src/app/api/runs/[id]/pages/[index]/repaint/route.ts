@@ -107,18 +107,15 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     await runtime.billing.reserveRunCredits(user.id, id, 1);
     reserved = true;
 
-    // 图片编辑调用必须套 imageApiSemaphore 并发信号量（防止绕过并发上限），
-    // 并加 120s 超时与请求取消信号组合（Node ≥ 20 支持 AbortSignal.any）。
-    const images = await runtime.imageApiSemaphore.run(async () => {
-      const timeoutSignal = AbortSignal.timeout(120_000);
-      const signal = request.signal ? AbortSignal.any([request.signal, timeoutSignal]) : timeoutSignal;
-      return route.image.edit!({
-        prompt: `${parsed.data.prompt}。只修改 Mask 指示的区域，区域外内容必须保持原样。`,
-        aspectRatio: input.aspectRatio,
-        baseImage: { base64: sourceBuffer.toString("base64") },
-        maskBase64: mask.toString("base64"),
-        signal,
-      });
+    // 渠道模型实例已统一绑定渠道级并发门；这里仅组合超时与客户端取消信号。
+    const timeoutSignal = AbortSignal.timeout(120_000);
+    const signal = request.signal ? AbortSignal.any([request.signal, timeoutSignal]) : timeoutSignal;
+    const images = await route.image.edit!({
+      prompt: `${parsed.data.prompt}。只修改 Mask 指示的区域，区域外内容必须保持原样。`,
+      aspectRatio: input.aspectRatio,
+      baseImage: { base64: sourceBuffer.toString("base64") },
+      maskBase64: mask.toString("base64"),
+      signal,
     });
     const image = images[0]!;
 
@@ -165,4 +162,3 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     }
   }
 }
-

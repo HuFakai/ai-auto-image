@@ -38,6 +38,7 @@ const route = {
   imageModel: "image-1",
   timeoutMs: 1000,
   maxAttempts: 1,
+  concurrencyMax: 0,
 };
 
 describe("createOpenAICompatProvider text model", () => {

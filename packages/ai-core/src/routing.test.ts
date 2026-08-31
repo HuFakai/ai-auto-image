@@ -12,6 +12,7 @@ function route(id: string, maxAttempts = 2): { config: ProviderRouteConfig; mode
       apiKeyRef: "TEST_KEY",
       timeoutMs: 1000,
       maxAttempts,
+      concurrencyMax: 0,
     },
     model: "test-model",
   };

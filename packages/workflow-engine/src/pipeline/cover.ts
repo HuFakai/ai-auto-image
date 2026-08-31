@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { toAiError, withModelFallbacks, type Semaphore } from "@aai/ai-core";
+import { toAiError, withModelFallbacks } from "@aai/ai-core";
 import {
   CoverPlanSchema,
   type CoverCandidatePlan,
@@ -37,7 +37,6 @@ export interface CoverDeps {
   assetStore: AssetStore;
   textRoutes: TextRoute[];
   imageRoutes: ImageRoute[];
-  imageApiSemaphore: Semaphore;
   assetsDir: string;
   /** 手动封面作业使用：Provider 调用前预留候选图额度 */
   reserveImageCredits?: (runId: string, amount: number) => Promise<void>;
@@ -269,8 +268,7 @@ export async function generateCoverCandidates(
     const failedVariants: number[] = [];
     let produced = 0;
 
-    for (let i = 0; i < plan.candidates.length; i++) {
-      const candidate = plan.candidates[i]!;
+    await Promise.all(plan.candidates.map(async (candidate, i) => {
       const variant = i + 1;
       try {
         const imagePrompt = buildCoverImagePrompt(input, candidate, mode);
@@ -279,14 +277,12 @@ export async function generateCoverCandidates(
           signal: ctx.signal,
           run: async (fallbackRoute) => {
             const route = deps.imageRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
-            return deps.imageApiSemaphore.run(async () => {
-              ctx.onProgress();
-              return route.image.generate({
-                prompt: imagePrompt,
-                aspectRatio: input.aspectRatio,
-                n: 1,
-                signal: ctx.signal,
-              });
+            ctx.onProgress();
+            return route.image.generate({
+              prompt: imagePrompt,
+              aspectRatio: input.aspectRatio,
+              n: 1,
+              signal: ctx.signal,
             });
           },
           onAttempt: async (record) => {
@@ -377,7 +373,7 @@ export async function generateCoverCandidates(
           error: aiError.message.slice(0, 300),
         });
       }
-    }
+    }));
 
     await deps.runRepo.succeedNode(node.id, {
       outputRef: JSON.stringify({ produced, failedVariants, variants: plan.candidates.length }),

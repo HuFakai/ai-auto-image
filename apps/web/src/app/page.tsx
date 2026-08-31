@@ -40,8 +40,6 @@ export default async function HomePage() {
     runs: initialRuns,
     providerLabel: runtime.config.providerLabel,
     providerMode: runtime.config.providerMode,
-    serverMaxConcurrency: runtime.config.serverMaxConcurrency,
-    defaultConcurrency: runtime.config.defaultConcurrency,
   };
 
   return (
@@ -57,7 +55,7 @@ export default async function HomePage() {
             渠道在线 · {initial.providerLabel}
           </span>
           <span className="inline-flex items-center rounded-full border border-line px-2.5 py-[3px] font-mono text-[11px] text-ink-soft">
-            并发 {initial.serverMaxConcurrency} 路
+            渠道并发按后台配置
           </span>
         </div>
       </header>

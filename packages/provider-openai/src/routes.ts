@@ -14,6 +14,7 @@ export function openaiRoute(overrides: Partial<ProviderRouteConfig> = {}): Provi
     imageModel: "gpt-image-2",
     timeoutMs: DEFAULT_TIMEOUT_MS,
     maxAttempts: 3,
+    concurrencyMax: 0,
     ...overrides,
   };
 }
@@ -29,6 +30,7 @@ export function xaiRoute(overrides: Partial<ProviderRouteConfig> = {}): Provider
     imageModel: "grok-imagine-image-2.0",
     timeoutMs: DEFAULT_TIMEOUT_MS,
     maxAttempts: 3,
+    concurrencyMax: 0,
     ...overrides,
   };
 }
@@ -78,5 +80,6 @@ export function compatibleRoute(
     timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     maxAttempts: input.maxAttempts ?? 2,
     headers: input.headers,
+    concurrencyMax: input.concurrencyMax ?? 0,
   };
 }

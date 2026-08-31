@@ -87,7 +87,7 @@ authenticated_run_smoke() {
   run_id=$(curl -fsS -X POST "http://127.0.0.1:${APP_PORT}/api/runs" \
     -H "Cookie: ${VERIFY_COOKIE}" \
     -H "content-type: application/json" \
-    -d '{"topic":"部署验证：真实生成烟测","requestedImageConcurrency":1,"textRenderingMode":"deterministic"}' \
+    -d '{"topic":"部署验证：真实生成烟测","textRenderingMode":"deterministic"}' \
     | sed -nE 's/.*"runId":"([^"]+)".*/\1/p')
   if [ -z "$run_id" ]; then
     say "FAIL  创建运行失败"; FAIL=$((FAIL+1)); echo "- ❌ 创建运行失败" >> "$REPORT"; return 1

@@ -46,7 +46,8 @@ export interface ChannelView {
   resolution: string | null;
   enabled: boolean;
   maxAttempts: number;
-  imageConcurrencyMax: number | null;
+  /** 模型调用并发上限；0 表示不限制 */
+  concurrencyMax: number;
   imageEditSupport: boolean;
   lastTestOk: boolean | null;
   lastTestAt: number | null;
@@ -89,7 +90,7 @@ export interface RunDetailPayload {
   errorSummary: string | null;
   createdAt: number;
   input: CreateRunInput;
-  concurrency: { requested: number; serverMax: number; effective: number; postprocessMax: number } | null;
+  concurrency: { channels: Array<{ id: string; type: "text" | "image"; max: number }> } | null;
   totals: { promptTokens: number; completionTokens: number; totalTokens: number; images: number; costUsd: number };
   job: { id: string; status: string; attempts: number; recoveries: number } | null;
   nodes: Array<{ nodeName: string; status: string; attempt: number }>;
@@ -126,6 +127,4 @@ export interface RunsListPayload {
   runs: RunListItem[];
   providerLabel: string;
   providerMode: "mock" | "partial" | "real";
-  serverMaxConcurrency: number;
-  defaultConcurrency: number;
 }

@@ -115,6 +115,8 @@ export function ChannelsView({ initial }: { initial: ChannelsPayload }) {
                       {channel.baseUrl.replace(/^https?:\/\//, "")}
                       {" · "}
                       {channel.apiKeyHint}
+                      {" · "}
+                      并发 {channel.concurrencyMax === 0 ? "不限制" : channel.concurrencyMax}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <button

@@ -241,7 +241,8 @@ export const channels = pgTable(
     enabled: integer("enabled").notNull().default(1),
     sortOrder: bigint("sort_order", { mode: "number" }).notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(3),
-    imageConcurrencyMax: integer("image_concurrency_max"),
+    /** 历史物理列名保留兼容；业务语义为文本/图片通用渠道并发，0 表示不限制 */
+    concurrencyMax: integer("image_concurrency_max").notNull().default(0),
     imageEditSupport: integer("image_edit_support").notNull().default(0),
     lastTestOk: integer("last_test_ok"),
     lastTestAt: epochColumn("last_test_at"),

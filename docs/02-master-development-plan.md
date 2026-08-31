@@ -124,7 +124,7 @@ packages/
 Docker Host
   └─ app container
        ├─ Web/API
-       ├─ bounded Job Runner（默认并发 1）
+       ├─ in-process Job Runner（任务不设全局并发）
        ├─ SQLite /data/app.db
        └─ Assets /data/assets
 ```
@@ -133,8 +133,7 @@ Docker Host
 - 生产镜像使用多阶段构建，不包含源码缓存、测试工具、Chromium 和开发依赖。
 - SQLite、资产、导出文件全部挂载到 `/data` 持久卷，并配置服务器定时备份。
 - SQLite 开启 WAL、`busy_timeout` 和外键；写任务保持短事务。
-- 图片生成并发允许用户按项目或本次 Run 自定义；实际并发取用户值、服务器上限和 Provider 限流上限中的最小值。
-- 图片 API 调用并发和 Sharp 本地后处理并发分别控制，避免多个大图同时解码造成内存峰值。
+- 文本与图片模型调用只服从后台模型渠道配置；默认 `0` 不限制，正整数在所有用户和任务间共享。
 - 不常驻运行浏览器、MinIO、Redis、PostgreSQL 等额外服务。
 - 健康检查、日志轮转、磁盘空间阈值和优雅停机属于首期部署必备能力。
 - 中期迁移后再拆分 `web`、`worker`、`postgres` 和 `redis` 容器。
@@ -143,8 +142,7 @@ Docker Host
 
 - 空闲状态应用内存目标不高于 250 MB。
 - 单个高清页面合成期间容器峰值内存目标不高于 700 MB。
-- 默认只允许一个图片合成任务并行执行。
-- 设置 Sharp/libvips 缓存和并发上限，任务完成后及时释放大 Buffer。
+- 任务完成后及时释放大 Buffer，并通过容器内存、页面数和单图尺寸约束控制资源风险。
 - 不在服务器本地运行大模型，文本和图片生成均通过远程 API。
 
 ### 5.4 数据库与队列升级时点
@@ -201,7 +199,7 @@ Docker Host
 3. 提取事实、卖点、引用和风险项。
 4. 生成平台文案候选和 Storyboard。
 5. 确定 Brand Kit、视觉风格和页面模板。
-6. 按用户并发设置生成带原生中文的最终图片，或在确定性模式下生成无文字视觉素材。
+6. 并行生成带原生中文的最终图片，或在确定性模式下生成无文字视觉素材；仅服从渠道级并发门。
 7. 原生模式直接保存模型图片；确定性模式使用 Render Engine 合成文字与素材。
 8. 原生模式检查文字准确性，确定性模式检查文字溢出和布局；两种模式都执行事实、对比度和视觉一致性检查。
 9. 自动修复可确定问题，标记需要人工处理的问题。
@@ -282,32 +280,21 @@ SlidePlan + Theme + Assets
 
 原生模式不执行上述文字合成，只做流式下载、必要的尺寸/格式校验、元数据登记和可选轻量压缩。
 
-### 9.3 图片并发
+### 9.3 模型渠道并发
 
 ```ts
-type GenerationConcurrency = {
-  requested: number;
-  serverMax: number;
-  providerMax?: number;
-  effective: number;
-  postprocessMax: number;
+type ChannelConcurrency = {
+  channelId: string;
+  type: "text" | "image";
+  max: number; // 0 = unlimited
 };
 ```
 
-- 用户可以在设置页和生成前配置图片并发。
-- 默认值为 1，初期服务器上限建议为 4，可通过环境变量调整。
-- 有效并发为 `min(requested, serverMax, providerMax)`。
-- Provider 返回 429 时降低并发并指数退避，不把失败请求无限重排。
+- 只在“管理后台 → 模型渠道”配置文本或图片渠道并发。
+- 默认值为 `0`，表示不限制；正整数表示该渠道在所有用户和任务之间共享的调用上限。
+- 不再提供用户请求并发、服务器全局图片并发、后处理并发或 Runner 环境变量上限。
+- Provider 返回 429 时仍按错误策略指数退避，不把失败请求无限重排。
 - 图片响应采用流式写盘，避免并发任务把完整大图同时保存在内存中。
-- 本地后处理默认并发 1，即使图片 API 并发更高也分批进入 Sharp。
-
-建议环境变量：
-
-```text
-IMAGE_GENERATION_CONCURRENCY_DEFAULT=1
-IMAGE_GENERATION_CONCURRENCY_MAX=4
-IMAGE_POSTPROCESS_CONCURRENCY_MAX=1
-```
 
 ## 10. 工作流状态
 
@@ -357,8 +344,7 @@ DRAFT
 - 预览图与高清导出分级处理。
 - 参考图在上传前压缩并限制数量。
 - 相同输入和 Prompt 版本允许缓存。
-- 图片生成并发默认 1，允许用户自定义；服务器配置保留不可突破的安全上限。
-- 本地图片后处理并发独立控制，默认 1。
+- 文本和图片模型默认不限并发；需要保护特定网关时在渠道中设置正整数上限。
 - 生产镜像不包含 Chromium，避免浏览器常驻和大体积依赖。
 
 ### 12.3 安全

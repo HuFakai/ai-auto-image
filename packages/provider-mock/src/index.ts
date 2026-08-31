@@ -59,7 +59,7 @@ const MOCK_ROUTE = {
   imageModel: "mock-image",
   timeoutMs: 30_000,
   maxAttempts: 1,
-  imageConcurrencyMax: 4,
+  concurrencyMax: 0,
 };
 
 /** 可被 AbortSignal 中断的延迟：取消语义在 Mock 中与真实 HTTP 调用一致 */

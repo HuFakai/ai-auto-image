@@ -10,7 +10,7 @@
 - PostgreSQL 方言 Schema、生产远程 PostgreSQL、无连接串时的 PGlite 测试/快速运行路径。
 - OpenAI-compatible、OpenAI、xAI/Grok、Mock Provider 抽象和文本/图片独立渠道管理。
 - native 原生中文图片（默认）与 deterministic 确定性文字渲染（显式开启、默认关闭）双模式。
-- 用户自定义图片并发、服务器/Provider 限流和独立后处理并发。
+- 文本/图片模型渠道级并发控制，默认 `0` 不限制；所有用户与任务共享渠道正整数上限。
 - 9 种内容类型、知识卡片/漫画两条管线、封面候选、版式、平台适配、单页返修、局部重绘 API 和 ZIP 导出。
 - 暗室暗房 UI、Brand Kit、用户登录注册、资源隔离、套餐/点数/订阅、支付订单与管理后台第一版。
 
