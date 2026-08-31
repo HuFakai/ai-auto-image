@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getRuntime } from "@/server/runtime";
 import { requireAdmin } from "@/server/auth";
 import { decryptApiKey, encryptApiKey, getEncryptionKey } from "@/server/channel-crypto";
+import { AlipayClient } from "@/server/pay/providers";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +74,14 @@ export async function PUT(request: Request) {
       if (submitted === null || submitted === "") delete currentSecrets[field];
       else currentSecrets[field] = submitted;
     }
+  }
+  if (
+    body.channel === "alipay" &&
+    currentSecrets.appPrivateKey &&
+    currentSecrets.alipayPublicKey &&
+    !AlipayClient.verifyKeyPair(currentSecrets.appPrivateKey, currentSecrets.alipayPublicKey)
+  ) {
+    return NextResponse.json({ error: "支付宝应用私钥与支付宝公钥不匹配，或密钥格式无法解析" }, { status: 400 });
   }
   secretsEncrypted = Object.keys(currentSecrets).length > 0 ? encryptApiKey(getEncryptionKey(dataDir()), JSON.stringify(currentSecrets)) : null;
 

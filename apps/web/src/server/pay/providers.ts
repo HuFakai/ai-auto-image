@@ -17,8 +17,20 @@ function alipayTimestamp(date = new Date()): string {
   return shifted.toISOString().replace("T", " ").slice(0, 19);
 }
 
-/** 按 key 排序拼 k=v&k=v（不 URL 编码；值为空则跳过）——支付宝签名/验签原文 */
-function alipaySignSource(params: Record<string, string>): string {
+/**
+ * API 请求签名原文：按 key 排序拼 k=v&k=v（不 URL 编码；值为空则跳过）。
+ * OpenAPI 2.0 只剔除 sign，sign_type 必须参与请求签名。
+ */
+function alipayRequestSignSource(params: Record<string, string>): string {
+  return Object.keys(params)
+    .filter((key) => key !== "sign" && params[key] !== undefined && params[key] !== "")
+    .sort()
+    .map((key) => `${key}=${params[key]}`)
+    .join("&");
+}
+
+/** 订单异步通知验签原文：支付宝 V1 通知规范会同时剔除 sign 与 sign_type。 */
+function alipayNotifySignSource(params: Record<string, string>): string {
   return Object.keys(params)
     .filter((key) => key !== "sign" && key !== "sign_type" && params[key] !== undefined && params[key] !== "")
     .sort()
@@ -66,6 +78,17 @@ export interface AlipayPrecreateResult {
 export class AlipayClient {
   constructor(private readonly config: AlipayConfig) {}
 
+  /** 仅在服务端做密钥配对自检，不上传或记录任何密钥内容。 */
+  static verifyKeyPair(appPrivateKey: string, alipayPublicKey: string): boolean {
+    const probe = `ai-auto-image-key-check:${randomBytes(16).toString("hex")}`;
+    try {
+      const signature = rsaSha256Sign(appPrivateKey, probe);
+      return rsaSha256Verify(alipayPublicKey, probe, signature);
+    } catch {
+      return false;
+    }
+  }
+
   private systemParams(bizContent: string, notifyUrl?: string): Record<string, string> {
     const params: Record<string, string> = {
       app_id: this.config.appId,
@@ -84,7 +107,7 @@ export class AlipayClient {
   private async post(method: string, bizContent: Record<string, unknown>, notifyUrl?: string) {
     const params = this.systemParams(JSON.stringify(bizContent), notifyUrl);
     params.method = method;
-    params.sign = rsaSha256Sign(this.config.appPrivateKey, alipaySignSource(params));
+    params.sign = rsaSha256Sign(this.config.appPrivateKey, alipayRequestSignSource(params));
     const body = new URLSearchParams(params);
     const response = await fetch(this.config.gateway, {
       method: "POST",
@@ -137,7 +160,7 @@ export class AlipayClient {
   static verifyNotify(params: Record<string, string>, alipayPublicKey: string): boolean {
     const sign = params["sign"];
     if (!sign) return false;
-    return rsaSha256Verify(alipayPublicKey, alipaySignSource(params), sign);
+    return rsaSha256Verify(alipayPublicKey, alipayNotifySignSource(params), sign);
   }
 }
 
