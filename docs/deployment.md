@@ -260,6 +260,8 @@ ALIPAY_GATEWAY=https://openapi.alipay.com/gateway.do
 
 如果使用沙箱，管理后台的网关改为支付宝当前沙箱环境提供的网关地址；业务域名和通知地址仍然按实际可公网访问的 HTTPS 域名配置。支付宝官方的 [alipay.trade.precreate 接口文档](https://developer.alibaba.com/docs/api.htm?apiId=862&docType=4)中，正式网关为 `https://openapi.alipay.com/gateway.do`，`notify_url` 是支付宝服务器通知商户服务器的 HTTP/HTTPS 地址；[用户信息授权文档](https://developer.alibaba.com/docs/doc.htm?articleId=105656&docType=1&treeId=346)中的授权回调则用于接收授权结果，需与授权请求中的 `redirect_uri` 匹配。
 
+当前项目调用订单码支付时会固定传入支付宝要求的 `product_code=QR_CODE_OFFLINE`，不需要在管理页额外填写。若服务器仍运行旧镜像，可能会看到 `40002 Invalid Arguments`；更新代码并重新构建后再测试。新的错误信息还会保留支付宝返回的 `sub_code` 和 `sub_msg`，便于继续定位具体参数。
+
 ### 4.5 不把服务器密钥带进镜像
 
 Compose 使用根目录 .env 作为容器运行时环境文件；同时 .dockerignore 已排除 .env，避免密钥进入 Docker 构建上下文。请确认：

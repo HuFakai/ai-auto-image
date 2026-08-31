@@ -103,13 +103,24 @@ export class AlipayClient {
         out_trade_no: input.orderNo,
         total_amount: (input.amountCents / 100).toFixed(2),
         subject: input.subject,
+        // 订单码支付的产品码是支付宝接口必填项，不能省略。
+        product_code: "QR_CODE_OFFLINE",
         timeout_express: `${Math.max(1, input.timeoutMinutes)}m`,
       },
       input.notifyUrl,
     );
-    const result = payload["alipay_trade_precreate_response"] as { code?: string; msg?: string; sub_msg?: string; qr_code?: string; trade_no?: string } | undefined;
+    const result = payload["alipay_trade_precreate_response"] as {
+      code?: string;
+      msg?: string;
+      sub_code?: string;
+      sub_msg?: string;
+      qr_code?: string;
+      trade_no?: string;
+    } | undefined;
     if (!result || result.code !== ALIPAY_SUCCESS || !result.qr_code) {
-      throw new Error(`alipay precreate failed: ${result?.code ?? "?"} ${result?.msg ?? ""} ${result?.sub_msg ?? ""}`.trim());
+      throw new Error(
+        `alipay precreate failed: ${result?.code ?? "?"} ${result?.msg ?? ""} ${result?.sub_code ?? ""} ${result?.sub_msg ?? ""}`.trim(),
+      );
     }
     return { qrCode: result.qr_code, tradeNo: result.trade_no ?? null };
   }
