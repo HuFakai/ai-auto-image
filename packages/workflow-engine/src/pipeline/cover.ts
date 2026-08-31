@@ -16,6 +16,7 @@ import { buildCoverPlanPrompt, buildStyleHint } from "../prompts";
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import type { ImageRoute, TextRoute } from "./knowledge-cards";
+import { releaseReservedCredits } from "./credit-reservation";
 
 /**
  * 封面工序（增强能力）：
@@ -38,6 +39,10 @@ export interface CoverDeps {
   imageRoutes: ImageRoute[];
   imageApiSemaphore: Semaphore;
   assetsDir: string;
+  /** 手动封面作业使用：Provider 调用前预留候选图额度 */
+  reserveImageCredits?: (runId: string, amount: number) => Promise<void>;
+  /** 手动封面作业结束后释放未成功产出的额度 */
+  releaseImageCredits?: (runId: string) => Promise<void>;
 }
 
 interface CoverStageCtx {
@@ -220,6 +225,34 @@ export async function generateCoverCandidates(
     return { skipped: true, produced: 0, failedVariants: [] };
   }
 
+  // 结算钩子可能在图片已落盘后失败；复用同一节点和候选资产重试结算，
+  // 避免恢复时重新调用 3 次图片 Provider。
+  const failedCoverNode = existingNodes.find(
+    (row) => row.nodeName === COVER_NODE_NAME && row.status === "failed" && row.outputRef,
+  );
+  if (failedCoverNode?.outputRef) {
+    try {
+      const output = JSON.parse(failedCoverNode.outputRef) as { produced?: number; failedVariants?: number[] };
+      const coverAssets = (await deps.assetRepo.listByRun(runId)).filter(
+        (asset) => asset.kind === "cover" && asset.nodeRunId === failedCoverNode.id,
+      );
+      const produced = output.produced;
+      if (typeof produced === "number" && Number.isInteger(produced) && produced > 0 && coverAssets.length === produced) {
+        await deps.runRepo.succeedNode(failedCoverNode.id, {
+          outputRef: failedCoverNode.outputRef,
+          images: produced,
+        });
+        return {
+          skipped: false,
+          produced,
+          failedVariants: output.failedVariants ?? [],
+        };
+      }
+    } catch {
+      // 输出不完整或资产不匹配时走正常的封面重试路径。
+    }
+  }
+
   const mode = input.textRenderingMode === "deterministic" ? "deterministic" : "native";
   const node = await deps.runRepo.createNodeRun(runId, COVER_NODE_NAME);
   await deps.runRepo.startNode(node.id, {
@@ -373,7 +406,7 @@ export async function runCoverStage(
   try {
     await generateCoverCandidates(deps, { runId, input, storyboard, ctx });
   } catch (error) {
-    if (ctx.signal.aborted) throw error;
+    if (ctx.signal.aborted || (error instanceof Error && error.name === "BillingCaptureError")) throw error;
     logger.warn("cover stage failed (non-blocking)", { runId, error: String(error).slice(0, 300) });
   }
 }
@@ -388,11 +421,25 @@ export function registerCoverPipeline(runner: JobRunner, deps: CoverDeps): void 
     const run = await deps.runRepo.require(ctx.runId);
     const input = JSON.parse(run.inputJson) as CreateRunInput;
     const storyboard = await loadStoryboard(deps, ctx.runId);
-    await generateCoverCandidates(deps, {
-      runId: ctx.runId,
-      input,
-      storyboard,
-      ctx: { signal: ctx.signal, onProgress: ctx.onProgress },
-    });
+    let reserved = false;
+    try {
+      if (deps.reserveImageCredits) {
+        // CoverPlanSchema 固定恰好 3 个候选；失败候选会在 finally 中释放。
+        await deps.reserveImageCredits(ctx.runId, 3);
+        reserved = true;
+      }
+      await generateCoverCandidates(deps, {
+        runId: ctx.runId,
+        input,
+        storyboard,
+        ctx: { signal: ctx.signal, onProgress: ctx.onProgress },
+      });
+    } finally {
+      if (reserved) {
+        await releaseReservedCredits(deps, ctx.runId, (releaseError) =>
+          logger.error("release cover credits failed", { runId: ctx.runId, error: String(releaseError) }),
+        );
+      }
+    }
   });
 }

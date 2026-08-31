@@ -1,208 +1,147 @@
 # 开发文档：环境配置与启动指南
 
-> 本文档说明如何在本地与服务器上配置、启动和验证 AI Auto Image 项目（阶段 0）。
-> 架构与阶段规划见 [总体规划](./02-master-development-plan.md) 与 [基础框架方案](./04-ai-image-framework-solution.md)。
+> 本文按当前代码（2026-08-31）编写。当前生产数据库已经是 PostgreSQL；无 `DATABASE_URL` 的本地/测试运行时使用进程内 PGlite，早期文档中的 SQLite 说明不再适用于当前运行时。
+> 产品状态与待办见 [current-status.md](./current-status.md)，当前开发顺序见 [current-roadmap.md](./current-roadmap.md)。
 
 ## 1. 环境要求
 
 | 依赖 | 版本 | 说明 |
 |---|---|---|
-| Node.js | ≥ 22（推荐 24） | 本地开发与生产运行 |
-| pnpm | ≥ 10（推荐 11） | 包管理，`corepack enable` 可自动获取 |
-| Docker | 可选 | 仅服务器部署需要 |
+| Node.js | 22+ | 与 Dockerfile 的 node:22-alpine 对齐 |
+| pnpm | 11+ | 根目录 `package.json` 固定 package manager 为 pnpm 11.8 |
+| Docker | 服务器需要 | 本轮审查机未安装，目标服务器按部署手册验证 |
 
-## 2. 快速启动（本地开发）
+## 2. 本地快速启动
 
 ```bash
-# 1. 安装依赖（workspace 全量安装）
 pnpm install
-
-# 2. 配置环境变量（模型渠道密钥）
 cp .env.example .env
-#    然后编辑 .env，填入 TEXT_* / IMAGE_* 渠道配置（见第 3 节）
-
-# 3. 下载中文字体（确定性渲染兜底需要，OFL 许可，不入 Git）
-pnpm fonts
-
-# 4. 初始化数据库（SQLite，WAL 模式，10 张表）
-pnpm db:migrate
-#    可选：插入种子数据
-pnpm db:seed
-
-# 5. 启动开发服务器（Next.js + 进程内 Job Runner）
+pnpm fonts                 # 确定性渲染和中文字体检查需要
 pnpm dev
-#    打开 http://localhost:1235
 ```
 
-启动后即可在 Studio 页面输入主题生成成套图文：
+默认打开 `http://localhost:1235`。如果 `.env` 中设置了其他 `PORT`，以该端口为准。
 
-- 输入主题 → 选择比例 / 文字模式 / 并发 → 「生成整套图文」。
-- 运行详情页实时展示节点进度、逐页显影、Token 与费用账本。
-- 未配置任何真实渠道时自动使用 Mock Provider（占位图卡，零费用）。
+当前运行时行为：
 
-## 3. 模型渠道配置
+- 未设置 `DATABASE_URL`：使用进程内 PGlite；当前 Web runtime 不把 PGlite 数据库句柄持久化到 `DATA_DIR`，适合本地快速试验和测试。
+- 设置 `DATABASE_URL`：使用 `postgres.js` 连接远程 PostgreSQL，启动时自动执行 `packages/storage/drizzle/` 中的迁移。
+- 未配置真实文本/图片渠道：可使用 Mock Provider 完成零费用占位图卡流程。
+- `native` 是默认文字模式；`deterministic` 需要显式选择，用于程序化叠加准确中文；图片 API 并发由用户请求、服务器上限和 Provider 上限共同裁剪。
 
-渠道在 **Studio「渠道设置」页**（`/settings`）管理，不再依赖环境变量：
+首次打开应用后，可在 Studio 的渠道设置中分别配置文本和图片渠道；Brand Kit、计费和支付配置分别由设置页/管理后台维护。
 
-- **文本与图片渠道分离配置**，各自支持添加多个，按顺序优先、失败逐个回退。
-- 密钥使用 AES-256-GCM 加密落库（主密钥来自 `APP_SECRET` 环境变量；未设置时自动生成并
-  持久化在 `DATA_DIR/.secret`），界面只显示末四位。
-- 每个渠道支持：启停、排序（↑↓，越靠前越优先）、编辑（密钥留空表示不变）、删除、
-  连通性测试（只读 `GET /models`，无模型调用费用）。
-- 图片渠道可按网关配置参数风格：`aspect_ratio`（grok2api）或 `size`（OpenAI 官方）、
-  返回格式 `b64_json` / `url`、可选分辨率透传。
-- 保存立即生效，无需重启；正在运行的任务继续使用启动时的渠道。
-- API：`GET/POST /api/channels`、`PATCH/DELETE /api/channels/:id`、
-  `POST /api/channels/:id/test`、`POST /api/channels/reorder`。
+## 3. 环境变量
 
-### 3.1 环境变量的角色
+完整模板见根目录 `.env.example`。常用配置如下：
 
-- **自动导入**：首次启动时若渠道表为空且 `.env` 中有 `TEXT_* / IMAGE_*` 配置，
-  会自动导入为两条渠道（名称带「自动导入」标记）。之后删除该渠道请同时清理 `.env`，
-  否则重启会再次导入。
-- **回退**：某侧未配置任何启用渠道时，该侧自动使用 Mock Provider（占位图卡，零费用）；
-  配置了真实渠道的侧**不会混入 Mock**，真实调用失败不会被静默降级。
-- `OPENAI_API_KEY` / `XAI_API_KEY` 为整体渠道备选，优先级低于设置页渠道。
-
-### 3.2 已验证的网关差异（内建支持）
-
-| 网关行为 | 处理方式 |
+| 变量 | 用途 |
 |---|---|
-| WAF 拦截 `OpenAI/JS` User-Agent（403） | Wire 客户端固定 UA 为 `ai-auto-image/0.1` |
-| 图片参数用 `aspect_ratio` 而非 `size` | 渠道配置「比例参数风格 = aspect_ratio」 |
-| 响应格式需显式声明 | 渠道配置「返回格式 = b64_json」 |
-| 图片 URL 需要鉴权才能下载 | 用 `b64_json` 绕开；`url` 模式会立即流式转存 |
-| 推理模型消耗 reasoning token 导致空响应 | 结构化输出默认 `max_tokens=8192`，空响应按可重试错误指数退避 |
-| LLM 输出 1-based 页码 | Storyboard 生成后统一归一化为 0-based |
+| `DATABASE_URL` | 生产/远程开发 PostgreSQL 连接串；Docker 中必填 |
+| `REDIS_URL` | Redis 预留配置；当前进程内 Runner 不依赖它 |
+| `APP_SECRET` | 渠道密钥 AES-256-GCM 加密主密钥；生产必须固定并妥善保管 |
+| `REGISTER_ENABLED` / `REGISTER_INVITE_CODE` | 注册开关与邀请码 |
+| `TEXT_*` / `IMAGE_*` | 首次启动自动导入的文本/图片渠道配置 |
+| `OPENAI_API_KEY` / `XAI_API_KEY` | 官方 Provider 备选密钥 |
+| `DATA_DIR` / `ASSETS_DIR` / `EXPORTS_DIR` | 运行时数据、生成资产和导出文件目录 |
+| `IMAGE_GENERATION_CONCURRENCY_DEFAULT` | 未单独请求时的图片并发默认值 |
+| `IMAGE_GENERATION_CONCURRENCY_MAX` | 服务器图片 API 并发硬上限 |
+| `IMAGE_POSTPROCESS_CONCURRENCY_MAX` | Sharp/Satori 后处理并发上限 |
+| `JOB_RUNNER_CONCURRENCY` | 进程内 Job Runner 并发 |
+| `STARTER_CREDITS` | 新用户初始点数 |
+| `PAY_NOTIFY_BASE_URL` 及支付变量 | 支付宝/微信支付预下单、验签和回调 |
+
+本地模板默认图片并发为 1、上限为 4；生产 Compose 当前设置为默认 2、上限 6。实际有效图片并发为：
+
+```text
+min(用户请求并发, IMAGE_GENERATION_CONCURRENCY_MAX, Provider imageConcurrencyMax)
+```
+
+`IMAGE_POSTPROCESS_CONCURRENCY_MAX` 单独限制本地图片处理，不与远程图片请求共用同一个信号量。
 
 ## 4. 常用命令
 
 ```bash
-pnpm dev             # 开发服务器（Next.js + 进程内 Job Runner）
-pnpm build           # 全仓构建（含 Next.js standalone 产物）
-pnpm typecheck       # 全仓类型检查
-pnpm test            # 全仓测试（vitest，65 项：单测 + 集成）
-pnpm lint            # ESLint（仓库根统一执行）
-
-pnpm fonts           # 下载中文字体（Noto Sans SC，OFL）
-pnpm db:migrate      # 创建/更新 SQLite 表结构
-pnpm db:seed         # 插入种子数据（演示项目 + Prompt 版本）
-
-pnpm eval            # 评测：6 用例双模式（Mock 零费用），输出解析/渲染成功率指标
-pnpm verify:live     # 真实渠道验证：Storyboard → 原生中文出图 → 转存 → 报告
-pnpm verify:openai   # OpenAI 官方渠道验证（需 OPENAI_API_KEY）
-pnpm verify:xai      # xAI/Grok 官方渠道验证（需 XAI_API_KEY）
-
-bash infra/verify-deployment.sh   # 服务器部署验证（见 docs/deployment-checklist.md）
-```
-
-验证报告输出到 `fixtures/reports/*.json`，验证图片输出到 `data/assets/verify/`。
-
-## 5. 数据与资产目录
-
-运行时数据默认在 `apps/web/data/`（`DATA_DIR=./data` 相对于运行目录）：
-
-```text
-apps/web/data/
-  ├─ db/app.db        SQLite（WAL）；10 张表迁移由 drizzle 管理
-  ├─ assets/          生成图片（runs/{runId}/pages/page-N.png）
-  └─ exports/         导出清单（{runId}/manifest.json，含预期文案与用量）
-```
-
-重启安全：应用重启后 Job Runner 从 `jobs` 表恢复未完成任务，已成功页面不会重新生成
-（Runner 对运行中任务自动心跳续租，慢推理调用不会被误判为孤儿）。
-**运行中取消**：详情页「作废本次运行」即时中断进行中的模型调用（signal 贯穿到 HTTP 层，
-取消不触发重试，已成功页面保留）。
-**单页返修**：详情页每页可改标题/正文——native 模式重新出图（提示费用），
-deterministic 模式「重新排版」零费用；旧版本资产保留（Revision 版本链），返修后回到待审。
-**导出 ZIP**：详情页「导出 ZIP」产出按序图片 + LLM 生成的发布文案（失败降级模板）+ manifest + 发布清单。
-**长文/URL**：创建表单支持粘贴参考资料（按要点密度拆为 6–10 页）与 URL 导入（实验能力，失败降级粘贴）。
-**评审**：运行完成后可标记通过/驳回，工作台按评审状态筛选。
-**科普漫画**：创作表单选择「科普漫画」+ 可选主角设定 → 角色锚点与定妆图（文生图）→ 分镜
-（对白归属/页数一致性检查）→ 逐页生成（渠道勾选「支持图片编辑」时以定妆图为参考做图生图，
-保持角色跨页一致）→ 对白气泡程序渲染（旁白框 + 对白泡，文字可编辑）。3–6 页。
-**局部重绘**：`POST /api/runs/:id/pages/:index/repaint`（归一化 rect + prompt）——构建 Mask 调用
-图生图渠道；网关不支持 mask 时使用整页重绘（regenerate）替代。
-
-## 6. 生产部署
-
-生产部署步骤与阶段 0 验收基准见 [docs/deployment-checklist.md](./deployment-checklist.md)；
-服务器上执行 `bash infra/verify-deployment.sh` 可一键完成部署断言并输出报告。
-
-### 6.1 本机 standalone 运行
-
-```bash
+pnpm dev
+pnpm lint
+pnpm typecheck
+pnpm test
 pnpm build
-DATA_DIR=/绝对路径/data PORT=3000 \
-  node apps/web/.next/standalone/apps/web/server.js
+pnpm eval
+pnpm fonts
+pnpm db:migrate
+pnpm db:seed
+pnpm verify:live
+pnpm verify:openai
+pnpm verify:xai
 ```
 
-### 6.2 Docker（单容器，目标环境 1 vCPU / 1GB RAM）
+说明：
 
-```bash
-cd infra
-docker compose up -d
-docker compose logs -f app
-curl http://localhost:3000/api/health
-```
+- `pnpm db:migrate` 在没有 `DATABASE_URL` 时只对本次进程内 PGlite 执行迁移并退出，不会产生当前 Web runtime 可复用的本地 SQLite 文件。
+- `verify:openai` / `verify:xai` 会产生真实模型费用，必须先确认密钥、模型、预算和输出目录。
+- `pg:export` / `pg:import` 是旧 SQLite → PostgreSQL 数据导入工具，现已按当前 22 张表维护白名单、记录源库缺表并校验 JSONL 校验和；它仍不是 PostgreSQL 正式备份方案，生产备份优先使用 PG 原生备份。
 
-- 多阶段构建，镜像不含 Chromium / Playwright / 测试依赖；非 root 运行。
-- `/data` 持久卷（SQLite + 资产 + 导出），容器重建数据不丢。
-- 内置健康检查与 1GB 内存限制；并发默认 1、上限 4（`IMAGE_GENERATION_CONCURRENCY_MAX`）。
-- 密钥通过 compose 的 `${OPENAI_API_KEY}` 等注入；使用 `TEXT_* / IMAGE_*` 时在
-  `infra/docker-compose.yml` 的 `environment` 段补充对应变量。
-
-## 7. 项目结构
+## 5. 当前代码结构
 
 ```text
-apps/web/                  Next.js Studio（暗房风格 UI）+ API + 进程内 Runner
-packages/
-  shared-schemas/          Zod Schema：Brief / Storyboard / 并发 / 错误分类 / 状态机
-  ai-core/                 Provider 接口、多路由回退、错误归一、并发信号量
-  provider-openai/         通用 OpenAI-compatible Wire 实现（含 grok2api 差异参数）
-  provider-xai/            xAI/Grok 官方端点适配
-  provider-compatible/     自定义兼容端点（能力显式声明）
-  provider-mock/           Mock Provider（占位图卡、可注入失败）
-  workflow-engine/         Job Runner（租约/恢复/幂等）+ 知识卡片流水线
-  render-engine/           原生资产处理链 + Satori/Sharp 确定性渲染（兜底）
-  storage/                 Drizzle + SQLite（10 表）+ Repository + 原子落盘
-  config/                  共享 tsconfig
-infra/                     Dockerfile + docker-compose
-scripts/                   字体下载、迁移、种子、真实调用验证
-docs/adr/                  架构决策记录（模型层 / 作业 / 渲染 / 持久化 / 迁移）
-fixtures/                  评测输入与验证报告
+apps/web/                  Next.js Studio、API、登录、计费与进程内 Runner
+packages/shared-schemas/   Brief、Storyboard、Recipe、渲染、并发和状态 Schema
+packages/ai-core/          Provider 接口、路由回退、错误归一、信号量
+packages/provider-openai/  OpenAI-compatible Wire 与官方 OpenAI 适配
+packages/provider-xai/     xAI/Grok 适配
+packages/provider-compatible/ 自定义兼容端点
+packages/provider-mock/    零费用 Mock Provider
+packages/workflow-engine/  知识卡片/漫画/封面/返修/导出管线与 Job Runner
+packages/render-engine/    原生资产处理、Satori/Sharp 确定性渲染
+packages/storage/          Drizzle PostgreSQL 方言、PGlite/远程 PG、Repository、迁移
+packages/config/           共享 TypeScript 配置
+infra/                     Dockerfile、生产 Compose、部署验证脚本
+scripts/                   字体、迁移、种子、真实调用和评测脚本
+fixtures/                  评测输入与报告
+docs/                      当前状态、路线图、部署手册和设计基线
 ```
 
-## 8. 测试
+## 6. 数据与资产目录
+
+生产 Docker 容器中的目录约定：
+
+```text
+/data/
+  ├─ assets/       生成图片、定妆图、返修版本等
+  ├─ exports/      ZIP、manifest 和发布清单
+  └─ .secret       未配置 APP_SECRET 时的本地密钥文件（生产不建议依赖）
+```
+
+生产业务表位于外部 PostgreSQL，不在 `/data/db/app.db` 中。`/data` 仍必须使用持久卷并备份，因为资产、导出文件和可能的密钥文件都在其中。
+
+资产写入采用 `.part` 临时文件、魔数/非空校验、SHA-256 和原子重命名；运行重启后 Job Runner 会从数据库恢复未完成作业，已成功节点按幂等语义跳过。
+
+## 7. 浏览器、Playwright 与视觉测试的边界
+
+当前生产镜像**不包含** Chromium、Playwright 或测试依赖，图文生成不需要常驻浏览器，因此不会因为浏览器测试额外占用服务器内存。
+
+浏览器/视觉测试的作用是另一层质量保障：启动临时浏览器访问真实页面，验证登录、创作表单、生成详情、图片预览、下载和响应式布局是否能被用户正常操作；截图或 OCR/视觉比对可发现“代码构建通过但页面错位、按钮不可点、图片不显示”的问题。它适合在 CI 或开发机按需执行，不应作为生产服务常驻进程。
+
+当前仓库本轮审查未执行浏览器视觉测试；该项属于后续质量波次，不是当前 Docker 运行前置条件。
+
+## 8. 当前验证基线
+
+截至本轮修复：
+
+- `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 均通过。
+- `pnpm eval` 通过（Mock 12 个用例、48 页；结构化解析和页面渲染指标均达到阈值）。
+- storage、Web 的 PGlite/计费集成测试已配置合理默认超时；全仓测试 19/19 个任务通过。
+- 支付 mock 生产硬关闭、额度预留/结算/释放、重复节点结算保护和当前 22 张表迁移工具已纳入代码与测试。
+
+不要把上述状态写成“全仓测试全绿”，发布门禁以 [current-status.md](./current-status.md) 为准。
+
+## 9. 生产部署入口
 
 ```bash
-pnpm test    # 58 项：Schema 校验、错误归一、路由回退、并发信号量、
-             # 结构化解析、原子落盘、Job 生命周期、
-             # 集成（Mock 全流程 / 单页重试 / 重启恢复 / 取消）、确定性渲染
+docker compose -f infra/docker-compose.yml up -d --build
+docker compose -f infra/docker-compose.yml logs -f app
+curl http://127.0.0.1:1235/api/health
 ```
 
-关键集成场景（无需真实 Key，CI 可跑）：
-
-- Mock 全流程 DAG：brief → storyboard → 4 页并行 → manifest。
-- 单页失败仅重试该页，其余页面不重新生成。
-- 应用中断后从 `jobs` 表恢复任务（`orphan_recovered` → 继续执行）。
-- 幂等键复用、取消语义、资产 `.part` 原子写、路径逃逸防护。
-
-## 9. 常见问题
-
-| 现象 | 原因与处理 |
-|---|---|
-| 文本/图片调用 403 | 网关 WAF 拦截 SDK UA；已内建覆盖 UA，若仍 403 检查密钥与来源 IP 白名单 |
-| 文本返回空内容 | 推理模型耗尽输出预算；已默认 `max_tokens=8192` 并按可重试错误退避 |
-| 确定性渲染报「Chinese fonts not found」 | 运行 `pnpm fonts` 下载字体（原生模式不需要字体） |
-| 页面一直「排队中」 | Job Runner 未启动（查启动日志 `job runner started`）；或并发被占满 |
-| 单页显示「生成失败」 | 任务会自动重试该页；也可在详情页观察 `errorSummary` 与 `provider_attempts` |
-| 数据想换位置 | 设置 `DATA_DIR`（或 `SQLITE_PATH / ASSETS_DIR / EXPORTS_DIR`）后重启 |
-| 改了渠道配置不生效 | Runtime 单例在进程内缓存，重启 dev server 生效 |
-
-## 10. 当前边界（阶段 0）
-
-- 单机单容器 + SQLite + 进程内 Runner；PostgreSQL / Redis / 独立 Worker 到阶段 3（见 [ADR-0005](./adr/0005-migration-to-postgres-redis.md)）。
-- 仅知识卡片 Recipe；商品带货/文章拆解等独立 Recipe 在后续迭代（密度拆页与上传能力已就绪）。
-- 原生模式文字审查需 `TEXT_VISION=1`（视觉模型）；当前渠道的 deepseek-v4-flash 不支持图片输入，审查自动跳过并记录。
-- 无自动发布；导出为 ZIP/manifest 由阶段 1 交付。
+生产部署、外部 PostgreSQL/Redis、1Panel 反代、HTTPS、备份和安全检查见 [deployment.md](./deployment.md)。

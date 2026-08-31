@@ -8,6 +8,7 @@ import type { ImageRoute } from "./knowledge-cards";
 import { buildSlidePrompt } from "../prompts";
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
+import { releaseReservedCredits } from "./credit-reservation";
 
 export const PAGE_REGEN_KIND = "page_regen";
 
@@ -32,6 +33,10 @@ export interface PageRegenDeps {
   postprocessMax: number;
   assetsDir: string;
   visualQuality: VisualQualityModel | null;
+  /** 可选计费回调：返修 Provider 调用前预留 1 点 */
+  reserveImageCredits?: (runId: string, amount: number) => Promise<void>;
+  /** 可选计费回调：返修成功/失败后释放未结算额度 */
+  releaseImageCredits?: (runId: string) => Promise<void>;
 }
 
 async function loadStoryboard(deps: PageRegenDeps, runId: string): Promise<Storyboard> {
@@ -69,6 +74,46 @@ async function syncStoryboardSlide(
 }
 
 /**
+ * 返修节点在资产和版本已经落库后若只因计费钩子失败，重试时复用该资产，
+ * 仅再次执行结算，避免重复调用图片 Provider。
+ */
+async function retryExistingRegenOutput(
+  deps: PageRegenDeps,
+  runId: string,
+  pageIndex: number,
+): Promise<boolean> {
+  const current = await deps.assetRepo.latestForPage(runId, pageIndex);
+  if (!current || !current.nodeRunId || (current.kind !== "generated" && current.kind !== "composite")) return false;
+  const nodes = await deps.runRepo.listNodeRuns(runId);
+  const node = nodes.find((row) => row.id === current.nodeRunId && row.status === "failed" && row.outputRef);
+  if (!node?.outputRef) return false;
+  try {
+    const output = JSON.parse(node.outputRef) as { assetId?: string };
+    if (output.assetId !== current.id) return false;
+  } catch {
+    return false;
+  }
+
+  let reserved = false;
+  try {
+    if (deps.reserveImageCredits) {
+      await deps.reserveImageCredits(runId, 1);
+      reserved = true;
+    }
+    await deps.runRepo.succeedNode(node.id, { outputRef: node.outputRef, images: 1 });
+    await deps.runRepo.setReview(runId, "pending");
+    logger.info("page regen billing retry reused asset", { runId, page: pageIndex, assetId: current.id });
+    return true;
+  } finally {
+    if (reserved) {
+      await releaseReservedCredits(deps, runId, (releaseError) =>
+        logger.error("release page regen retry credits failed", { runId, error: String(releaseError) }),
+      );
+    }
+  }
+}
+
+/**
  * 单页返修：只重生成目标页（native 重出图；deterministic 重出视觉层并重新排版），
  * 旧版本资产保留（superseded），写入 Revision 版本链，其余页面零调用。
  */
@@ -88,6 +133,7 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       headline: payload.headline?.trim() || original.headline,
       body: payload.body ?? original.body,
     };
+    if (await retryExistingRegenOutput(deps, ctx.runId, payload.pageIndex)) return;
     const mode = input.textRenderingMode;
     const plan = payload.imagePromptOverride
       ? { imagePrompt: payload.imagePromptOverride, expectedCopy: [slide.headline, ...slide.body] }
@@ -99,7 +145,12 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       model: deps.imageRoutes[0]?.model,
     });
 
+    let reserved = false;
     try {
+      if (deps.reserveImageCredits) {
+        await deps.reserveImageCredits(ctx.runId, 1);
+        reserved = true;
+      }
       const result = await withModelFallbacks({
         routes: deps.imageRoutes.map((route) => ({ config: route.config, model: route.model })),
         signal: ctx.signal,
@@ -205,6 +256,12 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       const aiError = toAiError(error);
       await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
       throw error;
+    } finally {
+      if (reserved) {
+        await releaseReservedCredits(deps, ctx.runId, (releaseError) =>
+          logger.error("release page regen credits failed", { runId: ctx.runId, error: String(releaseError) }),
+        );
+      }
     }
   });
 }

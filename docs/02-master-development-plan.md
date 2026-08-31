@@ -1,5 +1,7 @@
 # 总体开发规划方案
 
+> 文档定位：产品和架构总体基线。本文保留初期“SQLite → PostgreSQL/Redis”的演进设计；当前 PostgreSQL 已落地，Redis/独立 Worker 仍按实际并发需求延期。当前事实与执行顺序以 [current-status.md](./current-status.md) 和 [current-roadmap.md](./current-roadmap.md) 为准。
+
 ## 1. 产品愿景
 
 建设一个面向内容创作者、运营团队和商家的 AI 图文生产平台。用户提供主题、文案、文章、URL、商品资料或图书信息后，系统能够生成一套风格统一、文字准确、可编辑、可追溯并适配多个自媒体平台的图文内容。

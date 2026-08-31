@@ -9,6 +9,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import postgres from "postgres";
 import { loadDotEnv } from "./lib/env.js";
+import { PG_MIGRATION_TABLES } from "./lib/pg-migration-tables.js";
 
 loadDotEnv();
 
@@ -30,20 +31,34 @@ interface ManifestEntry {
   file: string;
 }
 
+interface Manifest {
+  formatVersion?: number;
+  exportedAt: string;
+  tables: ManifestEntry[];
+  skippedTables?: string[];
+}
+
 const manifest = JSON.parse(
   fs.readFileSync(path.join(dumpDir, "manifest.json"), "utf8"),
-) as { exportedAt: string; tables: ManifestEntry[] };
+) as Manifest;
+
+const allowedTables = new Set<string>(PG_MIGRATION_TABLES);
+for (const entry of manifest.tables) {
+  if (!allowedTables.has(entry.table)) throw new Error(`manifest 含未知表：${entry.table}`);
+}
 
 const sql = postgres(databaseUrl, { max: 1 });
 try {
   if (truncate) {
-    // 外键依赖顺序：先子表后父表；TRUNCATE ... CASCADE 一次到位
-    await sql.unsafe(`TRUNCATE TABLE projects, workflow_runs, node_runs, prompt_versions, assets,
-      asset_relations, provider_attempts, provider_usages, channels, brand_kits, revisions, jobs, job_events CASCADE`);
-    console.log("已清空目标表（--truncate）");
+    // 仅在显式 --truncate 时执行；CASCADE 覆盖当前账号、计费、支付和工作流全表。
+    await sql.unsafe(`TRUNCATE TABLE ${PG_MIGRATION_TABLES.join(", ")} CASCADE`);
+    console.log(`已清空目标表（--truncate，${PG_MIGRATION_TABLES.length} 张表）`);
   }
 
   for (const entry of manifest.tables) {
+    if (!/^[a-z0-9_]+$/.test(entry.table) || entry.file !== path.basename(entry.file)) {
+      throw new Error(`非法迁移清单标识符：${entry.table} / ${entry.file}`);
+    }
     const filePath = path.join(dumpDir, entry.file);
     if (!fs.existsSync(filePath)) {
       console.warn(`  跳过 ${entry.table}：${entry.file} 不存在`);
@@ -67,13 +82,18 @@ try {
       }
       const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
       const values = columns.map((column) => row[column] ?? null);
-      await sql.unsafe(
-        `insert into ${entry.table} (${columns.join(", ")}) values (${placeholders}) on conflict (id) do nothing`,
-        values,
-      );
+      await sql.unsafe(`insert into ${entry.table} (${columns.join(", ")}) values (${placeholders}) on conflict do nothing`, values);
       inserted += 1;
     }
-    console.log(`  ${entry.table}: 导入 ${inserted}/${entry.rows} 行（校验和一致）`);
+    const countRows = (await sql.unsafe(`select count(*)::bigint as count from ${entry.table}`)) as Array<{ count: string | number }>;
+    const targetCount = Number(countRows[0]?.count ?? 0);
+    if (truncate && targetCount !== entry.rows) {
+      throw new Error(`导入行数不一致：${entry.table}（目标 ${targetCount} / 清单 ${entry.rows}）`);
+    }
+    console.log(`  ${entry.table}: 读取 ${entry.rows} 行，写入 ${inserted} 行，目标现有 ${targetCount} 行（校验和一致）`);
+  }
+  if (manifest.skippedTables?.length) {
+    console.log(`\n源 SQLite 缺少并跳过：${manifest.skippedTables.join(", ")}`);
   }
   console.log(`\n导入完成：${new URL(databaseUrl).host}/${new URL(databaseUrl).pathname.slice(1)}`);
 } finally {

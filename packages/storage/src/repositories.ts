@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, like, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, like, ne, notInArray, sql } from "drizzle-orm";
 import {
   JOB_TERMINAL_STATUSES,
   type JobStatus,
@@ -117,7 +117,7 @@ export interface CreateRunInputRow {
 
 export class RunRepo {
   private readonly client: DbClient;
-  /** 节点成功且产生图片时触发（计费扣点等）；钩子异常不阻断流水线 */
+  /** 节点成功且产生图片时触发（计费扣点等）；关键钩子异常必须阻断当前节点 */
   private readonly nodeSucceededHooks: Array<(event: { runId: string; nodeRunId: string; images: number }) => Promise<void>> = [];
 
   /** 注册「节点成功产出图片」回调（进程内单次注册，如计费服务） */
@@ -193,6 +193,69 @@ export class RunRepo {
       .where(eq(workflowRuns.id, id));
   }
 
+  /**
+   * 为一次运行追加图片额度预留。钱包预留由 BillingService 先完成，
+   * 本字段记录该运行仍需结算/释放的数量，支持失败重试时只补足差额。
+   */
+  async reserveCredits(id: string, amount: number) {
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error("credit reservation amount must be a positive integer");
+    const rows = await this.client
+      .update(workflowRuns)
+      .set({
+        creditsReserved: sql`${workflowRuns.creditsReserved} + ${amount}`,
+        updatedAt: now(),
+      })
+      .where(eq(workflowRuns.id, id))
+      .returning({
+        userId: workflowRuns.userId,
+        creditsReserved: workflowRuns.creditsReserved,
+        creditsCharged: workflowRuns.creditsCharged,
+      });
+    if (rows.length === 0) throw new Error(`workflow run not found: ${id}`);
+    return rows[0]!;
+  }
+
+  /** 原子结算一批已预留图片额度；不足时返回 null，不允许静默少扣。 */
+  async captureReservedCredits(id: string, amount: number) {
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error("credit capture amount must be a positive integer");
+    const rows = await this.client
+      .update(workflowRuns)
+      .set({
+        creditsReserved: sql`${workflowRuns.creditsReserved} - ${amount}`,
+        creditsCharged: sql`${workflowRuns.creditsCharged} + ${amount}`,
+        updatedAt: now(),
+      })
+      .where(and(eq(workflowRuns.id, id), gte(workflowRuns.creditsReserved, amount)))
+      .returning({
+        userId: workflowRuns.userId,
+        creditsReserved: workflowRuns.creditsReserved,
+        creditsCharged: workflowRuns.creditsCharged,
+      });
+    return rows[0] ?? null;
+  }
+
+  /** 钱包结算失败时恢复运行侧的预留状态。 */
+  async restoreCapturedCredits(id: string, amount: number): Promise<void> {
+    if (!Number.isInteger(amount) || amount <= 0) return;
+    await this.client
+      .update(workflowRuns)
+      .set({
+        creditsReserved: sql`${workflowRuns.creditsReserved} + ${amount}`,
+        creditsCharged: sql`${workflowRuns.creditsCharged} - ${amount}`,
+        updatedAt: now(),
+      })
+      .where(and(eq(workflowRuns.id, id), gte(workflowRuns.creditsCharged, amount)));
+  }
+
+  /** 释放运行当前尚未结算的额度；amount 由调用方按最新运行状态传入。 */
+  async releaseCredits(id: string, amount: number): Promise<void> {
+    if (!Number.isInteger(amount) || amount <= 0) return;
+    await this.client
+      .update(workflowRuns)
+      .set({ creditsReserved: sql`${workflowRuns.creditsReserved} - ${amount}`, updatedAt: now() })
+      .where(and(eq(workflowRuns.id, id), gte(workflowRuns.creditsReserved, amount)));
+  }
+
   /* Node runs */
 
   async createNodeRun(runId: string, nodeName: string) {
@@ -246,7 +309,7 @@ export class RunRepo {
     } = {},
   ) {
     const images = extra.images ?? 0;
-    await this.client
+    const updated = await this.client
       .update(nodeRuns)
       .set({
         status: "succeeded",
@@ -258,19 +321,28 @@ export class RunRepo {
         costUsd: extra.costUsd ?? null,
         ...(extra.model ? { model: extra.model } : {}),
       })
-      .where(eq(nodeRuns.id, id));
+      // 同一节点重复恢复/回调时不重复触发计费钩子。
+      .where(and(eq(nodeRuns.id, id), ne(nodeRuns.status, "succeeded")))
+      .returning({ runId: nodeRuns.runId });
+    if (updated.length === 0) return;
     if (images > 0 && this.nodeSucceededHooks.length > 0) {
-      const row = await one(this.client.select({ runId: nodeRuns.runId }).from(nodeRuns).where(eq(nodeRuns.id, id)).limit(1));
-      if (row) {
+      try {
         for (const hook of this.nodeSucceededHooks) {
-          try {
-            await hook({ runId: row.runId, nodeRunId: id, images });
-          } catch (error) {
-            console.log(
-              JSON.stringify({ ts: new Date().toISOString(), level: "error", msg: "node succeeded hook failed", error: String(error) }),
-            );
-          }
+          await hook({ runId: updated[0]!.runId, nodeRunId: id, images });
         }
+      } catch (error) {
+        // 节点已经有可复用产物，但关键结算钩子失败时不能保留 succeeded；
+        // 下次 Job 重试会复用 outputRef，再次尝试结算而不是把图片当成免费结果。
+        await this.client
+          .update(nodeRuns)
+          .set({
+            status: "failed",
+            finishedAt: now(),
+            errorCategory: "internal",
+            errorSummary: `node completion hook failed: ${String(error).slice(0, 360)}`,
+          })
+          .where(eq(nodeRuns.id, id));
+        throw error;
       }
     }
   }
@@ -1596,6 +1668,12 @@ export class WalletRepo {
 
   /** 入账（正数）。返回最新余额。 */
   async credit(userId: string, delta: number): Promise<number> {
+    if (!Number.isInteger(delta) || delta < 0) throw new Error("credit amount must be a non-negative integer");
+    if (delta === 0) {
+      const current = await this.findByUser(userId);
+      if (!current) throw new Error(`wallet not found for user ${userId}`);
+      return current.balance - current.reservedCredits;
+    }
     const rows = await this.client
       .update(wallets)
       .set({
@@ -1604,15 +1682,17 @@ export class WalletRepo {
         updatedAt: now(),
       })
       .where(eq(wallets.userId, userId))
-      .returning({ balance: wallets.balance });
-    return rows[0]!.balance;
+      .returning({ balance: wallets.balance, reservedCredits: wallets.reservedCredits });
+    if (rows.length === 0) throw new Error(`wallet not found for user ${userId}`);
+    return rows[0]!.balance - rows[0]!.reservedCredits;
   }
 
   /**
-   * 扣减（正数）。余额充足时全扣；不足时扣到 0 兜底（并发下可能发生，流水 note 说明）。
-   * 返回 { deducted, balanceAfter }。
+   * 非预留扣减（正数）。只允许一次性全额扣减，不再“扣到 0”静默少扣；
+   * 同时不触碰其它运行已预留的额度。返回 { deducted, balanceAfter }。
    */
   async debit(userId: string, amount: number): Promise<{ deducted: number; balanceAfter: number }> {
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error("debit amount must be a positive integer");
     const full = await this.client
       .update(wallets)
       .set({
@@ -1620,16 +1700,101 @@ export class WalletRepo {
         totalConsumed: sql`${wallets.totalConsumed} + ${amount}`,
         updatedAt: now(),
       })
-      .where(and(eq(wallets.userId, userId), gte(wallets.balance, amount)))
-      .returning({ balance: wallets.balance });
-    if (full.length > 0) return { deducted: amount, balanceAfter: full[0]!.balance };
-    const partial = await this.client
+      .where(
+        and(
+          eq(wallets.userId, userId),
+          sql`${wallets.balance} - ${wallets.reservedCredits} >= ${amount}`,
+        ),
+      )
+      .returning({ balance: wallets.balance, reservedCredits: wallets.reservedCredits });
+    if (full.length > 0) {
+      return {
+        deducted: amount,
+        balanceAfter: full[0]!.balance - full[0]!.reservedCredits,
+      };
+    }
+    const current = await this.findByUser(userId);
+    return {
+      deducted: 0,
+      balanceAfter: current ? current.balance - current.reservedCredits : 0,
+    };
+  }
+
+  /** 原子预留额度；返回 null 表示可用余额不足或钱包不存在。 */
+  async reserveCredits(
+    userId: string,
+    amount: number,
+  ): Promise<{ balance: number; reservedCredits: number; available: number } | null> {
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error("credit reservation amount must be a positive integer");
+    const rows = await this.client
       .update(wallets)
-      .set({ balance: 0, totalConsumed: sql`${wallets.totalConsumed} + ${wallets.balance}`, updatedAt: now() })
-      .where(and(eq(wallets.userId, userId), gte(wallets.balance, 1)))
-      .returning({ balance: wallets.balance });
-    if (partial.length === 0) return { deducted: 0, balanceAfter: 0 };
-    return { deducted: amount - partial[0]!.balance, balanceAfter: 0 };
+      .set({
+        reservedCredits: sql`${wallets.reservedCredits} + ${amount}`,
+        updatedAt: now(),
+      })
+      .where(
+        and(
+          eq(wallets.userId, userId),
+          sql`${wallets.balance} - ${wallets.reservedCredits} >= ${amount}`,
+        ),
+      )
+      .returning({ balance: wallets.balance, reservedCredits: wallets.reservedCredits });
+    if (rows.length === 0) return null;
+    const row = rows[0]!;
+    return { ...row, available: row.balance - row.reservedCredits };
+  }
+
+  /** 原子结算已预留额度；不足时返回 null，禁止少扣或透支。 */
+  async captureReservedCredits(
+    userId: string,
+    amount: number,
+  ): Promise<{ balance: number; reservedCredits: number; available: number } | null> {
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error("credit capture amount must be a positive integer");
+    const rows = await this.client
+      .update(wallets)
+      .set({
+        balance: sql`${wallets.balance} - ${amount}`,
+        reservedCredits: sql`${wallets.reservedCredits} - ${amount}`,
+        totalConsumed: sql`${wallets.totalConsumed} + ${amount}`,
+        updatedAt: now(),
+      })
+      .where(
+        and(
+          eq(wallets.userId, userId),
+          gte(wallets.reservedCredits, amount),
+          gte(wallets.balance, amount),
+        ),
+      )
+      .returning({ balance: wallets.balance, reservedCredits: wallets.reservedCredits });
+    if (rows.length === 0) return null;
+    const row = rows[0]!;
+    return { ...row, available: row.balance - row.reservedCredits };
+  }
+
+  /** 释放尚未结算的预留额度。 */
+  async releaseReservedCredits(userId: string, amount: number): Promise<number> {
+    if (!Number.isInteger(amount) || amount <= 0) return 0;
+    const rows = await this.client
+      .update(wallets)
+      .set({ reservedCredits: sql`${wallets.reservedCredits} - ${amount}`, updatedAt: now() })
+      .where(and(eq(wallets.userId, userId), gte(wallets.reservedCredits, amount)))
+      .returning({ balance: wallets.balance, reservedCredits: wallets.reservedCredits });
+    if (rows.length === 0) return 0;
+    return rows[0]!.balance - rows[0]!.reservedCredits;
+  }
+
+  /** 钱包结算失败时恢复一次已结算的额度（补偿操作）。 */
+  async restoreCapturedCredits(userId: string, amount: number): Promise<void> {
+    if (!Number.isInteger(amount) || amount <= 0) return;
+    await this.client
+      .update(wallets)
+      .set({
+        balance: sql`${wallets.balance} + ${amount}`,
+        reservedCredits: sql`${wallets.reservedCredits} + ${amount}`,
+        totalConsumed: sql`${wallets.totalConsumed} - ${amount}`,
+        updatedAt: now(),
+      })
+      .where(eq(wallets.userId, userId));
   }
 
   /** 批量取钱包（管理端用户列表） */

@@ -1,5 +1,7 @@
 # 基于 Auto-AI-Video 提取的 AI 图文生成基础框架解决方案
 
+> 现状说明（2026-08-31）：本文是从 Auto-AI-Video 提取能力形成的历史基础框架方案。文中的初期 SQLite、阶段顺序和资源假设是设计基线；当前代码已演进为 PostgreSQL 方言 + 生产远程 PostgreSQL + 本地/测试 PGlite，具体状态以 [current-status.md](./current-status.md) 为准。
+
 > 状态：方案设计稿
 >
 > 目标：从 `/Users/fakaihu/Documents/project/AI-aute-image/Auto-AI-Video/` 提取经过实践验证的生产能力，结合当前仓库已有的图文产品规划，形成一个可持续扩展的 AI 图文生成基础框架。
@@ -642,4 +644,3 @@ Linux Docker Host
 - [Auto-AI-Video Durable Tasks](../Auto-AI-Video/docs/DURABLE_TASKS.md)
 - [Auto-AI-Video Production Runner](../Auto-AI-Video/docs/PRODUCTION_RUNNER.md)
 - [Auto-AI-Video 多频道生产基线](../Auto-AI-Video/docs/MULTI_CHANNEL_BASELINE.md)
-

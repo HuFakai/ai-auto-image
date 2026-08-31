@@ -6,7 +6,6 @@ import type { CreateRunInput, Storyboard, StoryboardSlide } from "@aai/shared-sc
 import { renderSlideDeterministic, themeById } from "@aai/render-engine";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser } from "@/server/auth";
-import { requireCredits } from "@/server/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -41,10 +40,6 @@ export async function POST(
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid input" }, { status: 400 });
   }
-
-  // 计费预检：返修重出一张图消耗 1 点
-  const billingGuard = await requireCredits(user.id, 1);
-  if (billingGuard) return billingGuard;
 
   const runtime = await getRuntime();
   const run = await runtime.runRepo.require(id);

@@ -10,9 +10,9 @@ services:
       dockerfile: infra/Dockerfile
     container_name: aai-app
     restart: unless-stopped
-    # 仅绑定回环：对外由 1Panel OpenResty（反代 + HTTPS）暴露，3000 端口不直连公网
+    # 仅绑定回环：对外由 1Panel OpenResty（反代 + HTTPS）暴露，1235 端口不直连公网
     ports:
-      - "127.0.0.1:${PORT:-3000}:3000"
+      - "127.0.0.1:${PORT:-1235}:1235"
     volumes:
       - aai-data:/data
     environment:
@@ -44,7 +44,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:1235/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 30s
       timeout: 5s

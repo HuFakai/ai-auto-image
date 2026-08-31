@@ -236,7 +236,7 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
   }
   const runRepo = new RunRepo(db.db);
   const billing = new BillingService(walletRepo, ledgerRepo, planRepo, subscriptionRepo, runRepo);
-  // 生图实时扣点：节点成功产出图片 → 钱包扣 1 点/张（RunRepo 钩子内已捕获异常，不阻断流水线）
+  // 生图计费：流水线先预留额度，节点成功产出图片后结算，失败/取消由流水线释放剩余预留。
   runRepo.onNodeSucceeded(billing.nodeImageHook());
   const pay = new PayService({
     dataDir,
@@ -345,6 +345,8 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     assetsDir,
     exportsDir,
     templateVersion: "darkroom-knowledge@1",
+    reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
+    releaseImageCredits: (runId) => billing.releaseRunCredits(runId),
   });
 
   registerComicPipeline(runtime.runner, {
@@ -377,6 +379,8 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     assetsDir,
     exportsDir,
     serverMaxConcurrency,
+    reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
+    releaseImageCredits: (runId) => billing.releaseRunCredits(runId),
   });
 
   registerPageRegenPipeline(runtime.runner, {
@@ -395,6 +399,8 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     imageApiSemaphore: runtime.imageApiSemaphore,
     postprocessMax,
     assetsDir,
+    reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
+    releaseImageCredits: (runId) => billing.releaseRunCredits(runId),
     get visualQuality() {
       return pipelineDeps.visualQuality;
     },
@@ -423,6 +429,8 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     },
     imageApiSemaphore: runtime.imageApiSemaphore,
     assetsDir,
+    reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
+    releaseImageCredits: (runId) => billing.releaseRunCredits(runId),
   });
 
   await runtime.refreshChannels();

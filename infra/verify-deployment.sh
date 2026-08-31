@@ -7,6 +7,7 @@ set -uo pipefail
 PASS=0
 FAIL=0
 REPORT="${REPORT:-infra/deployment-report.md}"
+APP_PORT="${PORT:-1235}"
 
 say() { echo "[verify] $*"; }
 check() { # check <名称> <命令...>
@@ -44,7 +45,7 @@ build_and_up() {
 await_health() {
   say "等待健康检查（最多 90s）"
   for _ in $(seq 1 45); do
-    if curl -fsS http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+    if curl -fsS "http://127.0.0.1:${APP_PORT}/api/health" >/dev/null 2>&1; then
       say "PASS  /api/health 就绪"; PASS=$((PASS+1)); echo "- ✅ /api/health 就绪" >> "$REPORT"
       return 0
     fi
@@ -69,7 +70,7 @@ no_browser_assertion() {
 mock_run_end_to_end() {
   say "发起一次 Mock 生成（不产生费用）"
   local run_id
-  run_id=$(curl -fsS -X POST http://127.0.0.1:3000/api/runs \
+  run_id=$(curl -fsS -X POST "http://127.0.0.1:${APP_PORT}/api/runs" \
     -H "content-type: application/json" \
     -d '{"topic":"部署验证：重启持久性","requestedImageConcurrency":1}' \
     | sed -E 's/.*"runId":"([^"]+)".*/\1/')
@@ -78,7 +79,7 @@ mock_run_end_to_end() {
   fi
   for _ in $(seq 1 60); do
     local status
-    status=$(curl -fsS "http://127.0.0.1:3000/api/runs/$run_id" | sed -E 's/.*"status":"([a-z_]+)".*/\1/')
+    status=$(curl -fsS "http://127.0.0.1:${APP_PORT}/api/runs/$run_id" | sed -E 's/.*"status":"([a-z_]+)".*/\1/')
     [ "$status" = "succeeded" ] && break
     [ "$status" = "failed" ] && break
     sleep 2
@@ -91,12 +92,12 @@ restart_persistence() {
   say "重启容器验证持久性"
   docker compose -f infra/docker-compose.yml restart app >/dev/null
   sleep 8
-  check "重启后 /api/health 恢复" curl -fsS http://127.0.0.1:3000/api/health
+  check "重启后 /api/health 恢复" curl -fsS "http://127.0.0.1:${APP_PORT}/api/health"
   local run_id
   run_id=$(cat /tmp/aai-verify-run-id 2>/dev/null || echo "")
   if [ -n "$run_id" ]; then
     check "重启后历史运行仍在（$run_id）" \
-      curl -fsS "http://127.0.0.1:3000/api/runs/$run_id"
+      curl -fsS "http://127.0.0.1:${APP_PORT}/api/runs/$run_id"
   fi
   local asset_count
   asset_count=$(docker compose -f infra/docker-compose.yml exec app sh -c "ls /data/assets/runs 2>/dev/null | wc -l" | tr -d '[:space:]')

@@ -24,7 +24,10 @@ describe("knowledge card pipeline (mock)", () => {
   it("runs the full spike DAG: brief → storyboard → 4 pages → manifest", async () => {
     const harness = await makeHarness({ mock: { latencyMs: 1 } });
     const runner = startEvalRunner(harness);
-    const { runId, jobId } = await createRunWith(harness, { topic: "量子纠缠" });
+    const { runId, jobId } = await createRunWith(harness, {
+      topic: "量子纠缠",
+      generateCoverCandidates: true,
+    });
 
     await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "succeeded");
     await runner.stop();

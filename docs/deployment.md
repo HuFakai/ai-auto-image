@@ -1,94 +1,152 @@
-# 服务器部署手册（1Panel · 甲骨文 4C24G ARM）
+# 服务器部署手册（Docker · 1Panel · 外部 PostgreSQL）
 
-> 目标环境：甲骨文 4 核 24G（Ampere ARM，`uname -m` 应显示 `aarch64`）· 1Panel 已托管 PostgreSQL（`1Panel-postgresql-VkBl`）与 Redis（`1Panel-redis-d67m`）。
-> 架构：web 容器仅在回环地址暴露 3000 端口，对外由 1Panel OpenResty 反代 + HTTPS。
+> 本手册按当前 Compose 配置编写。推荐目标为 1Panel 托管的 Linux/ARM 服务器；Web 以单容器运行，生产数据库使用外部 PostgreSQL，Redis 先作为预留服务，不代表当前应用已经切换到 Redis Worker。
+> 本次代码审查机未安装 Docker，以下步骤必须在目标服务器执行并留存实际输出。
 
-## 0. 前置检查
+## 1. 部署形态
 
-```bash
-uname -m                       # aarch64 → 直接在服务器上构建镜像（无需交叉编译）
-docker network ls | grep -i 1panel   # 找到 1Panel 容器网络名（默认 1panel-network）
+```text
+Internet
+   │
+1Panel OpenResty + HTTPS
+   │ 反代到 127.0.0.1:1235
+   ▼
+ai-auto-image Web 容器
+   ├─ 外部 PostgreSQL：业务数据、用户、计费、订单
+   ├─ 外部 Redis：当前预留，独立 Worker 阶段再启用
+   └─ /data 持久卷：生成资产、导出包、运行密钥文件
 ```
 
-甲骨文双层防火墙放行 80/443（在「实例安全列表」放行后，1Panel「主机防火墙」通常已代管 iptables；若仍不通手动放行）。
+当前单容器方案的目标是节省资源、降低运维复杂度；当多实例、持续高并发、队列优先级或多人协作成为真实需求时，再启用 Redis/BullMQ 和独立 Worker。
 
-## 1. 数据库初始化
-
-1Panel 的 PG 数据库 `ai_image` 已创建。表结构由应用启动时自动迁移（drizzle migrations 打进镜像），无需手动执行。
-如需手动校验：`docker exec -it 1Panel-postgresql-VkBl psql -U ai_image -d ai_image -c '\dt'`（应看到 15 张表）。
-
-## 2. 准备代码与环境变量
+## 2. 服务器前置检查
 
 ```bash
-cd /opt && git clone https://github.com/HuFakai/ai-auto-image.git && cd ai-auto-image
+uname -m
+docker --version
+docker compose version
+docker network ls | grep -i 1panel
 ```
 
-创建 `/opt/ai-auto-image/.env`（该文件已被 .gitignore，不会入库）：
+ARM 服务器通常应显示 `aarch64`。确认 1Panel PostgreSQL/Redis 容器与应用加入同一个 Docker 网络；Compose 默认网络名是 `1panel-network`，不一致时设置 `DOCKER_NETWORK`。
+
+服务器只需要对外放行 80/443。1235 仅绑定回环地址，5432/6379 不应直接暴露公网。
+
+## 3. 获取代码与准备环境变量
 
 ```bash
-DATABASE_URL=postgres://ai_image:<PG密码>@1Panel-postgresql-VkBl:5432/ai_image
-REDIS_URL=redis://:<Redis密码>@1Panel-redis-d67m:6379
-APP_SECRET=<见第 3 步>
-REGISTER_ENABLED=0                # 上线先关闭注册；第一个注册用户自动成为管理员
-REGISTER_INVITE_CODE=             # 开放注册时的邀请码（可选）
-DOCKER_NETWORK=1panel-network     # 与第 0 步确认的网络名一致
+cd /opt
+git clone https://github.com/HuFakai/ai-auto-image.git
+cd ai-auto-image
+cp .env.example .env
 ```
 
-## 3. 渠道密钥解密的关键一步（APP_SECRET）
+编辑根目录 `.env`，至少配置：
 
-渠道 API Key 在库里是 AES-256-GCM 加密的，加密主密钥来自 `APP_SECRET` 环境变量；**未设置时**使用 `DATA_DIR/.secret` 文件中的随机密钥。
+```dotenv
+DATABASE_URL=postgres://<user>:<password>@<postgres-container>:5432/<database>
+APP_SECRET=<高强度随机值>
+REGISTER_ENABLED=0
+DOCKER_NETWORK=1panel-network
+```
 
-从旧环境（本机开发库）导入的渠道数据，是用**开发机的 `apps/web/data/.secret`** 加密的。要让服务器能解密，二选一：
+如果暂时不接 Redis，`REDIS_URL` 可以为空；Compose 仍要求 `DATABASE_URL`，因为生产路径不应回退到 PGlite。
 
-- **方案 A（推荐，最省事）**：读取本机 `apps/web/data/.secret` 的内容，填到服务器 `.env` 的 `APP_SECRET=`。
-- **方案 B（更规范）**：服务器设置全新的 `APP_SECRET`，启动后在「渠道设置」里重新录入各渠道 API Key（旧渠道删除）。
+模型渠道可以通过 `.env` 首次自动导入，也可以在应用的渠道设置页录入。支付和模型密钥不要提交 Git，不要写入日志或部署截图。
 
-## 4. 构建与启动
+## 4. 数据库与密钥
+
+- 当前 PostgreSQL Schema 共 22 张表，应用启动时自动执行 `packages/storage/drizzle/` 迁移。
+- 首次启动后可在 PostgreSQL 容器中检查表：
+
+  ```bash
+  docker exec -it <postgres-container> psql -U <user> -d <database> -c '\dt'
+  ```
+
+- `APP_SECRET` 是渠道 API Key 的加密主密钥。若导入已有渠道数据，必须使用加密时的同一个值；若无法安全迁移旧密钥，应在服务器上重新录入渠道密钥。
+- `/data` 中的 `assets/` 和 `exports/` 必须持久化；生产 PostgreSQL 数据由数据库自身备份，不要只备份 `/data`。
+- 当前 `pg:export` / `pg:import` 仍是旧 SQLite → PostgreSQL 导入工具，但已覆盖当前 22 张表、记录源库缺表并校验 JSONL 校验和。它不是正式备份方案，生产正式备份仍优先使用 PostgreSQL 原生备份和 1Panel 备份策略。
+
+## 5. 构建、启动和健康检查
 
 ```bash
 docker compose -f infra/docker-compose.yml up -d --build
-docker compose -f infra/docker-compose.yml logs -f app     # 看到迁移与 job runner started 即正常
-curl http://127.0.0.1:3000/api/health                       # {"ok":true,...,"database":"134.185.113.0:5432"}
+docker compose -f infra/docker-compose.yml ps
+docker compose -f infra/docker-compose.yml logs --tail=200 app
+curl http://127.0.0.1:1235/api/health
 ```
 
-镜像在服务器本地构建（ARM 原生）；首次构建约 3–6 分钟。better-sqlite3/sharp 均有 arm64 musl 预编译，无需编译工具链。
+正常启动应看到迁移完成和 Job Runner 启动日志；健康检查应返回成功 JSON。镜像使用多阶段构建、Next standalone、非 root 用户和 Node 内置 fetch 健康检查，不包含 Chromium/Playwright。
 
-## 5. 初始化管理员
+当前 Compose 的资源/并发默认值：
 
-1. 临时开放注册：`.env` 中 `REGISTER_ENABLED=1`，`docker compose -f infra/docker-compose.yml up -d` 重建容器。
-2. 浏览器访问站点 → 注册（第一个注册用户自动成为 **admin**）。
-3. 关闭注册：`REGISTER_ENABLED=0` 再次重建。之后如需加人，设置 `REGISTER_INVITE_CODE` 并临时开启。
+| 配置 | 当前值 |
+|---|---:|
+| 容器内存上限 | 4G |
+| 图片生成默认并发 | 2 |
+| 图片生成服务器上限 | 6 |
+| 图片后处理上限 | 2 |
+| 进程内 Job Runner 并发 | 2 |
 
-## 6. 1Panel 反代 + HTTPS
+这些是起步值，不是性能承诺。应结合 Provider 限流、图片分辨率和目标服务器监控调整；用户请求并发不能突破服务器/Provider 上限。
 
-1. 1Panel「网站」→ 创建静态/反代站点，域名指向服务器 IP（A 记录）。
-2. 反代目标 `http://127.0.0.1:3000`；开启 WebSocket 支持（SSE/轮询均兼容）。
-3. 申请 Let's Encrypt 证书并开启强制 HTTPS。
+## 6. 管理员和注册策略
 
-## 7. 安全清单（上线必查）
+推荐流程：
 
-- [ ] 3000 端口仅绑定 `127.0.0.1`（compose 已如此），甲骨文安全组**不放行** 5432/6379（当前 PG 的 5432 对全网开放，建议改为仅本机或按 IP 限制——1Panel 数据库「访问权限」可配）。
-- [ ] PG/Redis 密码已轮换（曾出现在对话/本地文件中）。
-- [ ] `APP_SECRET` 已按第 3 步配置。
-- [ ] 注册已关闭或带邀请码。
-- [ ] 1Panel 已为 PG 配置自动备份（每日全量 + binlog/WAL）。
+1. 保持 `REGISTER_ENABLED=0` 部署并完成健康检查。
+2. 只在受控 HTTPS 环境短时设置 `REGISTER_ENABLED=1`，注册第一个管理员。
+3. 立即改回 `REGISTER_ENABLED=0` 并重建/重启容器。
+4. 后续增加成员时使用邀请码和人工审批；公网开放前补齐完整 RBAC、管理员审计和注册风控。
 
-## 8. 升级与回滚
+不要把“首个注册用户自动成为 admin”当作长期生产账户管理方案。
+
+## 7. 上线前安全清单
+
+- [ ] `APP_SECRET` 使用高强度随机值，且没有出现在 Git、日志、截图或聊天记录中。
+- [ ] PostgreSQL/Redis 只对应用网络或白名单开放，不对公网开放。
+- [ ] PostgreSQL 已做每日备份，并完成一次可恢复演练。
+- [ ] `/data` Docker volume 已做备份和磁盘容量告警。
+- [ ] 1235 只绑定 `127.0.0.1`，对外访问统一经过 HTTPS。
+- [ ] 注册关闭或配置邀请码；管理员账号已单独验证。
+- [ ] 生产环境已禁止 mock 订单和 `/api/pay/dev-confirm`；真实支付未就绪时必须 fail-closed。
+- [ ] 支付宝/微信回调域名、证书、验签、公钥和商户配置已完成小额联调。
+- [ ] 真实 OpenAI/Grok 渠道已完成预算受控的成功/失败调用验证。
+- [ ] 中文字体已随镜像存在，native 与 deterministic 两种模式各有人工抽样结果。
+- [ ] `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 在发布提交上全绿。
+- [ ] 已记录健康检查、重启恢复、资产持久化、并发、CPU、内存、队列等待和错误日志结果。
+
+## 8. 部署验证脚本
+
+在目标服务器执行：
 
 ```bash
-cd /opt/ai-auto-image && git pull
-docker compose -f infra/docker-compose.yml up -d --build   # 重建（数据在 PG 与 aai-data 卷中，不受影响）
-docker compose -f infra/docker-compose.yml logs --since 5m app
+bash infra/verify-deployment.sh
 ```
 
-- 生成中任务：重启会按恢复语义把 running 任务释放回队列重跑（幂等：已成功页面跳过）。
-- 数据卷 `aai-data` 存放 assets/exports；PG 由 1Panel 备份。回滚 = `git checkout <上一版本 tag>` 后重建。
+该脚本覆盖构建/启动、健康检查、Mock 运行、重启持久性和基础资源观察。当前脚本的内存检查仍需要人工结合 `docker stats` 判断，不能替代完整压测；本轮审查没有执行它。
 
-## 9. 故障排查
+## 9. 更新、回滚和故障排查
 
-| 现象 | 排查 |
+更新：
+
+```bash
+cd /opt/ai-auto-image
+git pull --ff-only origin main
+docker compose -f infra/docker-compose.yml up -d --build
+docker compose -f infra/docker-compose.yml logs --since=5m app
+```
+
+回滚前先备份 PostgreSQL 和 `/data`，再切到已验证的提交/标签重新构建。不要在生产运行未验证的迁移脚本或 `--truncate` 导入。
+
+常见问题：
+
+| 现象 | 排查方向 |
 |---|---|
-| 启动报 `DATABASE_URL` 相关连接错误 | `docker network inspect 1panel-network` 确认 aai-app 已加入；容器内 `nc -zv 1Panel-postgresql-VkBl 5432` |
-| 渠道测试报解密失败 | APP_SECRET 与加密端不一致（见第 3 步） |
-| /api/health 500 | 看 `docker logs aai-app`；多为迁移或 PG 连接问题 |
-| 页面重定向到 /login 但无法登录 | `REGISTER_ENABLED` 与浏览器 cookie（Secure 需 HTTPS）检查 |
+| 容器启动失败 | `docker compose logs app`；重点看 `DATABASE_URL`、网络名、迁移和 `APP_SECRET` |
+| `/api/health` 失败 | 检查 PostgreSQL 网络/凭据、迁移错误和容器资源 |
+| 页面无法访问 | 检查 1Panel 反代目标、HTTPS、回环端口和 WebSocket/SSE 配置 |
+| 渠道密钥解密失败 | `APP_SECRET` 与录入/导入时不一致；重新录入渠道或恢复正确密钥 |
+| 任务一直排队 | 查看 Runner 启动日志、Job 状态、Provider 限流和有效并发 |
+| 图片文字异常 | native 结果走人工复核；需要精确文字时显式开启 deterministic 并确认字体 |
+| 支付到账但点数异常 | 先冻结真实收费，检查订单幂等、回调验签和点数流水，不要手工重复补单 |

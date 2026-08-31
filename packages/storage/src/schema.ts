@@ -51,6 +51,10 @@ export const workflowRuns = pgTable(
     reviewStatus: text("review_status").notNull().default("pending"),
     reviewNote: text("review_note"),
     reviewedAt: epochColumn("reviewed_at"),
+    /** 当前运行尚未结算的图片额度；余额预留与图片成功结算分离 */
+    creditsReserved: integer("credits_reserved").notNull().default(0),
+    /** 当前运行已成功结算的图片数量；用于重试与幂等扣费 */
+    creditsCharged: integer("credits_charged").notNull().default(0),
     /** 用户挑选的作品封面（assets 表 kind="cover" 的资产；封面是增强能力，可空） */
     selectedCoverAssetId: text("selected_cover_asset_id").references((): AnyPgColumn => assets.id, {
       onDelete: "set null",
@@ -429,6 +433,8 @@ export const wallets = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     balance: integer("balance").notNull().default(0),
+    /** 已预留但尚未结算的点数；可用余额 = balance - reservedCredits */
+    reservedCredits: integer("reserved_credits").notNull().default(0),
     totalGranted: integer("total_granted").notNull().default(0),
     totalConsumed: integer("total_consumed").notNull().default(0),
     updatedAt: epochColumn("updated_at").notNull(),

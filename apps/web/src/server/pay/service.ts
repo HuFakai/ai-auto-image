@@ -7,6 +7,14 @@ export const ORDER_TTL_MINUTES = 15;
 
 export type PayChannel = "alipay" | "wechat" | "mock";
 
+/**
+ * mock 支付只用于本地/测试沙箱。生产环境无论请求参数还是渠道配置如何，
+ * 都不能通过 mock 订单或 dev-confirm 发放真实点数。
+ */
+export function isMockPaymentAllowed(): boolean {
+  return process.env.NODE_ENV !== "production" && process.env.PAYMENT_MOCK_ENABLED !== "0";
+}
+
 /* ── 渠道参数解析：数据库配置优先，环境变量兜底 ─────────────── */
 
 interface AlipaySecrets {
@@ -148,10 +156,17 @@ export class PayService {
     const title = plan ? plan.name : pkg!.name;
 
     let channel: PayChannel = input.channel;
-    if (channel !== "mock") {
-      // 渠道未启用或参数不完整 → 降级为沙箱模拟收款（与模型渠道缺失回落 Mock 的策略一致）
+    if (channel === "mock") {
+      if (!isMockPaymentAllowed()) throw new PayError("当前环境禁止使用模拟支付", 403);
+    } else {
       const resolved = await this.resolveChannel(channel);
-      if (!resolved.enabled || !resolved.ready) channel = "mock";
+      if (!resolved.enabled || !resolved.ready) {
+        if (!isMockPaymentAllowed()) {
+          throw new PayError(`${channel === "alipay" ? "支付宝" : "微信"} 支付渠道未配置或未启用`, 503);
+        }
+        // 仅开发/测试环境允许未配置真实渠道时降级为 mock。
+        channel = "mock";
+      }
     }
 
     const expiresAt = Date.now() + ORDER_TTL_MINUTES * 60 * 1000;
@@ -294,6 +309,7 @@ export class PayService {
 
   /** 沙箱模拟支付确认（仅 mock 订单） */
   async devConfirm(order: Order): Promise<Order> {
+    if (!isMockPaymentAllowed()) throw new PayError("当前环境禁止使用模拟支付", 403);
     if (order.channel !== "mock") throw new PayError("仅模拟订单可沙箱确认", 400);
     return this.fulfillOrder(order.id, `MOCK${Date.now()}`);
   }

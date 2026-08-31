@@ -44,6 +44,7 @@ describe.skipIf(!fontsPresent())("cover stage in deterministic pipeline (needs f
     const { runId, jobId } = await createRunWith(harness, {
       topic: "什么是复利",
       textRenderingMode: "deterministic",
+      generateCoverCandidates: true,
     });
     await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "succeeded", 30_000);
     await runner.stop();
@@ -110,6 +111,7 @@ describe.skipIf(!fontsPresent())("cover stage in deterministic pipeline (needs f
     const { runId, jobId } = await createRunWith(harness, {
       topic: "时间管理方法",
       textRenderingMode: "deterministic",
+      generateCoverCandidates: true,
     });
     await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "succeeded", 30_000);
     await runner.stop();
@@ -147,7 +149,10 @@ describe("cover stage in native pipeline", () => {
       },
     });
     const runner = startEvalRunner(harness);
-    const { runId, jobId } = await createRunWith(harness, { topic: "睡眠科学" });
+    const { runId, jobId } = await createRunWith(harness, {
+      topic: "睡眠科学",
+      generateCoverCandidates: true,
+    });
     await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "succeeded", 30_000);
     await runner.stop();
 

@@ -22,6 +22,7 @@ import { applyBrandOverlays, hasBrandOverlays, renderComicSlide, themeById } fro
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import { buildComicStoryboardPrompt, buildStyleHint } from "../prompts";
+import { releaseReservedCredits, reserveCreditsToTarget } from "./credit-reservation";
 
 export const COMIC_RUN_KIND = "comic_story_run";
 
@@ -39,6 +40,10 @@ export interface ComicPipelineDeps {
   assetsDir: string;
   exportsDir: string;
   serverMaxConcurrency: number;
+  /** 可选计费回调：图片 Provider 调用前预留额度 */
+  reserveImageCredits?: (runId: string, amount: number) => Promise<void>;
+  /** 可选计费回调：运行结束、失败或取消时释放未结算额度 */
+  releaseImageCredits?: (runId: string) => Promise<void>;
 }
 
 /** 一致性规则检查项（与 QualityCheck 形状一致） */
@@ -143,7 +148,16 @@ export function registerComicPipeline(runner: JobRunner, deps: ComicPipelineDeps
       await executeComicRun(deps, ctx, run.id, input);
     } catch (error) {
       if (ctx.signal.aborted) await deps.runRepo.updateStatus(run.id, "cancelled");
+      else {
+        await deps.runRepo
+          .updateStatus(run.id, "failed", { errorSummary: String(error).slice(0, 400) })
+          .catch((statusError) => logger.error("run failure status update failed", { runId: run.id, error: String(statusError) }));
+      }
       throw error;
+    } finally {
+      await releaseReservedCredits(deps, run.id, (releaseError) =>
+        logger.error("release image credits failed", { runId: run.id, error: String(releaseError) }),
+      );
     }
   });
 }
@@ -219,42 +233,64 @@ async function executeComicRun(
     ).value;
     cast = anchors;
 
+    // 定妆图是漫画的第一张图片，必须在调用 Provider 前锁定额度。
+    await reserveCreditsToTarget(deps, runId, 1);
+
     /* 定妆图：独立节点（文生图，所有渠道都支持；幂等） */
-    const refNodeDone = (await deps.runRepo.listNodeRuns(runId)).find(
+    const refNodes = await deps.runRepo.listNodeRuns(runId);
+    const refNodeDone = refNodes.find(
       (n) => n.nodeName === "generate-character-ref" && n.status === "succeeded",
     );
     if (refNodeDone?.outputRef) {
       characterRefAssetId = (JSON.parse(refNodeDone.outputRef) as { assetId?: string }).assetId ?? null;
     } else {
-      const refNode = await deps.runRepo.createNodeRun(runId, "generate-character-ref");
-      await deps.runRepo.startNode(refNode.id, {
-        routeId: deps.imageRoutes[0]?.config.id,
-        model: deps.imageRoutes[0]?.model,
-      });
-      const refPrompt = [
-        `角色定妆图：${anchors.map((member) => member.name).join("、")}`,
-        ...anchors.map((member) => `${member.name}：${member.appearance}；服装：${member.outfit}`),
-        "要求：正面全身立绘、纯浅色背景、清晰勾线科普漫画风格；画面中不要出现任何文字。",
-      ].join("\n");
-      const image = await generateImageWithFallbacks(deps, ctx, runId, refNode.id, refPrompt, null);
-      const saved = await deps.assetStore.saveGeneratedImage(image, path.join("runs", runId, "character-ref.png"));
-      const asset = await deps.assetRepo.create({
-        runId,
-        nodeRunId: refNode.id,
-        kind: "reference",
-        filePath: saved.filePath,
-        mimeType: saved.mimeType,
-        bytes: saved.bytes,
-        checksum: saved.checksum,
-        metadataJson: JSON.stringify({ purpose: "character-ref" }),
-      });
-      characterRefAssetId = asset.id;
-      await deps.runRepo.succeedNode(refNode.id, {
-        outputRef: JSON.stringify({ assetId: asset.id }),
-        images: 1,
-        promptTokens: image.usage?.promptTokens ?? 0,
-        completionTokens: image.usage?.completionTokens ?? 0,
-      });
+      // 若上一次在图片落盘后仅因计费钩子失败，优先重试该节点的结算，不重复生成定妆图。
+      const failedRefNode = refNodes.find(
+        (n) => n.nodeName === "generate-character-ref" && n.status === "failed" && n.outputRef,
+      );
+      let failedRefAssetId: string | undefined;
+      try {
+        failedRefAssetId = failedRefNode?.outputRef
+          ? (JSON.parse(failedRefNode.outputRef) as { assetId?: string }).assetId
+          : undefined;
+      } catch {
+        failedRefAssetId = undefined;
+      }
+      const failedRefAsset = failedRefAssetId ? await deps.assetRepo.require(failedRefAssetId).catch(() => null) : null;
+      if (failedRefNode && failedRefAsset && failedRefAsset.runId === runId && failedRefAsset.kind === "reference") {
+        await deps.runRepo.succeedNode(failedRefNode.id, { outputRef: failedRefNode.outputRef ?? undefined, images: 1 });
+        characterRefAssetId = failedRefAsset.id;
+      } else {
+        const refNode = await deps.runRepo.createNodeRun(runId, "generate-character-ref");
+        await deps.runRepo.startNode(refNode.id, {
+          routeId: deps.imageRoutes[0]?.config.id,
+          model: deps.imageRoutes[0]?.model,
+        });
+        const refPrompt = [
+          `角色定妆图：${anchors.map((member) => member.name).join("、")}`,
+          ...anchors.map((member) => `${member.name}：${member.appearance}；服装：${member.outfit}`),
+          "要求：正面全身立绘、纯浅色背景、清晰勾线科普漫画风格；画面中不要出现任何文字。",
+        ].join("\n");
+        const image = await generateImageWithFallbacks(deps, ctx, runId, refNode.id, refPrompt, null);
+        const saved = await deps.assetStore.saveGeneratedImage(image, path.join("runs", runId, "character-ref.png"));
+        const asset = await deps.assetRepo.create({
+          runId,
+          nodeRunId: refNode.id,
+          kind: "reference",
+          filePath: saved.filePath,
+          mimeType: saved.mimeType,
+          bytes: saved.bytes,
+          checksum: saved.checksum,
+          metadataJson: JSON.stringify({ purpose: "character-ref" }),
+        });
+        characterRefAssetId = asset.id;
+        await deps.runRepo.succeedNode(refNode.id, {
+          outputRef: JSON.stringify({ assetId: asset.id }),
+          images: 1,
+          promptTokens: image.usage?.promptTokens ?? 0,
+          completionTokens: image.usage?.completionTokens ?? 0,
+        });
+      }
     }
     if (characterRefAssetId) {
       const refAsset = await deps.assetRepo.require(characterRefAssetId);
@@ -290,13 +326,30 @@ async function executeComicRun(
   }
 
   const pageCount = storyboard.pages.length;
+  await reserveCreditsToTarget(deps, runId, 1 + pageCount);
 
   /* generate-comic-pages：按并发；角色定妆图作为图生图参考（渠道支持时） */
   const failedPages: number[] = [];
   const editCapableRoutes = deps.imageRoutes.filter((route) => route.image.capabilities().imageEditSingle);
   const tasks = storyboard.pages.map((page) => async () => {
     const existing = await deps.assetRepo.latestForPage(runId, page.index);
-    if (existing) return;
+    if (existing) {
+      const nodes = await deps.runRepo.listNodeRuns(runId);
+      const linked = existing.nodeRunId ? nodes.find((node) => node.id === existing.nodeRunId) : undefined;
+      if (linked?.status === "failed" && linked.outputRef) {
+        let outputAssetId: string | undefined;
+        try {
+          outputAssetId = (JSON.parse(linked.outputRef) as { assetId?: string }).assetId;
+        } catch {
+          outputAssetId = undefined;
+        }
+        if (outputAssetId === existing.id) {
+          await deps.runRepo.succeedNode(linked.id, { outputRef: linked.outputRef, images: 1 });
+          return;
+        }
+      }
+      return;
+    }
     await generateComicPage(deps, ctx, {
       runId,
       input,

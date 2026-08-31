@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser } from "@/server/auth";
-import { PayError } from "@/server/pay/service";
+import { isMockPaymentAllowed, PayError } from "@/server/pay/service";
 
 export const dynamic = "force-dynamic";
 
-/** 沙箱模拟支付确认：仅 mock 订单（真实渠道参数未配置时自动降级为 mock） */
+/** 开发/测试沙箱模拟支付确认；生产环境路由硬关闭。 */
 export async function POST(request: Request) {
+  if (!isMockPaymentAllowed()) {
+    return NextResponse.json({ error: "mock payment disabled" }, { status: 404 });
+  }
   const user = await requireApiUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   let body: { orderId?: string };

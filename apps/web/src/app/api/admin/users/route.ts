@@ -29,7 +29,8 @@ export async function GET(request: Request) {
         status: user.status,
         authProvider: user.authProvider,
         createdAt: user.createdAt,
-        balance: wallet?.balance ?? 0,
+        balance: wallet ? wallet.balance - wallet.reservedCredits : 0,
+        reserved: wallet?.reservedCredits ?? 0,
         totalGranted: wallet?.totalGranted ?? 0,
         totalConsumed: wallet?.totalConsumed ?? 0,
         subscription: sub

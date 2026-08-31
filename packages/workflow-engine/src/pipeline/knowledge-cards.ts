@@ -36,6 +36,7 @@ import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import { buildBriefPrompt, buildSlidePrompt, buildStoryboardPrompt } from "../prompts";
 import { runCoverStage } from "./cover";
+import { releaseReservedCredits, reserveCreditsToTarget } from "./credit-reservation";
 
 export const KNOWLEDGE_CARD_KIND = "knowledge_card_run";
 
@@ -71,6 +72,10 @@ export interface WorkflowDeps {
   exportsDir: string;
   /** 确定性渲染模板版本（冻结进 RunSnapshot） */
   templateVersion: string;
+  /** 可选计费回调：运行在首次调用图片 Provider 前预留额度 */
+  reserveImageCredits?: (runId: string, amount: number) => Promise<void>;
+  /** 可选计费回调：运行结束、失败或取消时释放未结算额度 */
+  releaseImageCredits?: (runId: string) => Promise<void>;
 }
 
 interface NodeRowLike {
@@ -100,6 +105,33 @@ function pageIndexOf(row: NodeRowLike): number | undefined {
 }
 
 /**
+ * 结算钩子失败后，节点可能仍保留已落盘图片。重试时优先复用该产物，
+ * 只重新执行 succeedNode（从而重试计费钩子），避免再次调用图片 Provider。
+ */
+async function retryExistingImageNode(
+  deps: WorkflowDeps,
+  rows: NodeRowLike[],
+  runId: string,
+  pageIndex: number,
+): Promise<boolean> {
+  const node = rows.find(
+    (row) => row.nodeName === "generate-images" && row.status === "failed" && pageIndexOf(row) === pageIndex,
+  );
+  if (!node?.outputRef) return false;
+  let assetId: string | undefined;
+  try {
+    assetId = (JSON.parse(node.outputRef) as { assetId?: string }).assetId;
+  } catch {
+    return false;
+  }
+  if (!assetId) return false;
+  const asset = await deps.assetRepo.require(assetId).catch(() => null);
+  if (!asset || asset.runId !== runId || asset.pageIndex !== pageIndex || asset.supersededAt !== null) return false;
+  await deps.runRepo.succeedNode(node.id, { outputRef: node.outputRef, images: 1 });
+  return true;
+}
+
+/**
  * 阶段 0 Spike 流水线（docs/phases/00 §7）：
  * parse-input → generate-brief → generate-storyboard → generate-images（按有效并发并行）
  * → render-slides（仅确定性模式）→ package-export。
@@ -120,8 +152,16 @@ export function registerKnowledgeCardPipeline(runner: JobRunner, deps: WorkflowD
       // 中途取消发生在节点内部时，保证 Run 不停留在 running
       if (ctx.signal.aborted) {
         await deps.runRepo.updateStatus(run.id, "cancelled");
+      } else {
+        await deps.runRepo
+          .updateStatus(run.id, "failed", { errorSummary: String(error).slice(0, 400) })
+          .catch((statusError) => logger.error("run failure status update failed", { runId: run.id, error: String(statusError) }));
       }
       throw error;
+    } finally {
+      await releaseReservedCredits(deps, run.id, (releaseError) =>
+        logger.error("release image credits failed", { runId: run.id, error: String(releaseError) }),
+      );
     }
   });
 }
@@ -207,11 +247,22 @@ async function executeKnowledgeCardRun(
     await throwIfAborted(deps, runId, ctx.signal);
     const pageCount = storyboard.slides.length;
 
+    // 先按分镜计算本次运行的最大图片需求，再启动任何图片 Provider；
+    // deterministic 的非 default 版式是纯排版页，不计入图片额度。
+    const pageImageCount = storyboard.slides.filter(
+      (slide) => input.textRenderingMode !== "deterministic" || resolveSlideLayout(slide).layout === "default",
+    ).length;
+    const expectedImageCount = pageImageCount + (input.generateCoverCandidates ? 3 : 0);
+    await reserveCreditsToTarget(deps, runId, expectedImageCount);
+
     /* generate-images：按有效并发并行；已成功页面跳过 */
     const failedPages: number[] = [];
     const pageTasks = storyboard.slides.map((slide) => async () => {
       const rows = (await deps.runRepo.listNodeRuns(runId)) as unknown as NodeRowLike[];
       if (succeededPageNode(rows, slide.index)) {
+        return;
+      }
+      if (await retryExistingImageNode(deps, rows, runId, slide.index)) {
         return;
       }
       await generatePage(deps, ctx, runId, input, storyboard, slide, pageCount, effective, failedPages);

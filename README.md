@@ -1,0 +1,72 @@
+# AI 图文工坊
+
+根据主题、文案、长文、URL 或商品资料，自动生成适合小红书、抖音、微信公众号等自媒体平台使用的成套中文图文。覆盖知识卡片、科普漫画、产品种草、图书推荐、文章拆解等场景。
+
+## 当前状态
+
+项目当前处于**可演示 Beta、上线前加固期**：核心生成、编辑导出、Brand Kit、登录、PostgreSQL、点数计费和支付管理后台已经具备。本轮已完成支付 fail-closed、图片额度预留/结算、迁移覆盖和根质量门禁修复；真实模型/支付联调和目标服务器实测仍待完成。
+
+详细结论见 [当前项目状态与代码审查报告](./docs/current-status.md)，执行顺序见 [当前开发路线图](./docs/current-roadmap.md)。
+
+## 主要能力
+
+- 9 种内容类型，知识卡片与漫画两条工作流骨架。
+- OpenAI、xAI/Grok、OpenAI-compatible 和 Mock Provider；文本/图片渠道可独立配置和回退。
+- 原生中文图片模式默认开启；确定性文字渲染可控开启，默认关闭，用于精确文字兜底。
+- 用户自定义图片并发，服务器、Provider 和后处理分别限流。
+- 单页返修、版本链、封面候选、平台适配、Brand Kit、评审和 ZIP 导出。
+- 登录注册、资源隔离、套餐点数、订阅、订单、支付宝/微信支付接口和管理后台第一版。
+
+## 本地快速开始
+
+要求 Node.js 22+、pnpm 11+。本地未配置 `DATABASE_URL` 时使用进程内 PGlite，真实渠道未配置时可使用 Mock Provider。
+
+```bash
+pnpm install
+cp .env.example .env
+pnpm fonts
+pnpm dev
+```
+
+打开 `http://localhost:1235`。模型渠道、Brand Kit 和支付配置优先在应用设置/管理后台维护；密钥由 `APP_SECRET` 保护。
+
+## Docker 部署
+
+生产 Compose 运行单个 Web 容器，连接外部 PostgreSQL（必填）和可选 Redis，资产与导出文件挂载到 `/data`：
+
+```bash
+docker compose -f infra/docker-compose.yml up -d --build
+docker compose -f infra/docker-compose.yml logs -f app
+curl http://127.0.0.1:1235/api/health
+```
+
+完整步骤、HTTPS、备份、注册策略和上线安全项见 [服务器部署手册](./docs/deployment.md)。未完成 P0 安全项前，不要开放真实收费或公网注册。
+
+## 常用命令
+
+```bash
+pnpm dev
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm eval
+pnpm verify:openai   # 需要真实 OpenAI 密钥
+pnpm verify:xai      # 需要真实 xAI 密钥
+```
+
+本轮代码门禁已全绿：`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 和 `pnpm eval` 均通过；真实渠道和服务器验收仍见状态报告。
+
+## 文档
+
+- [文档索引](./docs/README.md)
+- [GitHub 与 Skills 调研](./docs/01-research-and-reference.md)
+- [总体开发规划（战略基线）](./docs/02-master-development-plan.md)
+- [AI 图文基础框架方案（Auto-AI-Video 提取）](./docs/04-ai-image-framework-solution.md)
+- [开发与环境说明](./docs/development.md)
+- [服务器部署手册](./docs/deployment.md)
+- [架构决策记录](./docs/adr/)
+
+## 许可证与复用
+
+复用第三方项目、字体、Prompt、模型输出和平台接口前，请按 [调研报告](./docs/01-research-and-reference.md) 的许可证与合规说明逐项确认。

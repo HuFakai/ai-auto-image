@@ -15,7 +15,7 @@ function logError(msg: string, extra: Record<string, unknown>) {
 
 /**
  * 计费服务：点数（1 点 = 0.1 元）为唯一消费通货。
- * - 生成一张图片扣 1 点：经 RunRepo.onNodeSucceeded 钩子实时扣减（见 runtime.ts 注册）；
+ * - 生成一张图片扣 1 点：先在钱包中原子预留，节点成功后结算，失败/取消释放；
  * - 充值/订阅到账立即入账并记流水；
  * - 订阅按周期发点：购买/续费立即发放一期，后续周期在读余额等场景惰性补发。
  */
@@ -29,6 +29,17 @@ export class InsufficientCreditsError extends Error {
   constructor(public readonly balance: number, public readonly needed: number) {
     super(`insufficient credits: balance=${balance} needed=${needed}`);
     this.name = "InsufficientCreditsError";
+  }
+}
+
+/** 计费结算失败标记：生成管线必须失败，不能把未扣费图片当成成功结果。 */
+export class BillingCaptureError extends Error {
+  override readonly cause?: unknown;
+
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.cause = cause;
+    this.name = "BillingCaptureError";
   }
 }
 
@@ -75,8 +86,56 @@ export class BillingService {
   /** 余额预检：不足时抛 InsufficientCreditsError（路由层转 402） */
   async precheck(userId: string, needed = 1): Promise<number> {
     const wallet = await this.ensureWallet(userId);
-    if (wallet.balance < needed) throw new InsufficientCreditsError(wallet.balance, needed);
-    return wallet.balance;
+    const available = wallet.balance - wallet.reservedCredits;
+    if (available < needed) throw new InsufficientCreditsError(available, needed);
+    return available;
+  }
+
+  /**
+   * 为运行追加图片额度预留。amount 是本次要新增的预留数量，
+   * 钱包 UPDATE 带可用余额条件，多个并发运行不会共同透支同一批点数。
+   */
+  async reserveRunCredits(userId: string, runId: string, amount: number): Promise<void> {
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error("credit reservation amount must be a positive integer");
+    const run = await this.runRepo.require(runId);
+    if (run.userId && run.userId !== userId) throw new Error("run does not belong to user");
+    const wallet = await this.ensureWallet(userId);
+    const reserved = await this.walletRepo.reserveCredits(userId, amount);
+    if (!reserved) {
+      const current = await this.walletRepo.findByUser(userId);
+      throw new InsufficientCreditsError(
+        current ? current.balance - current.reservedCredits : wallet.balance - wallet.reservedCredits,
+        amount,
+      );
+    }
+    try {
+      await this.runRepo.reserveCredits(runId, amount);
+    } catch (error) {
+      // 运行记录写入失败时释放钱包预留，避免额度永久冻结。
+      await this.walletRepo.releaseReservedCredits(userId, amount).catch((releaseError) => {
+        logError("credit reservation compensation failed", {
+          runId,
+          amount,
+          error: String(releaseError),
+        });
+      });
+      throw error;
+    }
+  }
+
+  /** 流水线回调使用：从 run 读取归属，避免把用户身份耦合进 workflow-engine。 */
+  async reserveRunCreditsForRun(runId: string, amount: number): Promise<void> {
+    const run = await this.runRepo.require(runId);
+    if (!run.userId) throw new Error(`run ${runId} has no billing owner`);
+    await this.reserveRunCredits(run.userId, runId, amount);
+  }
+
+  /** 运行结束/失败/取消时释放仍未结算的额度；重复调用安全。 */
+  async releaseRunCredits(runId: string): Promise<void> {
+    const run = await this.runRepo.require(runId);
+    if (!run.userId || run.creditsReserved <= 0) return;
+    await this.walletRepo.releaseReservedCredits(run.userId, run.creditsReserved);
+    await this.runRepo.releaseCredits(runId, run.creditsReserved);
   }
 
   /** 订阅惰性续期：过期置 expired；已付费周期内补发点数 */
@@ -105,7 +164,7 @@ export class BillingService {
       await this.ledgerRepo.append({
         userId,
         delta: granted,
-        balanceAfter: wallet?.balance ?? 0,
+        balanceAfter: wallet ? wallet.balance - wallet.reservedCredits : 0,
         reason: "subscription_grant",
         refType: "subscription",
         refId: sub.id,
@@ -136,38 +195,74 @@ export class BillingService {
     }
     const fresh = (await this.walletRepo.findByUser(userId)) ?? wallet;
     return {
-      balance: fresh.balance,
+      balance: fresh.balance - fresh.reservedCredits,
       totalGranted: fresh.totalGranted,
       totalConsumed: fresh.totalConsumed,
       subscription,
     };
   }
 
-  /** 图片产出处实时扣点（RunRepo 钩子回调；余额不足时扣到 0 兜底并记流水） */
-  async consumeForImages(userId: string, runId: string, images: number): Promise<void> {
+  /**
+   * 结算已经预留的图片额度。仅允许全额结算；没有足额预留时抛错，
+   * 不再使用“余额不足扣到 0”的兜底语义。
+   */
+  async consumeForImages(
+    userId: string,
+    runId: string,
+    images: number,
+    refType = "workflow_node",
+    refId = runId,
+  ): Promise<void> {
     if (images <= 0) return;
     await this.ensureWallet(userId);
-    const { deducted, balanceAfter } = await this.walletRepo.debit(userId, images);
-    await this.ledgerRepo.append({
-      userId,
-      delta: -deducted,
-      balanceAfter,
-      reason: "consume",
-      refType: "workflow_run",
-      refId: runId,
-      note: deducted < images ? `生图 ${images} 点（余额不足，实扣 ${deducted} 点）` : `生图 ${images} 点`,
-    });
+    const runState = await this.runRepo.captureReservedCredits(runId, images);
+    if (!runState) {
+      const wallet = await this.walletRepo.findByUser(userId);
+      throw new InsufficientCreditsError(
+        wallet ? wallet.balance - wallet.reservedCredits : 0,
+        images,
+      );
+    }
+    const walletState = await this.walletRepo.captureReservedCredits(userId, images);
+    if (!walletState) {
+      await this.runRepo.restoreCapturedCredits(runId, images).catch((restoreError) => {
+        logError("run credit capture compensation failed", {
+          runId,
+          images,
+          error: String(restoreError),
+        });
+      });
+      throw new Error(`wallet capture failed for run ${runId}`);
+    }
+    try {
+      await this.ledgerRepo.append({
+        userId,
+        delta: -images,
+        balanceAfter: walletState.available,
+        reason: "consume",
+        refType,
+        refId,
+        note: `生图 ${images} 点`,
+      });
+    } catch (error) {
+      // 钱包已经成功扣减时不能回滚成“免费图片”；记录错误供对账修复。
+      logError("credit ledger append failed after capture", { runId, images, error: String(error) });
+    }
   }
 
   /** 注册到 RunRepo 的「节点产出图片」钩子 */
   nodeImageHook(): (event: { runId: string; nodeRunId: string; images: number }) => Promise<void> {
-    return async ({ runId, images }) => {
+    return async ({ runId, nodeRunId, images }) => {
       try {
         const run = await this.runRepo.require(runId);
         if (!run.userId) return;
-        await this.consumeForImages(run.userId, runId, images);
+        await this.consumeForImages(run.userId, runId, images, "workflow_node", nodeRunId);
       } catch (error) {
         logError("billing image charge failed", { runId, images, error: String(error) });
+        await this.runRepo
+          .updateStatus(runId, "failed", { errorSummary: `billing image charge failed: ${String(error).slice(0, 180)}` })
+          .catch((statusError) => logError("billing failure status update failed", { runId, error: String(statusError) }));
+        throw new BillingCaptureError(`billing image charge failed for run ${runId}`, error);
       }
     };
   }
@@ -217,7 +312,7 @@ export class BillingService {
     });
   }
 
-  /** 管理员手工调整点数（可正可负；负数扣到 0 兜底） */
+  /** 管理员手工调整点数（可正可负；负数只允许扣除可用余额） */
   async adminAdjust(userId: string, delta: number, note: string): Promise<number> {
     await this.ensureWallet(userId);
     let balanceAfter: number;
@@ -226,6 +321,7 @@ export class BillingService {
     } else {
       const result = await this.walletRepo.debit(userId, -delta);
       balanceAfter = result.balanceAfter;
+      delta = -result.deducted;
     }
     await this.ledgerRepo.append({
       userId,
@@ -238,9 +334,12 @@ export class BillingService {
     return balanceAfter;
   }
 
-  /** 退款扣回点数（订单退款时调用；余额不足扣到 0） */
+  /** 退款扣回点数（订单退款时调用；余额不足时不做部分扣减） */
   async clawback(userId: string, credits: number, orderId: string): Promise<number> {
-    if (credits <= 0) return (await this.walletRepo.findByUser(userId))?.balance ?? 0;
+    if (credits <= 0) {
+      const wallet = await this.walletRepo.findByUser(userId);
+      return wallet ? wallet.balance - wallet.reservedCredits : 0;
+    }
     const { deducted, balanceAfter } = await this.walletRepo.debit(userId, credits);
     await this.ledgerRepo.append({
       userId,
@@ -257,6 +356,18 @@ export class BillingService {
 
 export type { Order };
 
+export function insufficientCreditsResponse(error: InsufficientCreditsError): Response {
+  return Response.json(
+    {
+      error: `点数不足：当前可用余额 ${error.balance} 点，本次需要 ${error.needed} 点（每张图消耗 1 点）。请前往「充值」购买点数或订阅套餐。`,
+      code: "insufficient_credits",
+      balance: error.balance,
+      needed: error.needed,
+    },
+    { status: 402 },
+  );
+}
+
 /**
  * 路由级余额预检：余额不足返回 402 响应（含 code=insufficient_credits），通过返回 null。
  * 用法：`const guard = await requireCredits(user.id); if (guard) return guard;`
@@ -269,15 +380,7 @@ export async function requireCredits(userId: string, needed = 1) {
     return null;
   } catch (error) {
     if (error instanceof InsufficientCreditsError) {
-      return Response.json(
-        {
-          error: `点数不足：当前余额 ${error.balance} 点，本次需要 ${error.needed} 点（每张图消耗 1 点）。请前往「充值」购买点数或订阅套餐。`,
-          code: "insufficient_credits",
-          balance: error.balance,
-          needed: error.needed,
-        },
-        { status: 402 },
-      );
+      return insufficientCreditsResponse(error);
     }
     throw error;
   }

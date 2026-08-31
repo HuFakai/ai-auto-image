@@ -6,7 +6,7 @@ import type { CreateRunInput } from "@aai/shared-schemas";
 import { z } from "zod";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser } from "@/server/auth";
-import { requireCredits } from "@/server/billing";
+import { insufficientCreditsResponse, InsufficientCreditsError } from "@/server/billing";
 
 export const dynamic = "force-dynamic";
 
@@ -48,10 +48,6 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   if (!parsed.success) {
     return NextResponse.json({ error: "invalid input" }, { status: 400 });
   }
-
-  // 计费预检：返修重出一张图消耗 1 点
-  const billingGuard = await requireCredits(user.id, 1);
-  if (billingGuard) return billingGuard;
 
   const runtime = await getRuntime();
   const run = await runtime.runRepo.require(id);
@@ -105,51 +101,68 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "没有可用图生图路由" }, { status: 409 });
   }
 
-  // 与管线一致：图片编辑调用必须套 imageApiSemaphore 并发信号量（防止绕过并发上限），
-  // 并加 120s 超时与请求取消信号组合（Node ≥ 20 支持 AbortSignal.any）
-  const images = await runtime.imageApiSemaphore.run(async () => {
-    const timeoutSignal = AbortSignal.timeout(120_000);
-    const signal = request.signal ? AbortSignal.any([request.signal, timeoutSignal]) : timeoutSignal;
-    return route.image.edit!({
-      prompt: `${parsed.data.prompt}。只修改 Mask 指示的区域，区域外内容必须保持原样。`,
-      aspectRatio: input.aspectRatio,
-      baseImage: { base64: sourceBuffer.toString("base64") },
-      maskBase64: mask.toString("base64"),
-      signal,
+  let reserved = false;
+  try {
+    // 与异步管线一致：先原子预留，再调用 Provider；失败/取消会释放预留。
+    await runtime.billing.reserveRunCredits(user.id, id, 1);
+    reserved = true;
+
+    // 图片编辑调用必须套 imageApiSemaphore 并发信号量（防止绕过并发上限），
+    // 并加 120s 超时与请求取消信号组合（Node ≥ 20 支持 AbortSignal.any）。
+    const images = await runtime.imageApiSemaphore.run(async () => {
+      const timeoutSignal = AbortSignal.timeout(120_000);
+      const signal = request.signal ? AbortSignal.any([request.signal, timeoutSignal]) : timeoutSignal;
+      return route.image.edit!({
+        prompt: `${parsed.data.prompt}。只修改 Mask 指示的区域，区域外内容必须保持原样。`,
+        aspectRatio: input.aspectRatio,
+        baseImage: { base64: sourceBuffer.toString("base64") },
+        maskBase64: mask.toString("base64"),
+        signal,
+      });
     });
-  });
-  const image = images[0]!;
+    const image = images[0]!;
 
-  const version = (await runtime.assetRepo.pageVersionCount(id, pageIndex)) + 1;
-  const saved = await runtime.assetStore.saveGeneratedImage(
-    image,
-    path.join("runs", id, "pages", `page-${pageIndex}-v${version}.png`),
-  );
-  await runtime.assetRepo.supersedePage(id, pageIndex);
-  const asset = await runtime.assetRepo.create({
-    runId: id,
-    pageIndex,
-    kind: "generated",
-    filePath: saved.filePath,
-    mimeType: saved.mimeType,
-    bytes: saved.bytes,
-    checksum: saved.checksum,
-    metadataJson: JSON.stringify({
-      mode: input.textRenderingMode,
-      repaint: { rect: parsed.data.rect, prompt: parsed.data.prompt },
-      revision: version,
-    }),
-  });
-  await runtime.revisionRepo.create({
-    runId: id,
-    pageIndex,
-    kind: "repaint",
-    payloadJson: JSON.stringify({ rect: parsed.data.rect, prompt: parsed.data.prompt }),
-    assetId: asset.id,
-  });
-  await runtime.runRepo.setReview(id, "pending");
+    const version = (await runtime.assetRepo.pageVersionCount(id, pageIndex)) + 1;
+    const saved = await runtime.assetStore.saveGeneratedImage(
+      image,
+      path.join("runs", id, "pages", `page-${pageIndex}-v${version}.png`),
+    );
+    await runtime.assetRepo.supersedePage(id, pageIndex);
+    const asset = await runtime.assetRepo.create({
+      runId: id,
+      pageIndex,
+      kind: "generated",
+      filePath: saved.filePath,
+      mimeType: saved.mimeType,
+      bytes: saved.bytes,
+      checksum: saved.checksum,
+      metadataJson: JSON.stringify({
+        mode: input.textRenderingMode,
+        repaint: { rect: parsed.data.rect, prompt: parsed.data.prompt },
+        revision: version,
+      }),
+    });
+    // 资产已经落库后结算本次真实成功图片；finally 释放未结算预留。
+    await runtime.billing.consumeForImages(user.id, id, 1, "workflow_repaint", `${id}:${pageIndex}:v${version}`);
+    await runtime.revisionRepo.create({
+      runId: id,
+      pageIndex,
+      kind: "repaint",
+      payloadJson: JSON.stringify({ rect: parsed.data.rect, prompt: parsed.data.prompt }),
+      assetId: asset.id,
+    });
+    await runtime.runRepo.setReview(id, "pending");
 
-  return NextResponse.json({ assetId: asset.id, revision: version }, { status: 201 });
+    return NextResponse.json({ assetId: asset.id, revision: version }, { status: 201 });
+  } catch (error) {
+    if (error instanceof InsufficientCreditsError) return insufficientCreditsResponse(error);
+    throw error;
+  } finally {
+    if (reserved) {
+      await runtime.billing.releaseRunCredits(id).catch((releaseError) => {
+        console.log(JSON.stringify({ ts: new Date().toISOString(), level: "error", msg: "repaint credit release failed", id, error: String(releaseError) }));
+      });
+    }
+  }
 }
-
 
