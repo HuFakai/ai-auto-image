@@ -1,6 +1,6 @@
 import type { Order, Plan, CreditPackage } from "@aai/storage";
 import { decryptApiKey, encryptApiKey, getEncryptionKey } from "../channel-crypto";
-import { AlipayClient, WechatPayClient, parseAlipayNotify } from "./providers";
+import { AlipayApiError, AlipayClient, WechatPayClient, parseAlipayNotify } from "./providers";
 
 /** 订单二维码有效期（分钟）：过期后前端引导重新下单 */
 export const ORDER_TTL_MINUTES = 15;
@@ -197,8 +197,20 @@ export class PayService {
         await this.deps.orderRepo.updateStatus(order.id, "pending");
         return { order: { ...order, qrCode: result.qrCode }, mock: false };
       } catch (error) {
+        const details = error instanceof AlipayApiError ? error.details : {};
+        this.deps.logError("alipay precreate failed", {
+          orderId: order.id,
+          orderNo: order.orderNo,
+          orderType: type,
+          amountCents,
+          subjectPreview: title.slice(0, 64),
+          subjectChars: Array.from(title).length,
+          subjectBytes: Buffer.byteLength(title, "utf8"),
+          gatewayHost: safeGatewayHost(config.gateway),
+          ...details,
+        });
         await this.deps.orderRepo.updateStatus(order.id, "failed", String(error).slice(0, 300));
-        throw new PayError(`支付宝下单失败：${String(error).slice(0, 160)}`, 502);
+        throw new PayError(`支付宝下单失败：${String(error).slice(0, 320)}`, 502);
       }
     }
 
@@ -382,6 +394,14 @@ function notifyUrl(channel: "alipay" | "wechat"): string | undefined {
   const base = process.env.PAY_NOTIFY_BASE_URL?.trim().replace(/\/$/, "");
   if (!base) return undefined;
   return `${base}/api/pay/notify/${channel}`;
+}
+
+function safeGatewayHost(gateway: string): string {
+  try {
+    return new URL(gateway).host;
+  } catch {
+    return "invalid-gateway";
+  }
 }
 
 export { encryptApiKey };
