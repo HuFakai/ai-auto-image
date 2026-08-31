@@ -36,12 +36,13 @@ DOCKER_NETWORK=1panel-network     # 与第 0 步确认的网络名一致
 
 ## 3. 渠道密钥解密的关键一步（APP_SECRET）
 
-渠道 API Key 在库里是 AES-256-GCM 加密的，加密主密钥来自 `APP_SECRET` 环境变量；**未设置时**使用 `DATA_DIR/.secret` 文件中的随机密钥。
+渠道 API Key 在库里是 AES-256-GCM 加密的，**唯一的解密密钥 = `APP_SECRET` 环境变量**；未设置时回退用 `DATA_DIR/.secret` 文件中的随机密钥。
 
-从旧环境（本机开发库）导入的渠道数据，是用**开发机的 `apps/web/data/.secret`** 加密的。要让服务器能解密，二选一：
+开发库中的渠道数据是用开发机的 `apps/web/data/.secret`（64 位随机 hex）加密的，该值**已固化到开发机 `.env` 的 `APP_SECRET=`**。因此：
 
-- **方案 A（推荐，最省事）**：读取本机 `apps/web/data/.secret` 的内容，填到服务器 `.env` 的 `APP_SECRET=`。
-- **方案 B（更规范）**：服务器设置全新的 `APP_SECRET`，启动后在「渠道设置」里重新录入各渠道 API Key（旧渠道删除）。
+- **服务器 `.env` 的 `APP_SECRET` 必须填与开发机 `.env` 完全相同的值**（从开发机 `.env` 复制 `APP_SECRET=` 那一行）——否则渠道密钥全部解不开（表现为渠道测试报解密失败）。
+- 若不沿用旧渠道：服务器可设全新 `APP_SECRET`，启动后在「渠道设置」重新录入各渠道 API Key。
+- 密码哈希（登录）与该密钥无关（scrypt 单向哈希，不涉及解密）。
 
 ## 4. 构建与启动
 
