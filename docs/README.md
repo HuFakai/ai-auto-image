@@ -13,7 +13,7 @@
 
 5. [GitHub 项目与 Skills 调研](./01-research-and-reference.md)：早期技术选型、可参考项目和复用边界。
 6. [总体开发规划方案](./02-master-development-plan.md)：产品愿景、领域模型和长期架构基线。
-7. [AI 图文基础框架解决方案](./04-ai-image-framework-solution.md)：从 Auto-AI-Video 提取的任务、Provider、渲染和资产设计；其中“初期 SQLite”是历史决策，当前实现已演进为 PostgreSQL 方言 + PGlite/远程 PostgreSQL。
+7. [AI 图文基础框架解决方案](./04-ai-image-framework-solution.md)：本项目的任务、Provider、渲染和资产设计基线；其中“初期 SQLite”是历史决策，当前实现已演进为 PostgreSQL 方言 + PGlite/远程 PostgreSQL。
 
 ## 阶段设计基线（历史范围）
 

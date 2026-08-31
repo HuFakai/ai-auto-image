@@ -9,7 +9,9 @@ data
 coverage
 **/*.tsbuildinfo
 .git
-Auto-AI-Video
+.env
+.env.*
+!.env.example
 docs
 fixtures
 *.db

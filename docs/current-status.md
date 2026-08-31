@@ -1,7 +1,7 @@
 # 当前项目状态与代码审查报告
 
 > 审查日期：2026-08-31  
-> 审查基线：`main` / `655635a feat: 计费系统（点数+订阅）、微信/支付宝扫码支付、管理后台`  
+> 审查基线：`main` / `49aded6 完成Wave1真实渠道兼容验证`；本次补充服务器部署专项配置与文档。
 > 本文是当前实现的状态基线。后续开发优先以本文和 [当前开发路线图](./current-roadmap.md) 为准；早期规划、阶段设计和 ADR 用于保留背景，不再自动代表当前待办。
 
 ## 一、结论
@@ -25,7 +25,8 @@
 - Next.js Studio、API Route 和进程内 Job Runner 已接通。
 - 数据层已经切换为 PostgreSQL 方言：生产通过 `DATABASE_URL` 连接 PostgreSQL；本地/测试无连接串时使用进程内 PGlite，见 `packages/storage/src/database.ts`。
 - 当前 Schema 共 22 张表，覆盖项目、运行、节点、资产、作业、渠道、品牌、用户、会话、套餐、订单、钱包、订阅、点数流水和支付配置。
-- Dockerfile 已使用多阶段构建、standalone 产物、非 root 用户、健康检查和 `/data` 资产卷；生产 Compose 连接外部 PostgreSQL/Redis。
+- Dockerfile 已使用多阶段构建、standalone 产物、非 root 用户、健康检查和 `/data` 资产卷；生产 Compose 连接外部 PostgreSQL，Redis 仅作为可选预留。
+- 生产 Compose 已将根目录 `.env` 同时作为插值来源和容器运行时环境来源，固定绑定 `127.0.0.1:1235`，要求显式 `APP_SECRET`，默认内存上限 4G、图片并发 2/上限 4；服务器部署仍需在目标主机实测。
 
 ### 2. AI 生成和工作流
 
@@ -61,7 +62,7 @@
 | `pnpm eval` | 通过 | Mock 12 个用例、48 页；结构化解析和页面渲染指标均达到阈值，平均运行约 0.4 秒 |
 | `pnpm pg:export --out <临时目录>` | 通过 | 当前 22 张表白名单；旧 SQLite 缺表会记录到 manifest 并跳过 |
 | 已配置兼容渠道 smoke | 通过 | `deepseek-v4-flash` 结构化输出 6 页；`grok-imagine-image-2.0` 原生中文封面成功生成并转存，图片调用约 46 秒；报告见 `fixtures/reports/live.json` |
-| Docker 构建/启动 | 本轮未验证 | 当前审查机未安装 Docker；必须在目标 Linux/ARM 服务器执行部署脚本和真实健康检查 |
+| Docker 构建/启动 | 本轮未验证 | 当前审查机未安装 Docker；部署手册已按 Oracle 4 核 24G + 1Panel 补齐，必须在目标 Linux/ARM 服务器执行部署脚本和真实健康检查 |
 | 官方 OpenAI/xAI 直连模型 | 本轮未验证 | 当前 `.env` 未配置 `OPENAI_API_KEY` / `XAI_API_KEY`；配置后执行 `pnpm verify:openai` / `pnpm verify:xai` |
 | 支付宝/微信真实支付 | 本轮未验证 | 需要商户配置、回调域名、证书和沙箱/生产联调 |
 
@@ -90,7 +91,7 @@
 2. **生产联调部分完成**：当前配置的兼容文本/图片网关已跑通固定真实样本，并修复 DeepSeek reasoning-only 返回与网关 `thinking` 参数差异；目标服务器 Docker、反向代理、中文字体、外部 PostgreSQL/Redis 连通性、官方 OpenAI/xAI 直连和支付宝/微信回调仍需要实测记录。
 3. **权限模型仍是第一版**：已有 admin/user 基础角色和资源归属，但还没有完整 RBAC、管理员操作审计和更严格的跨用户测试；公网开放前需要补齐。
 4. **质量检查仍偏规则与人工**：原生图片中文字视觉审查依赖支持视觉输入的文本渠道；局部重绘 API 已有，框选 UI 尚未闭环。
-5. **部署性能数据未形成报告**：Compose 已放宽到 4G 内存、默认图片并发 2/上限 6，但当前没有目标服务器的峰值、队列等待和外部 Provider 限流数据。`infra/verify-deployment.sh` 的内存检查仍主要依赖人工观察。
+5. **部署性能数据未形成报告**：Compose 已设置 4G 内存、默认图片并发 2/上限 4，但当前没有目标服务器的峰值、队列等待和外部 Provider 限流数据。`infra/verify-deployment.sh` 的内存检查仍主要依赖人工观察，真实生成烟测默认关闭以避免意外消费额度。
 6. **Provider 测试覆盖不均衡**：OpenAI-compatible 的流式解析、multipart 文本、DeepSeek reasoning 开关已有合同测试；官方 OpenAI/xAI 直连端点行为仍需合同测试和带脱敏报告的真实验证。
 
 ## 六、P2 产品化工作

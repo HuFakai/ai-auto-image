@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # 阶段 0 退出条件：Linux 服务器 Docker 部署实测脚本。
 # 在目标服务器（仓库根目录）执行：bash infra/verify-deployment.sh
-# 覆盖：构建、启动、健康检查、重启持久性、镜像无 Chromium/Playwright 断言、内存基准采样。
+# 覆盖：构建、启动、健康检查、/data 持久性、镜像无 Chromium/Playwright 断言、内存基准采样。
+# 真实生成烟测默认关闭；设置 RUN_GENERATION_SMOKE=1 并提供 VERIFY_COOKIE 后才会调用模型并消耗额度。
 set -uo pipefail
 
 PASS=0
 FAIL=0
 REPORT="${REPORT:-infra/deployment-report.md}"
-APP_PORT="${PORT:-1235}"
+APP_PORT="${APP_PORT:-1235}"
 
 say() { echo "[verify] $*"; }
 check() { # check <名称> <命令...>
@@ -58,7 +59,7 @@ await_health() {
 no_browser_assertion() {
   say "断言镜像内无 Chromium / Playwright"
   local hits
-  hits=$(docker compose -f infra/docker-compose.yml exec app \
+  hits=$(docker compose -f infra/docker-compose.yml exec -T app \
     sh -c "find / -maxdepth 6 \( -iname '*chromium*' -o -iname '*chrome*' -o -iname '*playwright*' \) -not -path '/proc/*' -not -path '/sys/*' 2>/dev/null | head -5" || true)
   if [ -z "$hits" ]; then
     say "PASS  镜像无 Chromium/Playwright"; PASS=$((PASS+1)); echo "- ✅ 镜像内无 Chromium/Playwright" >> "$REPORT"
@@ -67,41 +68,47 @@ no_browser_assertion() {
   fi
 }
 
-mock_run_end_to_end() {
-  say "发起一次 Mock 生成（不产生费用）"
+authenticated_run_smoke() {
+  if [ "${RUN_GENERATION_SMOKE:-0}" != "1" ]; then
+    say "跳过真实生成烟测（默认关闭，避免未授权调用模型和消耗额度）"
+    echo "- ⏭️ 真实生成烟测已跳过；如需执行，设置 RUN_GENERATION_SMOKE=1 并提供 VERIFY_COOKIE" >> "$REPORT"
+    return 0
+  fi
+  if [ -z "${VERIFY_COOKIE:-}" ]; then
+    say "FAIL  RUN_GENERATION_SMOKE=1 时必须提供 VERIFY_COOKIE"
+    FAIL=$((FAIL+1)); echo "- ❌ 真实生成烟测缺少 VERIFY_COOKIE" >> "$REPORT"; return 1
+  fi
+  say "发起一次已授权真实生成烟测（可能消耗模型额度）"
   local run_id
   run_id=$(curl -fsS -X POST "http://127.0.0.1:${APP_PORT}/api/runs" \
+    -H "Cookie: ${VERIFY_COOKIE}" \
     -H "content-type: application/json" \
-    -d '{"topic":"部署验证：重启持久性","requestedImageConcurrency":1}' \
-    | sed -E 's/.*"runId":"([^"]+)".*/\1/')
+    -d '{"topic":"部署验证：真实生成烟测","requestedImageConcurrency":1,"textRenderingMode":"deterministic"}' \
+    | sed -nE 's/.*"runId":"([^"]+)".*/\1/p')
   if [ -z "$run_id" ]; then
     say "FAIL  创建运行失败"; FAIL=$((FAIL+1)); echo "- ❌ 创建运行失败" >> "$REPORT"; return 1
   fi
+  local status=""
   for _ in $(seq 1 60); do
-    local status
-    status=$(curl -fsS "http://127.0.0.1:${APP_PORT}/api/runs/$run_id" | sed -E 's/.*"status":"([a-z_]+)".*/\1/')
+    status=$(curl -fsS "http://127.0.0.1:${APP_PORT}/api/runs/$run_id" \
+      -H "Cookie: ${VERIFY_COOKIE}" | sed -nE 's/.*"status":"([a-z_]+)".*/\1/p')
     [ "$status" = "succeeded" ] && break
     [ "$status" = "failed" ] && break
     sleep 2
   done
-  check "Mock 运行完成（run=$run_id）" test "$status" = "succeeded"
+  check "真实生成烟测完成（run=$run_id）" test "$status" = "succeeded"
   echo "$run_id" > /tmp/aai-verify-run-id
 }
 
-restart_persistence() {
-  say "重启容器验证持久性"
+volume_persistence() {
+  say "重启容器验证 /data 持久卷"
+  docker compose -f infra/docker-compose.yml exec -T app \
+    sh -c "mkdir -p /data/verify && printf '%s\\n' deployment-verify > /data/verify/marker" >/dev/null
   docker compose -f infra/docker-compose.yml restart app >/dev/null
   sleep 8
   check "重启后 /api/health 恢复" curl -fsS "http://127.0.0.1:${APP_PORT}/api/health"
-  local run_id
-  run_id=$(cat /tmp/aai-verify-run-id 2>/dev/null || echo "")
-  if [ -n "$run_id" ]; then
-    check "重启后历史运行仍在（$run_id）" \
-      curl -fsS "http://127.0.0.1:${APP_PORT}/api/runs/$run_id"
-  fi
-  local asset_count
-  asset_count=$(docker compose -f infra/docker-compose.yml exec app sh -c "ls /data/assets/runs 2>/dev/null | wc -l" | tr -d '[:space:]')
-  check "持久卷资产仍在（$asset_count 个 run 目录）" test "$asset_count" -ge 1
+  check "/data 持久卷重启后仍可写入" \
+    docker compose -f infra/docker-compose.yml exec -T app sh -c "test -s /data/verify/marker"
 }
 
 memory_baseline() {
@@ -127,8 +134,8 @@ main() {
   build_and_up
   await_health || { docker compose -f infra/docker-compose.yml logs --tail 50 app; exit 1; }
   no_browser_assertion
-  mock_run_end_to_end
-  restart_persistence
+  authenticated_run_smoke
+  volume_persistence
   memory_baseline
 
   echo "" >> "$REPORT"

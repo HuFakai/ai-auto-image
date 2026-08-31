@@ -62,7 +62,7 @@ pnpm verify:xai      # 需要真实 xAI 密钥
 - [文档索引](./docs/README.md)
 - [GitHub 与 Skills 调研](./docs/01-research-and-reference.md)
 - [总体开发规划（战略基线）](./docs/02-master-development-plan.md)
-- [AI 图文基础框架方案（Auto-AI-Video 提取）](./docs/04-ai-image-framework-solution.md)
+- [AI 图文基础框架方案](./docs/04-ai-image-framework-solution.md)
 - [开发与环境说明](./docs/development.md)
 - [服务器部署手册](./docs/deployment.md)
 - [架构决策记录](./docs/adr/)

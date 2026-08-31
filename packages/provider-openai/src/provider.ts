@@ -263,7 +263,7 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
       return await readChatStream(response);
     } catch (error) {
       // 推理网关可能把 max_tokens 全部消耗在 reasoning_content，导致没有 final content。
-      // 按 Auto-AI-Video 的兼容策略补一次更大预算的非流式请求；reasoning 已显式关闭时不重复收费。
+      // 按兼容网关的通用策略补一次更大预算的非流式请求；reasoning 已显式关闭时不重复收费。
       if (!(error instanceof EmptyChatResponseError) || textRequestOptions?.disableReasoning) throw error;
       const currentBudget = typeof baseBody.max_tokens === "number" ? baseBody.max_tokens : 0;
       const retryBudget = Math.min(Math.max(currentBudget * 2, 4096), 16_000);

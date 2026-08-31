@@ -47,7 +47,7 @@ export class ModelRouteExhaustedError extends Error {
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * 多路由回退执行（借鉴 Auto-AI-Video model_routing/llm_service 的双循环）：
+ * 多路由回退执行（参考既有内容生产系统的双循环实践）：
  * 外层遍历 preferred + fallback 路由，内层按 route.maxAttempts 重试；
  * 不可重试错误（authentication/content_policy/invalid_request）直接跳到下一路由；
  * 全部耗尽后抛出带完整尝试记录的 ModelRouteExhaustedError。

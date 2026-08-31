@@ -1,10 +1,10 @@
-# 基于 Auto-AI-Video 提取的 AI 图文生成基础框架解决方案
+# AI 图文生成基础框架解决方案
 
-> 现状说明（2026-08-31）：本文是从 Auto-AI-Video 提取能力形成的历史基础框架方案。文中的初期 SQLite、阶段顺序和资源假设是设计基线；当前代码已演进为 PostgreSQL 方言 + 生产远程 PostgreSQL + 本地/测试 PGlite，具体状态以 [current-status.md](./current-status.md) 为准。
+> 现状说明（2026-08-31）：本文是本项目的基础框架方案。文中的初期 SQLite、阶段顺序和资源假设是设计基线；当前代码已演进为 PostgreSQL 方言 + 生产远程 PostgreSQL + 本地/测试 PGlite，具体状态以 [current-status.md](./current-status.md) 为准。
 
 > 状态：方案设计稿
 >
-> 目标：从 `/Users/fakaihu/Documents/project/AI-aute-image/Auto-AI-Video/` 提取经过实践验证的生产能力，结合当前仓库已有的图文产品规划，形成一个可持续扩展的 AI 图文生成基础框架。
+> 目标：沉淀经过实践验证的内容生产能力，结合当前仓库已有的图文产品规划，形成一个可持续扩展的 AI 图文生成基础框架。
 
 ## 1. 方案边界与结论
 
@@ -24,7 +24,7 @@
 
 ### 1.2 附件文档的使用方式
 
-`Auto-AI-Video` 中的 `AGENTS.md`、`CLAUDE.md`、README 和各类设计文档属于被分析的项目资料。本方案只提取其中的架构事实、接口思路和已验证经验，不把这些文件里的指令自动扩大为本项目的执行指令。
+历史参考项目中的说明文件属于曾经被分析的项目资料。本方案只沉淀其中的架构事实、接口思路和已验证经验，不把参考资料里的指令自动扩大为本项目的执行指令。
 
 尤其是视频项目中的音频、TTS、FFmpeg 视频合成、视频分镜时序、视频发布补给等内容，不会进入图文基础框架的首期核心路径。
 
@@ -53,13 +53,13 @@
           平台变体 / ZIP / 草稿 / 可选发布
 ```
 
-在当前仓库已有规划的基础上，落地实现仍建议采用 TypeScript Monorepo、Next.js、Drizzle、Sharp/Satori 和 SQLite。`Auto-AI-Video` 是 Python/FastAPI 项目，因此主要作为领域建模、任务可靠性和 Provider 行为的参考；不建议把两套运行时直接混入首期产品。
+在当前仓库已有规划的基础上，落地实现采用 TypeScript Monorepo、Next.js、Drizzle、Sharp/Satori 和数据库适配层。历史参考项目采用 Python/FastAPI，因此只保留领域建模、任务可靠性和 Provider 行为经验；不把两套运行时混入本项目。
 
-## 2. 从 Auto-AI-Video 提取的能力
+## 2. 已沉淀的通用能力
 
 ### 2.1 能力提取矩阵
 
-| Auto-AI-Video 能力 | 图文框架中的对应设计 | 处理方式 |
+| 通用内容生产能力 | 图文框架中的对应设计 | 处理方式 |
 | --- | --- | --- |
 | `model_routing.py` 的路由、重试和耗尽错误 | Provider Route、模型回退、统一错误和尝试记录 | 直接提取思想，按 TypeScript 接口重写 |
 | `llm_service.py` 的结构化输出、`base_url`、超时和路由解析 | TextModel、Structured Output、OpenAI/Grok 兼容文本调用 | 作为文本模型层行为规范 |
@@ -573,7 +573,7 @@ Linux Docker Host
 
 ## 13. 分阶段落地路线
 
-本文件是总体解决方案，具体阶段计划继续沿用当前仓库的阶段文档。基于 Auto-AI-Video 提取后的实施顺序建议如下：
+本文件是总体解决方案，具体阶段计划继续沿用当前仓库的阶段文档。基于当前代码和验证结果，实施顺序建议如下：
 
 ### 阶段 0：抽取内核和能力验证
 
@@ -629,7 +629,7 @@ Linux Docker Host
 本方案完成后，后续开发不应从视频项目逐文件复制，而应按以下顺序建立图文基础框架：
 
 1. 以本方案的领域模型和 Provider 协议作为实现基线。
-2. 将 `Auto-AI-Video` 的路由、任务恢复、资产血缘和质量检查提取成测试场景。
+2. 将路由、任务恢复、资产血缘和质量检查沉淀成可执行测试场景。
 3. 先完成阶段 0 的 OpenAI/Grok 图片调用和 SQLite 可恢复任务验证。
 4. 再实现阶段 1 的轮播图 MVP。
 5. 阶段 2 之后才扩展漫画与高级视觉，阶段 3 再评估 PostgreSQL、Redis 和独立 Worker。
@@ -640,7 +640,6 @@ Linux Docker Host
 - [总体开发规划方案](./02-master-development-plan.md)
 - [阶段 0：工程基础与技术验证](./phases/00-foundation-and-validation.md)
 - [阶段 1：图文生成 MVP](./phases/01-mvp-carousel-generation.md)
-- [Auto-AI-Video README](../Auto-AI-Video/README.md)
-- [Auto-AI-Video Durable Tasks](../Auto-AI-Video/docs/DURABLE_TASKS.md)
-- [Auto-AI-Video Production Runner](../Auto-AI-Video/docs/PRODUCTION_RUNNER.md)
-- [Auto-AI-Video 多频道生产基线](../Auto-AI-Video/docs/MULTI_CHANNEL_BASELINE.md)
+- [当前项目状态与代码审查报告](./current-status.md)
+- [当前开发路线图](./current-roadmap.md)
+- [服务器部署手册](./deployment.md)

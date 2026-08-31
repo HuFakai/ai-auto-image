@@ -20,8 +20,9 @@ ENV NODE_ENV=production \
     SQLITE_MIGRATIONS_DIR=/app/drizzle \
     FONT_DIR=/app/fonts \
     IMAGE_GENERATION_CONCURRENCY_DEFAULT=2 \
-    IMAGE_GENERATION_CONCURRENCY_MAX=6 \
-    IMAGE_POSTPROCESS_CONCURRENCY_MAX=2
+    IMAGE_GENERATION_CONCURRENCY_MAX=4 \
+    IMAGE_POSTPROCESS_CONCURRENCY_MAX=2 \
+    JOB_RUNNER_CONCURRENCY=2
 
 COPY --from=build /repo/apps/web/.next/standalone ./
 COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static

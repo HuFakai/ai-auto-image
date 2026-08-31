@@ -42,7 +42,7 @@ pnpm dev
 | `APP_SECRET` | 渠道密钥 AES-256-GCM 加密主密钥；生产必须固定并妥善保管 |
 | `REGISTER_ENABLED` / `REGISTER_INVITE_CODE` | 注册开关与邀请码 |
 | `TEXT_*` / `IMAGE_*` | 首次启动自动导入的文本/图片渠道配置 |
-| `OPENAI_API_KEY` / `XAI_API_KEY` | 官方 Provider 备选密钥 |
+| `OPENAI_API_KEY` / `XAI_API_KEY` | 官方 Provider 备用密钥；当前首启自动导入建议仍使用显式 `TEXT_*` / `IMAGE_*` |
 | `DATA_DIR` / `ASSETS_DIR` / `EXPORTS_DIR` | 运行时数据、生成资产和导出文件目录 |
 | `IMAGE_GENERATION_CONCURRENCY_DEFAULT` | 未单独请求时的图片并发默认值 |
 | `IMAGE_GENERATION_CONCURRENCY_MAX` | 服务器图片 API 并发硬上限 |
@@ -51,7 +51,7 @@ pnpm dev
 | `STARTER_CREDITS` | 新用户初始点数 |
 | `PAY_NOTIFY_BASE_URL` 及支付变量 | 支付宝/微信支付预下单、验签和回调 |
 
-本地模板默认图片并发为 1、上限为 4；生产 Compose 当前设置为默认 2、上限 6。实际有效图片并发为：
+本地模板默认图片并发为 1、上限为 4；生产 Compose 当前设置为默认 2、上限 4。实际有效图片并发为：
 
 ```text
 min(用户请求并发, IMAGE_GENERATION_CONCURRENCY_MAX, Provider imageConcurrencyMax)

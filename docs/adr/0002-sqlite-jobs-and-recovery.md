@@ -7,7 +7,7 @@
 
 ## 背景
 
-图片生成是分钟级长任务，HTTP 请求不可依赖；应用重启后必须从持久层恢复。最初的单机资源约束排除了 Redis/BullMQ，因此采用进程内 Runner + 数据库作业表。Auto-AI-Video 的 Durable Tasks（状态机 + attempts/recoveries）与 Production Runner（租约 + 看门狗 + 熔断）是该模型的参考来源。
+图片生成是分钟级长任务，HTTP 请求不可依赖；应用重启后必须从持久层恢复。最初的单机资源约束排除了 Redis/BullMQ，因此采用进程内 Runner + 数据库作业表。状态机、attempts/recoveries、租约、看门狗和熔断等机制来自既有内容生产系统的实践，并已按本项目数据模型独立实现。
 
 ## 决策
 

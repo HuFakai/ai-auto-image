@@ -8,7 +8,7 @@ import { z } from "zod";
  * 1. 把 JSON Schema 注入 Prompt（不依赖 provider 的 JSON mode，兼容所有 OpenAI-compatible 服务）；
  * 2. 三级解析容错：直接 JSON.parse → 提取 ```json 代码块 → 截取首尾大括号；
  * 3. Zod 校验；失败允许一次"带错误信息的修复调用"，仍失败则抛出可诊断错误。
- * （解析策略借鉴 Auto-AI-Video llm_service 的 _parse_response_as_model）
+ * （解析策略来自既有内容生产系统的生产实践，并在本项目中独立实现）
  */
 export async function generateStructured<T>(input: {
   schemaName: string;

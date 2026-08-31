@@ -9,7 +9,6 @@ export default tseslint.config(
       "**/coverage/**",
       "**/next-env.d.ts",
       "**/*.config.mjs",
-      "Auto-AI-Video/**",
       "data/**",
     ],
   },

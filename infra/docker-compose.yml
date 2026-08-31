@@ -12,28 +12,37 @@ services:
     restart: unless-stopped
     # 仅绑定回环：对外由 1Panel OpenResty（反代 + HTTPS）暴露，1235 端口不直连公网
     ports:
-      - "127.0.0.1:${PORT:-1235}:1235"
+      - "127.0.0.1:1235:1235"
     volumes:
       - aai-data:/data
+    # 根目录 .env 同时作为 Compose 插值来源和容器运行时环境来源。
+    # 这样 TEXT_*/IMAGE_*、支付和自定义兼容网关参数才能被首次自动导入。
+    env_file:
+      - ../.env
     environment:
       # ── 数据库（必填）：postgres://user:pass@1Panel-postgresql-VkBl:5432/ai_image ──
       DATABASE_URL: ${DATABASE_URL:?请在 .env 配置 DATABASE_URL}
       REDIS_URL: ${REDIS_URL:-}
       # ── 安全（必填）：渠道密钥加密主密钥；沿用导入数据时须与加密端一致（见 docs/deployment.md）──
-      APP_SECRET: ${APP_SECRET:-}
+      APP_SECRET: ${APP_SECRET:?请在 .env 配置 APP_SECRET}
       # ── 注册策略：默认关闭；开启需 REGISTER_ENABLED=1，可选邀请码 ──
       REGISTER_ENABLED: ${REGISTER_ENABLED:-0}
       REGISTER_INVITE_CODE: ${REGISTER_INVITE_CODE:-}
+      PORT: "1235"
       DATA_DIR: /data
       ASSETS_DIR: /data/assets
       EXPORTS_DIR: /data/exports
       SQLITE_MIGRATIONS_DIR: /app/drizzle
       FONT_DIR: /app/fonts
-      IMAGE_GENERATION_CONCURRENCY_DEFAULT: "2"
-      IMAGE_GENERATION_CONCURRENCY_MAX: "6"
-      IMAGE_POSTPROCESS_CONCURRENCY_MAX: "2"
-      JOB_RUNNER_CONCURRENCY: "2"
-      LOG_LEVEL: info
+      IMAGE_GENERATION_CONCURRENCY_DEFAULT: ${IMAGE_GENERATION_CONCURRENCY_DEFAULT:-2}
+      IMAGE_GENERATION_CONCURRENCY_MAX: ${IMAGE_GENERATION_CONCURRENCY_MAX:-4}
+      IMAGE_POSTPROCESS_CONCURRENCY_MAX: ${IMAGE_POSTPROCESS_CONCURRENCY_MAX:-2}
+      JOB_RUNNER_CONCURRENCY: ${JOB_RUNNER_CONCURRENCY:-2}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # 生产镜像禁止模拟支付；即使 .env.example 未被改写也不会误开。
+      PAYMENT_MOCK_ENABLED: "0"
+    # 普通 Docker Compose 也生效的内存上限；deploy.resources 兼容其他编排方式。
+    mem_limit: 4g
     deploy:
       resources:
         limits:

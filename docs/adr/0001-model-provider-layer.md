@@ -5,8 +5,8 @@
 ## 背景
 
 业务需要 OpenAI、xAI/Grok 与任意 OpenAI-compatible 服务可互换（docs/02 §8），且不允许
-SDK 类型扩散到领域代码。Auto-AI-Video 的 `model_routing.py` + `llm_service.py` 验证了
-「多路由回退 + 尝试记录 + 空响应恢复」在生产中的有效性。
+SDK 类型扩散到领域代码。既有内容生产系统的实践验证了「多路由回退 + 尝试记录 + 空响应恢复」
+在生产中的有效性，本项目按 TypeScript 领域接口独立实现。
 
 ## 决策
 
