@@ -1,10 +1,12 @@
 # 多阶段构建：不包含源码缓存、测试工具、Chromium 与开发依赖
 FROM node:22-alpine AS build
 WORKDIR /repo
+RUN apk add --no-cache bash curl
 RUN corepack enable
 COPY . .
+# 字体不进 Git；在构建阶段下载到镜像，保证确定性中文渲染在全新服务器上可用。
+RUN bash scripts/fetch-fonts.sh
 RUN pnpm install --frozen-lockfile
-# 字体已在仓库上下文中（.gitignore 仅影响 Git，不影响 Docker 上下文）
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 

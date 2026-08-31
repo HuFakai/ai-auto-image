@@ -5,6 +5,10 @@
 # 真实生成烟测默认关闭；设置 RUN_GENERATION_SMOKE=1 并提供 VERIFY_COOKIE 后才会调用模型并消耗额度。
 set -uo pipefail
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+COMPOSE=(docker compose --env-file "$ROOT_DIR/.env" -f "$ROOT_DIR/infra/docker-compose.yml")
+
 PASS=0
 FAIL=0
 REPORT="${REPORT:-infra/deployment-report.md}"
@@ -39,8 +43,8 @@ require_docker() {
 
 build_and_up() {
   say "构建镜像（多阶段，首次约 3-8 分钟）"
-  docker compose -f infra/docker-compose.yml build 2>&1 | tail -2
-  docker compose -f infra/docker-compose.yml up -d
+  "${COMPOSE[@]}" build 2>&1 | tail -2
+  "${COMPOSE[@]}" up -d
 }
 
 await_health() {
@@ -59,7 +63,7 @@ await_health() {
 no_browser_assertion() {
   say "断言镜像内无 Chromium / Playwright"
   local hits
-  hits=$(docker compose -f infra/docker-compose.yml exec -T app \
+  hits=$("${COMPOSE[@]}" exec -T app \
     sh -c "find / -maxdepth 6 \( -iname '*chromium*' -o -iname '*chrome*' -o -iname '*playwright*' \) -not -path '/proc/*' -not -path '/sys/*' 2>/dev/null | head -5" || true)
   if [ -z "$hits" ]; then
     say "PASS  镜像无 Chromium/Playwright"; PASS=$((PASS+1)); echo "- ✅ 镜像内无 Chromium/Playwright" >> "$REPORT"
@@ -102,13 +106,13 @@ authenticated_run_smoke() {
 
 volume_persistence() {
   say "重启容器验证 /data 持久卷"
-  docker compose -f infra/docker-compose.yml exec -T app \
+  "${COMPOSE[@]}" exec -T app \
     sh -c "mkdir -p /data/verify && printf '%s\\n' deployment-verify > /data/verify/marker" >/dev/null
-  docker compose -f infra/docker-compose.yml restart app >/dev/null
+  "${COMPOSE[@]}" restart app >/dev/null
   sleep 8
   check "重启后 /api/health 恢复" curl -fsS "http://127.0.0.1:${APP_PORT}/api/health"
   check "/data 持久卷重启后仍可写入" \
-    docker compose -f infra/docker-compose.yml exec -T app sh -c "test -s /data/verify/marker"
+    "${COMPOSE[@]}" exec -T app sh -c "test -s /data/verify/marker"
 }
 
 memory_baseline() {
@@ -120,7 +124,7 @@ memory_baseline() {
     echo "| 采样点 | 内存用量 |"
     echo "|---|---|"
     local idle
-    idle=$(docker stats --no-stream --format "{{.MemUsage}}" "$(docker compose -f infra/docker-compose.yml ps -q app)" | awk '{print $1}')
+    idle=$(docker stats --no-stream --format "{{.MemUsage}}" "$("${COMPOSE[@]}" ps -q app)" | awk '{print $1}')
     echo "| 空闲（目标 ≤250MB） | $idle |"
   } >> "$REPORT"
   say "空闲内存已记录（见报告）。单页合成峰值请保持本脚本运行并另开终端执行："
@@ -132,7 +136,7 @@ main() {
   init_report
   require_docker
   build_and_up
-  await_health || { docker compose -f infra/docker-compose.yml logs --tail 50 app; exit 1; }
+  await_health || { "${COMPOSE[@]}" logs --tail 50 app; exit 1; }
   no_browser_assertion
   authenticated_run_smoke
   volume_persistence

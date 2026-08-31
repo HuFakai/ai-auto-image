@@ -139,8 +139,8 @@ docs/                      当前状态、路线图、部署手册和设计基�
 ## 9. 生产部署入口
 
 ```bash
-docker compose -f infra/docker-compose.yml up -d --build
-docker compose -f infra/docker-compose.yml logs -f app
+docker compose --env-file .env -f infra/docker-compose.yml up -d --build
+docker compose --env-file .env -f infra/docker-compose.yml logs -f app
 curl http://127.0.0.1:1235/api/health
 ```
 

@@ -35,7 +35,7 @@
 
 目标：在目标 Docker 服务器完成小范围真实用户验证。
 
-- 服务器执行 `docker compose -f infra/docker-compose.yml up -d --build`、健康检查、重启恢复和资产持久化验证。
+- 服务器执行 `docker compose --env-file .env -f infra/docker-compose.yml up -d --build`、健康检查、重启恢复和资产持久化验证。
 - 核对外部 PostgreSQL/Redis 网络、迁移、备份、连接池、`APP_SECRET`、HTTPS、注册开关和日志脱敏。
 - ✅ 已使用当前 `.env` 配置的 OpenAI-compatible 文本渠道 + Grok 图片网关跑通固定样本：6 页结构化 Storyboard、1 张原生中文封面、图片转存成功；报告位于 `fixtures/reports/live.json`。
 - ⏳ 官方 OpenAI 与 xAI 直连渠道仍需在配置对应密钥后分别验证，并记录成功率、耗时、并发、成本、错字和图片下载失败。

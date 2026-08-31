@@ -2,7 +2,7 @@ name: ai-auto-image
 
 # 生产部署：连接外部 PostgreSQL / Redis（如 1Panel 托管实例）。
 # 在仓库根 .env 提供 DATABASE_URL / REDIS_URL / APP_SECRET，然后：
-#   docker compose -f infra/docker-compose.yml up -d --build
+#   docker compose --env-file .env -f infra/docker-compose.yml up -d --build
 services:
   app:
     build:
@@ -10,9 +10,10 @@ services:
       dockerfile: infra/Dockerfile
     container_name: aai-app
     restart: unless-stopped
-    # 仅绑定回环：对外由 1Panel OpenResty（反代 + HTTPS）暴露，1235 端口不直连公网
+    # 默认仅绑定回环，由 1Panel OpenResty（反代 + HTTPS）对外暴露。
+    # 临时公网直连测试时，在 .env 设置 APP_BIND_ADDRESS=0.0.0.0，并放行宿主机/云防火墙 1235。
     ports:
-      - "127.0.0.1:1235:1235"
+      - "${APP_BIND_ADDRESS:-127.0.0.1}:1235:1235"
     volumes:
       - aai-data:/data
     # 根目录 .env 同时作为 Compose 插值来源和容器运行时环境来源。

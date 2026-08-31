@@ -9,11 +9,11 @@
 ~~~text
 公网
   │
-Oracle VCN / 1Panel 防火墙：仅 80、443
+Oracle VCN / 1Panel 防火墙
   │
-1Panel OpenResty：HTTPS + 反向代理
+1Panel OpenResty：HTTPS + 反向代理（推荐）
   │
-127.0.0.1:1235
+127.0.0.1:1235（APP_BIND_ADDRESS 默认值）
   │
 aai-app（Node.js 22、非 root、/data 持久卷）
   ├── 1Panel PostgreSQL（同 Docker 网络，必需）
@@ -62,14 +62,24 @@ df -h /var/lib/docker
 
 ### 2.2 Oracle 云和 1Panel 防火墙
 
-在 Oracle VCN 的 Security List/NSG，以及 1Panel 防火墙中按以下原则配置：
+本项目支持两种访问方式。生产环境推荐使用方式 A；方式 B 只适合临时通过公网 IP 验证。
 
-- 对公网开放 80、443。
+**方式 A：1Panel 反向代理（推荐）**
+
+- Oracle VCN/NSG 和 1Panel 防火墙只开放 80、443。
 - SSH 22 只允许自己的固定 IP 或 VPN 网段。
-- 不对公网开放 1235、5432、6379。
-- 1235 由 Compose 绑定到 127.0.0.1，只能被本机的 1Panel 反向代理访问。
+- `.env` 保持 `APP_BIND_ADDRESS=127.0.0.1`。
+- 1Panel 网站/反向代理目标填写 `http://127.0.0.1:1235`。
+- PostgreSQL、Redis 和应用端口 1235 不对公网开放。
 
-如果暂时只通过公网 IP 测试，也建议先使用 1Panel 反向代理，不要直接把 1235 暴露到公网。
+**方式 B：公网 IP 直连测试**
+
+- `.env` 设置 `APP_BIND_ADDRESS=0.0.0.0`。
+- 在 Oracle VCN Security List/NSG 和 1Panel 防火墙放行入站 TCP 1235，来源尽量限制为你的公网 IP `/32`，不要直接对全网开放。
+- 修改配置后必须使用 `docker compose up -d --force-recreate`，仅 `restart` 不会重新读取端口绑定。
+- 通过 `http://服务器公网IP:1235` 访问；测试结束后建议恢复为 `127.0.0.1` 并关闭 1235 入站规则。
+
+无论哪种方式，5432 和 6379 都不应对公网开放。
 
 ### 2.3 确认 PostgreSQL/Redis 的 Docker 网络
 
@@ -134,20 +144,20 @@ REDIS_URL=
 
 ### 4.1 获取仓库
 
-首次部署：
+首次部署（1Panel 默认应用目录）：
 
 ~~~bash
-mkdir -p /opt
-cd /opt
+mkdir -p /opt/1panel/apps
+cd /opt/1panel/apps
 git clone https://github.com/HuFakai/ai-auto-image.git
-cd /opt/ai-auto-image
+cd /opt/1panel/apps/ai-auto-image
 git rev-parse --short HEAD
 ~~~
 
 后续更新已有目录：
 
 ~~~bash
-cd /opt/ai-auto-image
+cd /opt/1panel/apps/ai-auto-image
 git fetch origin
 git pull --ff-only origin main
 git rev-parse --short HEAD
@@ -158,7 +168,7 @@ git rev-parse --short HEAD
 ### 4.2 创建运行时配置
 
 ~~~bash
-cd /opt/ai-auto-image
+cd /opt/1panel/apps/ai-auto-image
 cp .env.example .env
 chmod 600 .env
 ~~~
@@ -201,6 +211,8 @@ JOB_RUNNER_CONCURRENCY=2
 
 # 应用端口固定为 1235
 PORT=1235
+# 默认仅本机访问；如需临时公网 IP 直连测试，改为 0.0.0.0
+APP_BIND_ADDRESS=127.0.0.1
 LOG_LEVEL=info
 ~~~
 
@@ -231,7 +243,7 @@ APP_SECRET 是渠道 API Key 的加密主密钥：
 Compose 使用根目录 .env 作为容器运行时环境文件；同时 .dockerignore 已排除 .env，避免密钥进入 Docker 构建上下文。请确认：
 
 ~~~bash
-cd /opt/ai-auto-image
+cd /opt/1panel/apps/ai-auto-image
 test -s .env
 stat -c '%a %n' .env 2>/dev/null || stat -f '%Lp %N' .env
 ~~~
@@ -243,30 +255,31 @@ stat -c '%a %n' .env 2>/dev/null || stat -f '%Lp %N' .env
 当前 Docker Compose 会：
 
 - 把根目录 .env 传入容器，保证模型、支付和 Provider 配置生效。
-- 强制应用监听并绑定 1235。
+- 应用监听容器内 1235；宿主机绑定地址由 `APP_BIND_ADDRESS` 控制，默认是 127.0.0.1。
 - 启动时执行 PostgreSQL 迁移。
 - 把 /data 挂载到名为 aai-data 的持久卷。
 - 将容器内存限制为 4G。
 - 强制生产镜像关闭模拟支付。
 - 不安装 Chromium、Playwright 或浏览器运行时。
+- 构建阶段自动执行 `scripts/fetch-fonts.sh`，将 Noto Sans/Serif SC 放入镜像；全新 `git clone` 不需要手工创建字体目录。
 
 在服务器执行：
 
 ~~~bash
-cd /opt/ai-auto-image
+cd /opt/1panel/apps/ai-auto-image
 
 # 只验证 Compose 插值和文件，不输出完整敏感配置
-docker compose -f infra/docker-compose.yml config --quiet
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml config --quiet
 
 # 首次构建并后台启动
-docker compose -f infra/docker-compose.yml up -d --build
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml up -d --build
 
 # 查看状态和健康状态
-docker compose -f infra/docker-compose.yml ps
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml ps
 docker inspect aai-app --format '{{.State.Status}} / health={{if .State.Health}}{{.State.Health.Status}}{{else}}n/a{{end}}'
 
 # 查看迁移、启动和错误日志
-docker compose -f infra/docker-compose.yml logs --tail=200 app
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml logs --tail=200 app
 
 # 本机健康检查
 curl -fsS http://127.0.0.1:1235/api/health
@@ -279,7 +292,7 @@ curl -fsS http://127.0.0.1:1235/api/health
 如果修改了 .env，仅执行 docker compose restart 不一定会重新创建容器并应用新的环境变量。使用：
 
 ~~~bash
-docker compose -f infra/docker-compose.yml up -d --force-recreate
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml up -d --force-recreate
 ~~~
 
 不要使用 docker compose down -v 作为普通重启或更新命令，它会删除应用持久卷。
@@ -346,7 +359,7 @@ curl -fsS https://<你的域名>/api/health
 ### 7.3 部署验证脚本
 
 ~~~bash
-cd /opt/ai-auto-image
+cd /opt/1panel/apps/ai-auto-image
 bash infra/verify-deployment.sh
 ~~~
 
@@ -386,17 +399,17 @@ docker exec <postgres-container> pg_dump \
 应用的图片资产和导出包在 Docker 持久卷中。备份期间可短暂停止应用，减少文件正在写入的概率：
 
 ~~~bash
-cd /opt/ai-auto-image
+cd /opt/1panel/apps/ai-auto-image
 mkdir -p /opt/backups/ai-auto-image
 
-docker compose -f infra/docker-compose.yml stop app
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml stop app
 
 docker run --rm --volumes-from aai-app \
   -v /opt/backups/ai-auto-image:/backup \
   alpine:3.20 \
   sh -c 'tar czf /backup/aai-data_$(date +%F_%H%M%S).tar.gz -C /data .'
 
-docker compose -f infra/docker-compose.yml start app
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml start app
 ~~~
 
 同时备份服务器上的 .env（使用受控权限和安全存储，不要提交 Git），因为没有 APP_SECRET 就无法解密渠道密钥。备份 PostgreSQL、/data 和 .env 才能构成可恢复组合。
@@ -419,12 +432,12 @@ docker compose -f infra/docker-compose.yml start app
 ### 9.1 正常更新
 
 ~~~bash
-cd /opt/ai-auto-image
+cd /opt/1panel/apps/ai-auto-image
 git fetch origin
 git pull --ff-only origin main
-docker compose -f infra/docker-compose.yml up -d --build
-docker compose -f infra/docker-compose.yml ps
-docker compose -f infra/docker-compose.yml logs --since=5m app
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml up -d --build
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml ps
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml logs --since=5m app
 curl -fsS http://127.0.0.1:1235/api/health
 ~~~
 
@@ -440,13 +453,13 @@ docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}'
 回滚前先备份 PostgreSQL 和 /data，记录当前提交。然后切换到已经验证过的提交或标签，重新构建：
 
 ~~~bash
-cd /opt/ai-auto-image
+cd /opt/1panel/apps/ai-auto-image
 git fetch origin
 git log --oneline -5
 # 选择已验证的提交/标签后再执行切换
 git switch --detach <known-good-commit>
-docker compose -f infra/docker-compose.yml up -d --build
-docker compose -f infra/docker-compose.yml logs --since=5m app
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml up -d --build
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml logs --since=5m app
 curl -fsS http://127.0.0.1:1235/api/health
 ~~~
 
@@ -459,7 +472,8 @@ curl -fsS http://127.0.0.1:1235/api/health
 | Compose 配置校验失败 | docker compose ... config --quiet | .env 缺失、APP_SECRET/数据库未配置、外部网络名错误 |
 | 容器反复重启 | docker compose ... logs --tail=200 app | PostgreSQL 不可达、迁移失败、密钥缺失、内存不足 |
 | /api/health 返回 500 | 容器日志 + PostgreSQL 网络 | 数据库 URL、容器网络、账号权限或迁移问题 |
-| 页面打不开 | 1Panel 反代、证书、Oracle 入站规则 | 代理目标写错、1235 被占用、443 未放行 |
+| 页面打不开 | 绑定地址、1Panel 反代、证书、Oracle 入站规则 | `APP_BIND_ADDRESS` 仍为回环、代理目标写错、1235/443 未按访问方式放行 |
+| Docker 构建提示字体目录不存在 | 构建日志和 `scripts/fetch-fonts.sh` | 旧版本未在构建阶段下载字体；更新到包含自动下载的版本后重新构建 |
 | 健康正常但显示 Mock | 设置页渠道列表 | TEXT_*/IMAGE_* 未自动导入，或渠道被禁用 |
 | 渠道密钥解密失败 | APP_SECRET 是否与录入时一致 | 更换了主密钥或迁移时未带旧密钥 |
 | 任务一直排队 | Run/Job 状态、Provider 限流、docker stats | 外部接口慢、并发上限过低或 Provider 限流 |
@@ -470,7 +484,7 @@ curl -fsS http://127.0.0.1:1235/api/health
 ## 10. 上线前检查清单
 
 - [ ] 服务器架构、Docker、Compose、磁盘和内存已记录。
-- [ ] Oracle VCN 和 1Panel 只开放必要端口；1235/5432/6379 未暴露公网。
+- [ ] 生产反代模式下 Oracle VCN 和 1Panel 只开放必要端口；1235/5432/6379 未暴露公网。
 - [ ] PostgreSQL 数据库已创建，应用与数据库共享正确 Docker 网络。
 - [ ] DATABASE_URL 未使用容器内的 localhost。
 - [ ] APP_SECRET 已设置并安全备份；迁移旧渠道时密钥一致。
@@ -488,20 +502,20 @@ curl -fsS http://127.0.0.1:1235/api/health
 
 | 项目 | 当前值 |
 | --- | --- |
-| 应用宿主机端口 | 127.0.0.1:1235 |
+| 应用宿主机端口 | `${APP_BIND_ADDRESS:-127.0.0.1}:1235` |
 | 容器监听端口 | 1235 |
 | 应用容器 | aai-app |
 | 应用持久目录 | /data |
 | Compose 文件 | infra/docker-compose.yml |
-| 部署路径示例 | /opt/ai-auto-image |
+| 部署路径示例 | /opt/1panel/apps/ai-auto-image |
 | 健康接口 | http://127.0.0.1:1235/api/health |
 | 正式入口 | https://<你的域名>/ |
 
 日常只使用以下命令查看和更新，不要把删除卷当作重启手段：
 
 ~~~bash
-docker compose -f infra/docker-compose.yml ps
-docker compose -f infra/docker-compose.yml logs --tail=200 app
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml ps
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml logs --tail=200 app
 docker stats aai-app --no-stream
-docker compose -f infra/docker-compose.yml up -d --build
+docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/apps/ai-auto-image/infra/docker-compose.yml up -d --build
 ~~~

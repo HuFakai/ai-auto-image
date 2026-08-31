@@ -35,12 +35,12 @@ pnpm dev
 生产 Compose 运行单个 Web 容器，连接外部 PostgreSQL（必填）和可选 Redis，资产与导出文件挂载到 `/data`：
 
 ```bash
-docker compose -f infra/docker-compose.yml up -d --build
-docker compose -f infra/docker-compose.yml logs -f app
+docker compose --env-file .env -f infra/docker-compose.yml up -d --build
+docker compose --env-file .env -f infra/docker-compose.yml logs -f app
 curl http://127.0.0.1:1235/api/health
 ```
 
-完整步骤、HTTPS、备份、注册策略和上线安全项见 [服务器部署手册](./docs/deployment.md)。未完成 P0 安全项前，不要开放真实收费或公网注册。
+默认 1235 仅绑定本机；需要临时公网 IP 直连时，在 `.env` 设置 `APP_BIND_ADDRESS=0.0.0.0`，并按 [服务器部署手册](./docs/deployment.md) 放行云防火墙。生产环境建议使用 1Panel HTTPS 反向代理。完整步骤、备份、注册策略和上线安全项见 [服务器部署手册](./docs/deployment.md)。未完成 P0 安全项前，不要开放真实收费或公网注册。
 
 ## 常用命令
 
