@@ -49,6 +49,20 @@ export const XAI_CAPABILITIES: CompatCapabilities = {
   },
 };
 
+/**
+ * 推理型兼容模型的默认策略：DeepSeek 结构化输出若把 max_tokens 全耗在 reasoning 上，
+ * 可能没有 final content。可通过 TEXT_DISABLE_REASONING=0 保留推理，=1 对兼容文本渠道统一关闭。
+ */
+export function shouldDisableReasoning(
+  model: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const configured = env.TEXT_DISABLE_REASONING?.trim().toLowerCase();
+  if (configured === "1" || configured === "true") return true;
+  if (configured === "0" || configured === "false") return false;
+  return /deepseek/i.test(model);
+}
+
 /** 自定义 compatible 路由预设：全部能力显式配置，不根据模型名猜测 */
 export function compatibleRoute(
   input: Partial<ProviderRouteConfig> = {},

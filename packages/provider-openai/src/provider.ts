@@ -74,6 +74,13 @@ export interface ImageRequestOptions {
 
 export interface CompatCapabilities {
   text?: Partial<TextCapabilities>;
+  /** 文本请求参数差异（例如 DeepSeek 兼容网关的推理开关） */
+  textRequest?: {
+    /** 通过 OpenAI-compatible 顶层 thinking 参数关闭 provider reasoning */
+    disableReasoning?: boolean;
+    /** 透传网关支持的额外 chat/completions 参数 */
+    extraParams?: Record<string, unknown>;
+  };
   image?: Partial<ImageCapabilities>;
   /** 比例 → 尺寸字符串映射（Provider 差异在此收敛） */
   aspectSizeMap?: AspectSizeMap;
@@ -107,12 +114,58 @@ const DEFAULT_TEXT_CAPABILITIES: TextCapabilities = {
 
 interface ChatResponseShape {
   id?: string;
-  choices?: Array<{ message?: { content?: string | null } }>;
+  choices?: Array<ChatChoiceShape>;
   usage?: {
     prompt_tokens?: number | null;
     completion_tokens?: number | null;
     total_tokens?: number | null;
   } | null;
+}
+
+interface ChatChoiceShape {
+  finish_reason?: string | null;
+  text?: unknown;
+  message?: {
+    content?: unknown;
+    reasoning_content?: unknown;
+  };
+  delta?: {
+    content?: unknown;
+    reasoning_content?: unknown;
+  };
+}
+
+class EmptyChatResponseError extends AiError {
+  constructor(
+    readonly finishReason: string | undefined,
+    readonly reasoningChars: number,
+    readonly streaming: boolean,
+  ) {
+    super(
+      "provider_unavailable",
+      `empty response from text model${streaming ? " (stream)" : ""}; ` +
+        `finish_reason=${finishReason ?? "unknown"}; reasoning_chars=${reasoningChars}`,
+    );
+    this.name = "EmptyChatResponseError";
+  }
+}
+
+function extractText(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return "";
+  return value
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (!part || typeof part !== "object") return "";
+      const candidate = part as { text?: unknown; value?: unknown };
+      if (typeof candidate.text === "string") return candidate.text;
+      if (candidate.text && typeof candidate.text === "object") {
+        const nested = candidate.text as { value?: unknown };
+        if (typeof nested.value === "string") return nested.value;
+      }
+      return typeof candidate.value === "string" ? candidate.value : "";
+    })
+    .join("");
 }
 
 export interface CreateCompatProviderInput {
@@ -126,6 +179,7 @@ export interface CreateCompatProviderInput {
 /** 构造一个通用 OpenAI-compatible Provider（openai / xai / compatible 共用） */
 export function createOpenAICompatProvider(input: CreateCompatProviderInput): ProviderBundle {
   const { config, client } = input;
+  const textRequestOptions = input.capabilities?.textRequest;
   const textCaps: TextCapabilities = { ...DEFAULT_TEXT_CAPABILITIES, ...input.capabilities?.text };
   const imageCaps: ImageCapabilities = { ...DEFAULT_IMAGE_CAPABILITIES, ...input.capabilities?.image };
   const aspectSizeMap: Required<AspectSizeMap> = {
@@ -137,9 +191,14 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
 
   const readChatResponse = (response: unknown): TextResult => {
     const body = response as ChatResponseShape;
-    const text = body.choices?.[0]?.message?.content ?? "";
+    const choice = body.choices?.[0];
+    const text = extractText(choice?.message?.content ?? choice?.text);
     if (!text.trim()) {
-      throw new AiError("provider_unavailable", "empty response from text model");
+      throw new EmptyChatResponseError(
+        choice?.finish_reason ?? undefined,
+        extractText(choice?.message?.reasoning_content).length,
+        false,
+      );
     }
     return {
       text,
@@ -161,19 +220,24 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
     let text = "";
     let providerRequestId: string | undefined;
     let usage: ModelUsage | undefined;
+    let finishReason: string | undefined;
+    let reasoningChars = 0;
     for await (const raw of iterable) {
       const chunk = raw as {
         id?: string;
-        choices?: Array<{ delta?: { content?: string | null } }>;
+        choices?: Array<ChatChoiceShape>;
         usage?: Parameters<typeof usageFromOpenAI>[0];
       };
-      const delta = chunk.choices?.[0]?.delta?.content;
-      if (delta) text += delta;
+      const choice = chunk.choices?.[0];
+      const deltaText = extractText(choice?.delta?.content ?? choice?.text ?? choice?.message?.content);
+      if (deltaText) text += deltaText;
+      reasoningChars += extractText(choice?.delta?.reasoning_content ?? choice?.message?.reasoning_content).length;
+      if (choice?.finish_reason) finishReason = choice.finish_reason;
       if (chunk.id) providerRequestId = chunk.id;
       if (chunk.usage) usage = usageFromOpenAI(chunk.usage);
     }
     if (!text.trim()) {
-      throw new AiError("provider_unavailable", "empty response from text model (stream)");
+      throw new EmptyChatResponseError(finishReason, reasoningChars, true);
     }
     return { text, usage: usage ?? usageFromOpenAI(undefined), providerRequestId };
   };
@@ -182,11 +246,33 @@ export function createOpenAICompatProvider(input: CreateCompatProviderInput): Pr
     body: Record<string, unknown>,
     options?: { signal?: AbortSignal },
   ): Promise<TextResult> => {
+    const baseBody: Record<string, unknown> = {
+      ...(textRequestOptions?.extraParams ?? {}),
+      ...body,
+    };
+    if (textRequestOptions?.disableReasoning) {
+      // 部分兼容网关接受顶层 thinking；直接把 extra_body 作为 JSON 字段发送会返回 400。
+      baseBody.thinking = { type: "disabled" };
+    }
+
     const response = await client.chat.completions.create(
-      { ...body, stream: true, stream_options: { include_usage: true } },
+      { ...baseBody, stream: true, stream_options: { include_usage: true } },
       options,
     );
-    return readChatStream(response);
+    try {
+      return await readChatStream(response);
+    } catch (error) {
+      // 推理网关可能把 max_tokens 全部消耗在 reasoning_content，导致没有 final content。
+      // 按 Auto-AI-Video 的兼容策略补一次更大预算的非流式请求；reasoning 已显式关闭时不重复收费。
+      if (!(error instanceof EmptyChatResponseError) || textRequestOptions?.disableReasoning) throw error;
+      const currentBudget = typeof baseBody.max_tokens === "number" ? baseBody.max_tokens : 0;
+      const retryBudget = Math.min(Math.max(currentBudget * 2, 4096), 16_000);
+      if (retryBudget <= currentBudget) throw error;
+      const retryBody: Record<string, unknown> = { ...baseBody, max_tokens: retryBudget, stream: false };
+      delete retryBody.stream_options;
+      const retryResponse = await client.chat.completions.create(retryBody, options);
+      return readChatResponse(retryResponse);
+    }
   };
 
   const textModel: TextModel = {

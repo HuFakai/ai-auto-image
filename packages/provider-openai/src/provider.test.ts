@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { createOpenAICompatProvider, type WireClient } from "./provider";
+import { shouldDisableReasoning } from "./routes";
 
 function fakeClient(overrides: Partial<WireClient> = {}): WireClient {
   return {
@@ -22,6 +23,10 @@ function fakeClient(overrides: Partial<WireClient> = {}): WireClient {
     },
     ...overrides,
   };
+}
+
+async function* streamChunks(...chunks: unknown[]): AsyncGenerator<unknown> {
+  for (const chunk of chunks) yield chunk;
 }
 
 const route = {
@@ -73,6 +78,87 @@ describe("createOpenAICompatProvider text model", () => {
       schemaName: "S",
     });
     expect(value).toEqual({ title: "卡", pages: 2 });
+  });
+
+  it("parses streamed final content without treating reasoning as the answer", async () => {
+    const create = vi.fn(async (_params: Record<string, unknown>) =>
+      streamChunks(
+        { id: "chat_stream_1", choices: [{ delta: { reasoning_content: "思考中" } }] },
+        { choices: [{ delta: { content: [{ type: "text", text: "最终" }] } }] },
+        { choices: [{ delta: { content: "答案" }, finish_reason: "stop" }], usage: { total_tokens: 9 } },
+      ),
+    );
+    const client = fakeClient({
+      chat: { completions: { create } },
+    });
+    const provider = createOpenAICompatProvider({ config: route, apiKey: "k", client });
+
+    const result = await provider.text!.generateText({ prompt: "hi" });
+
+    expect(result.text).toBe("最终答案");
+    expect(result.providerRequestId).toBe("chat_stream_1");
+    expect(result.usage.totalTokens).toBe(9);
+    expect(create.mock.calls[0]?.[0]).toMatchObject({ stream: true });
+  });
+
+  it("retries a reasoning-only stream with a larger non-stream budget", async () => {
+    const calls: Record<string, unknown>[] = [];
+    const create = vi.fn(async (params: Record<string, unknown>) => {
+      calls.push(params);
+      if (params.stream === true) {
+        return streamChunks({ choices: [{ delta: { reasoning_content: "思考" }, finish_reason: "length" }] });
+      }
+      return {
+        id: "chat_retry_1",
+        choices: [{ message: { content: "最终答案" }, finish_reason: "stop" }],
+        usage: { total_tokens: 20 },
+      };
+    });
+    const client = fakeClient({
+      chat: { completions: { create } },
+    });
+    const provider = createOpenAICompatProvider({ config: route, apiKey: "k", client });
+
+    const result = await provider.text!.generateText({ prompt: "hi", maxOutputTokens: 1000 });
+
+    expect(result.text).toBe("最终答案");
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toMatchObject({ stream: false, max_tokens: 4096 });
+  });
+
+  it("sends the configured DeepSeek reasoning switch in the gateway request body", async () => {
+    const create = vi.fn(async (_params: Record<string, unknown>) =>
+      streamChunks({ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }]}),
+    );
+    const client = fakeClient({
+      chat: { completions: { create } },
+    });
+    const provider = createOpenAICompatProvider({
+      config: route,
+      apiKey: "k",
+      client,
+      capabilities: {
+        textRequest: {
+          disableReasoning: true,
+          extraParams: { reasoning_effort: "none" },
+        },
+      },
+    });
+
+    await expect(provider.text!.generateText({ prompt: "hi" })).resolves.toMatchObject({ text: "ok" });
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      reasoning_effort: "none",
+      thinking: { type: "disabled" },
+    });
+  });
+});
+
+describe("shouldDisableReasoning", () => {
+  it("auto-disables DeepSeek reasoning but respects explicit overrides", () => {
+    expect(shouldDisableReasoning("deepseek-v4-flash", {})).toBe(true);
+    expect(shouldDisableReasoning("grok-4.5", {})).toBe(false);
+    expect(shouldDisableReasoning("deepseek-v4-flash", { TEXT_DISABLE_REASONING: "0" })).toBe(false);
+    expect(shouldDisableReasoning("grok-4.5", { TEXT_DISABLE_REASONING: "1" })).toBe(true);
   });
 });
 

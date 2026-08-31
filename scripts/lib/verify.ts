@@ -41,6 +41,7 @@ export interface VerifyInput {
 
 export async function runVerify(input: VerifyInput): Promise<void> {
   const { label, textModel, imageModel, routes } = input;
+  const verifyStartedAt = Date.now();
   const runInput: CreateRunInput = CreateRunInputSchema.parse({
     topic: "三分钟看懂量子纠缠",
     aspectRatio: "3:4",
@@ -50,6 +51,7 @@ export async function runVerify(input: VerifyInput): Promise<void> {
 
   /* 1. 结构化 Brief + Storyboard（与流水线相同的 Schema 校验） */
   console.log(`[1/3] 生成 Content Brief + Storyboard（${label} · ${textModel.model}）`);
+  const textStartedAt = Date.now();
   const brief: ContentBrief = await textModel.generateObject({
     prompt: buildBriefPrompt(runInput),
     schemaName: "ContentBrief",
@@ -63,12 +65,22 @@ export async function runVerify(input: VerifyInput): Promise<void> {
   console.log(
     `  「${storyboard.title}」${storyboard.slides.length} 页 · ${storyboard.platform} · ${storyboard.aspectRatio} · ${CANVAS_SIZES[storyboard.aspectRatio].width}x${CANVAS_SIZES[storyboard.aspectRatio].height}`,
   );
+  const textDurationMs = Date.now() - textStartedAt;
 
   /* 2. 原生中文出图（封面页），经过统一路由重试 */
   const slide = storyboard.slides[0]!;
   const plan = buildSlidePrompt(slide, storyboard, runInput, "native");
   console.log(`[2/3] 生成封面图（原生中文，预期文案 ${plan.expectedCopy.length} 条）`);
-  const startedAt = Date.now();
+  const imageStartedAt = Date.now();
+  const attempts: Array<{
+    routeId: string;
+    model: string;
+    attempt: number;
+    ok: boolean;
+    statusCode?: number;
+    errorCategory?: string;
+    elapsedMs: number;
+  }> = [];
   const result = await withModelFallbacks({
     routes,
     run: async () =>
@@ -78,12 +90,22 @@ export async function runVerify(input: VerifyInput): Promise<void> {
         n: 1,
       }),
     onAttempt: (record) => {
+      attempts.push({
+        routeId: record.routeId,
+        model: record.model,
+        attempt: record.attempt,
+        ok: record.ok,
+        ...(record.statusCode === undefined ? {} : { statusCode: record.statusCode }),
+        ...(record.errorCategory ? { errorCategory: record.errorCategory } : {}),
+        elapsedMs: record.finishedAt - record.startedAt,
+      });
       console.log(
         `  尝试 ${record.routeId}/${record.model}#${record.attempt}: ${record.ok ? "OK" : record.errorCategory} (${record.finishedAt - record.startedAt}ms)`,
       );
     },
   });
   const image = result[0]!;
+  const imageDurationMs = Date.now() - imageStartedAt;
 
   /* 3. 立即转存到本地资产目录 + 输出报告 */
   const root = path.resolve(import.meta.dirname ?? process.cwd(), "..", "..");
@@ -106,6 +128,12 @@ export async function runVerify(input: VerifyInput): Promise<void> {
         storyboardTitle: storyboard.title,
         slides: storyboard.slides.length,
         expectedCopy: plan.expectedCopy,
+        durations: {
+          textMs: textDurationMs,
+          imageMs: imageDurationMs,
+          totalMs: Date.now() - verifyStartedAt,
+        },
+        attempts,
         asset: {
           path: path.relative(root, saved.filePath),
           bytes: saved.bytes,

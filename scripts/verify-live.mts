@@ -1,7 +1,12 @@
 /** 真实渠道验证（TEXT_* / IMAGE_* 环境变量）：pnpm verify:live */
 import { loadDotEnv } from "./lib/env.js";
 import { runVerify } from "./lib/verify.js";
-import { compatibleRoute, createOpenAICompatProvider, createWireClient } from "@aai/provider-openai";
+import {
+  compatibleRoute,
+  createOpenAICompatProvider,
+  createWireClient,
+  shouldDisableReasoning,
+} from "@aai/provider-openai";
 
 loadDotEnv();
 
@@ -26,7 +31,12 @@ const textBundle = createOpenAICompatProvider({
   config: textConfig,
   apiKey: textKey,
   client: createWireClient(textConfig, textKey),
-  capabilities: { text: { structuredOutput: true, imageInput: process.env.TEXT_VISION === "1" } },
+  capabilities: {
+    text: { structuredOutput: true, imageInput: process.env.TEXT_VISION === "1" },
+    ...(shouldDisableReasoning(textConfig.textModel ?? "")
+      ? { textRequest: { disableReasoning: true } }
+      : {}),
+  },
 });
 
 const imageConfig = compatibleRoute({

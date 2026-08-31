@@ -2,7 +2,12 @@ import { z } from "zod";
 import type { TextModel, VisualQualityModel } from "@aai/ai-core";
 import type { ProviderRouteConfig } from "@aai/shared-schemas";
 import type { Channel, ChannelRepo } from "@aai/storage";
-import { compatibleRoute, createOpenAICompatProvider, createWireClient } from "@aai/provider-openai";
+import {
+  compatibleRoute,
+  createOpenAICompatProvider,
+  createWireClient,
+  shouldDisableReasoning,
+} from "@aai/provider-openai";
 import { createMockProvider } from "@aai/provider-mock";
 import { apiKeyHint, decryptApiKey, encryptApiKey, getEncryptionKey } from "./channel-crypto";
 import type { TextRoute, ImageRoute } from "@aai/workflow-engine";
@@ -186,7 +191,12 @@ export class ChannelService {
           config,
           apiKey,
           client: createWireClient(config, apiKey),
-          capabilities: { text: { structuredOutput: true, imageInput: false } },
+          capabilities: {
+            text: { structuredOutput: true, imageInput: false },
+            ...(shouldDisableReasoning(row.textModel ?? "")
+              ? { textRequest: { disableReasoning: true } }
+              : {}),
+          },
         });
         textRoutes.push({ config, model: bundle.text!.model, text: bundle.text! });
         if (!visualQuality && bundle.visualQuality) visualQuality = bundle.visualQuality;

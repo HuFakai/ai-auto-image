@@ -60,8 +60,9 @@
 | 支付 mock 安全测试 | 通过 | 生产环境禁止 mock 订单和 `dev-confirm`，真实渠道未配置时返回错误 |
 | `pnpm eval` | 通过 | Mock 12 个用例、48 页；结构化解析和页面渲染指标均达到阈值，平均运行约 0.4 秒 |
 | `pnpm pg:export --out <临时目录>` | 通过 | 当前 22 张表白名单；旧 SQLite 缺表会记录到 manifest 并跳过 |
+| 已配置兼容渠道 smoke | 通过 | `deepseek-v4-flash` 结构化输出 6 页；`grok-imagine-image-2.0` 原生中文封面成功生成并转存，图片调用约 46 秒；报告见 `fixtures/reports/live.json` |
 | Docker 构建/启动 | 本轮未验证 | 当前审查机未安装 Docker；必须在目标 Linux/ARM 服务器执行部署脚本和真实健康检查 |
-| OpenAI/xAI 真实模型 | 本轮未验证 | 需要服务器密钥和费用预算，执行 `pnpm verify:openai` / `pnpm verify:xai` |
+| 官方 OpenAI/xAI 直连模型 | 本轮未验证 | 当前 `.env` 未配置 `OPENAI_API_KEY` / `XAI_API_KEY`；配置后执行 `pnpm verify:openai` / `pnpm verify:xai` |
 | 支付宝/微信真实支付 | 本轮未验证 | 需要商户配置、回调域名、证书和沙箱/生产联调 |
 
 因此，本轮代码门禁已经全绿；这不等于真实渠道和生产部署已经验收，后两者仍属于 Wave 1。
@@ -86,11 +87,11 @@
 
 1. **SQLite → PostgreSQL 迁移工具已补齐**：`scripts/pg-export.mts` / `scripts/pg-import.mts` 共用当前 22 张表白名单，覆盖用户、会话、套餐、订单、钱包、订阅、点数流水和支付配置；导出 manifest 记录格式版本与源库缺表，导入校验文件校验和，`--truncate` 才会显式清空目标表并校验目标行数。生产正式备份仍使用 PostgreSQL 原生备份；本轮未对线上 PG 执行破坏性的 `--truncate` 导入。
 
-2. **生产联调尚未完成**：真实 OpenAI/Grok 图片调用、目标服务器 Docker、反向代理、中文字体、外部 PostgreSQL/Redis 连通性、支付宝/微信回调都还需要实测记录。
+2. **生产联调部分完成**：当前配置的兼容文本/图片网关已跑通固定真实样本，并修复 DeepSeek reasoning-only 返回与网关 `thinking` 参数差异；目标服务器 Docker、反向代理、中文字体、外部 PostgreSQL/Redis 连通性、官方 OpenAI/xAI 直连和支付宝/微信回调仍需要实测记录。
 3. **权限模型仍是第一版**：已有 admin/user 基础角色和资源归属，但还没有完整 RBAC、管理员操作审计和更严格的跨用户测试；公网开放前需要补齐。
 4. **质量检查仍偏规则与人工**：原生图片中文字视觉审查依赖支持视觉输入的文本渠道；局部重绘 API 已有，框选 UI 尚未闭环。
 5. **部署性能数据未形成报告**：Compose 已放宽到 4G 内存、默认图片并发 2/上限 6，但当前没有目标服务器的峰值、队列等待和外部 Provider 限流数据。`infra/verify-deployment.sh` 的内存检查仍主要依赖人工观察。
-6. **Provider 测试覆盖不均衡**：OpenAI、Mock 和核心路由有测试；compatible/xAI 的真实端点行为仍需合同测试和带脱敏报告的真实验证。
+6. **Provider 测试覆盖不均衡**：OpenAI-compatible 的流式解析、multipart 文本、DeepSeek reasoning 开关已有合同测试；官方 OpenAI/xAI 直连端点行为仍需合同测试和带脱敏报告的真实验证。
 
 ## 六、P2 产品化工作
 
