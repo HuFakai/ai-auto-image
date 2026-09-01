@@ -93,6 +93,8 @@ describe("payment mock gate", () => {
       type: "credits",
       planId: null,
       packageId: "pkg_test",
+      cardId: null,
+      batchId: null,
       title: "测试点数包",
       amountCents: 100,
       credits: 10,

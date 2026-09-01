@@ -12,6 +12,7 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "失败",
   refunded: "已退款",
   expired: "已过期",
+  redeemed: "已兑换",
 };
 
 /** 订单管理：列表 / 退款 */

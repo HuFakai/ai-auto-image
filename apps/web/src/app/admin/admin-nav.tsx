@@ -8,6 +8,7 @@ const ITEMS = [
   { href: "/admin/users", label: "用户" },
   { href: "/admin/orders", label: "订单" },
   { href: "/admin/plans", label: "套餐" },
+  { href: "/admin/cards", label: "卡密" },
   { href: "/admin/channels", label: "模型渠道" },
   { href: "/admin/payments", label: "支付渠道" },
 ];

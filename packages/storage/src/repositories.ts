@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, like, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, like, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   JOB_TERMINAL_STATUSES,
   type JobStatus,
@@ -29,6 +29,9 @@ import {
   newWalletId,
   newSubscriptionId,
   newLedgerId,
+  newCardAuditId,
+  newCardRedemptionId,
+  newCardWebhookId,
 } from "./ids";
 import {
   assetRelations,
@@ -38,6 +41,13 @@ import {
   channelModels,
   creditLedger,
   creditPackages,
+  cardAuditLogs,
+  cardBatches,
+  cardRedemptions,
+  redemptionCards,
+  cardWebhookDeliveries,
+  externalApiKeys,
+  apiIdempotencyRecords,
   jobEvents,
   jobs,
   nodeRuns,
@@ -51,6 +61,7 @@ import {
   revisions,
   sessions,
   subscriptions,
+  systemSettings,
   users,
   wallets,
   workflowRuns,
@@ -1914,7 +1925,14 @@ export class OrderRepo {
         count: sql<string>`count(*)`,
       })
       .from(orders)
-      .where(and(eq(orders.status, "paid"), ne(orders.type, "admin_adjust"), gte(orders.paidAt, sinceMs)))
+      .where(
+        and(
+          eq(orders.status, "paid"),
+          ne(orders.type, "admin_adjust"),
+          ne(orders.type, "card_redeem"),
+          gte(orders.paidAt, sinceMs),
+        ),
+      )
       .groupBy(sql`1`)
       .orderBy(sql`1`);
     return rows.map((row) => ({ day: row.day, totalCents: Number(row.totalCents), count: Number(row.count) }));
@@ -1929,7 +1947,7 @@ export class OrderRepo {
         count: sql<string>`count(*)`,
       })
       .from(orders)
-      .where(and(eq(orders.status, "paid"), ne(orders.type, "admin_adjust")))
+      .where(and(eq(orders.status, "paid"), ne(orders.type, "admin_adjust"), ne(orders.type, "card_redeem")))
       .groupBy(orders.channel);
     return rows.map((row) => ({ channel: row.channel, totalCents: Number(row.totalCents), count: Number(row.count) }));
   }
@@ -2195,8 +2213,9 @@ export type LedgerEntryInput = {
   userId: string;
   delta: number;
   balanceAfter: number;
-  reason: "starter" | "purchase" | "subscription_grant" | "consume" | "admin_adjust" | "refund";
+  reason: "starter" | "purchase" | "subscription_grant" | "consume" | "admin_adjust" | "refund" | "card_redeem";
   runId?: string | null;
+  cardId?: string | null;
   refType?: string | null;
   refId?: string | null;
   displayTitle?: string | null;
@@ -2225,6 +2244,7 @@ export class LedgerRepo {
       balanceAfter: entry.balanceAfter,
       reason: entry.reason,
       runId: entry.runId ?? null,
+      cardId: entry.cardId ?? null,
       refType: entry.refType ?? null,
       refId: entry.refId ?? null,
       displayTitle: entry.displayTitle ?? null,
@@ -2457,5 +2477,885 @@ export class PaymentConfigRepo {
     const row = await this.get(channel);
     if (!row) throw new Error(`payment config not found: ${channel}`);
     return row;
+  }
+}
+
+/* ── 卡密系统 ─────────────────────────────────────────────────── */
+
+export type CardSubscriptionBenefit = {
+  planId: string;
+  planName: string;
+  periodDays: number;
+  creditsPerPeriod: number;
+};
+
+export type CardBenefit =
+  | { type: "credits"; credits: number }
+  | ({ type: "subscription" } & CardSubscriptionBenefit)
+  | ({ type: "combo"; credits: number } & CardSubscriptionBenefit);
+
+export interface CardCodeSeed {
+  id: string;
+  codeHash: string;
+  codePrefix: string;
+  codeLast4: string;
+  expiresAt?: number | null;
+  metadataJson?: string | null;
+}
+
+export interface CardBatchRecordInput {
+  id: string;
+  batchNo: string;
+  name: string;
+  benefitType: CardBenefit["type"];
+  benefitJson: string;
+  quantity: number;
+  status?: string;
+  expiresAt?: number | null;
+  source?: string;
+  apiKeyId?: string | null;
+  externalBatchId?: string | null;
+  salesChannel?: string | null;
+  remark?: string | null;
+  createdBy?: string | null;
+  cards: CardCodeSeed[];
+  audit?: {
+    actorType: string;
+    actorId?: string | null;
+    action: string;
+    apiKeyId?: string | null;
+    detailJson?: string | null;
+  };
+}
+
+export interface CardIdempotencyInput {
+  id: string;
+  apiKeyId: string;
+  idempotencyKey: string;
+  requestHash: string;
+  resourceType: string;
+  resourceId: string;
+  responseEncrypted: string;
+  expiresAt: number;
+}
+
+export interface CardRedeemInput {
+  codeHash: string;
+  userId: string;
+  benefit: CardBenefit;
+  starterCredits: number;
+  ipHash?: string | null;
+  userAgentHash?: string | null;
+  nowMs?: number;
+}
+
+export type CardRedeemOutcome =
+  | {
+      status: "succeeded";
+      cardId: string;
+      batchId: string;
+      batchNo: string;
+      orderId: string;
+      orderNo: string;
+      credits: number;
+      balance: number;
+      benefit: CardBenefit;
+      webhookId: string | null;
+    }
+  | {
+      status: "unavailable";
+      reason: "invalid" | "disabled" | "expired" | "redeemed" | "batch_disabled";
+      redeemedBy?: string | null;
+      orderNo?: string | null;
+    };
+
+export class SystemSettingsRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async get(key: string) {
+    return one(this.client.select().from(systemSettings).where(eq(systemSettings.key, key)).limit(1));
+  }
+
+  async list() {
+    return this.client.select().from(systemSettings).orderBy(asc(systemSettings.key));
+  }
+
+  async set(key: string, valueJson: string, updatedBy?: string | null) {
+    const ts = now();
+    await this.client
+      .insert(systemSettings)
+      .values({ key, valueJson, updatedBy: updatedBy ?? null, updatedAt: ts })
+      .onConflictDoUpdate({
+        target: systemSettings.key,
+        set: { valueJson, updatedBy: updatedBy ?? null, updatedAt: ts },
+      });
+    return this.get(key);
+  }
+}
+
+export class CardRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async requireBatch(id: string) {
+    const row = await one(this.client.select().from(cardBatches).where(eq(cardBatches.id, id)).limit(1));
+    if (!row) throw new Error(`card batch not found: ${id}`);
+    return row;
+  }
+
+  async findBatchByExternalId(apiKeyId: string, externalBatchId: string) {
+    return one(
+      this.client
+        .select()
+        .from(cardBatches)
+        .where(and(eq(cardBatches.apiKeyId, apiKeyId), eq(cardBatches.externalBatchId, externalBatchId)))
+        .limit(1),
+    );
+  }
+
+  async createBatch(input: CardBatchRecordInput) {
+    const ts = now();
+    await this.client.transaction(async (tx) => {
+      await tx.insert(cardBatches).values({
+        id: input.id,
+        batchNo: input.batchNo,
+        name: input.name,
+        benefitType: input.benefitType,
+        benefitJson: input.benefitJson,
+        quantity: input.quantity,
+        status: input.status ?? "active",
+        expiresAt: input.expiresAt ?? null,
+        source: input.source ?? "admin",
+        apiKeyId: input.apiKeyId ?? null,
+        externalBatchId: input.externalBatchId ?? null,
+        salesChannel: input.salesChannel ?? null,
+        remark: input.remark ?? null,
+        createdBy: input.createdBy ?? null,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+      await tx.insert(redemptionCards).values(
+        input.cards.map((card) => ({
+          id: card.id,
+          batchId: input.id,
+          codeHash: card.codeHash,
+          codePrefix: card.codePrefix,
+          codeLast4: card.codeLast4,
+          status: "active",
+          expiresAt: card.expiresAt ?? input.expiresAt ?? null,
+          redeemedBy: null,
+          redeemedAt: null,
+          redemptionOrderId: null,
+          metadataJson: card.metadataJson ?? null,
+          createdAt: ts,
+          updatedAt: ts,
+        })),
+      );
+      if (input.audit) {
+        await tx.insert(cardAuditLogs).values({
+          id: newCardAuditId(),
+          actorType: input.audit.actorType,
+          actorId: input.audit.actorId ?? null,
+          action: input.audit.action,
+          batchId: input.id,
+          cardId: null,
+          apiKeyId: input.audit.apiKeyId ?? input.apiKeyId ?? null,
+          detailJson: input.audit.detailJson ?? null,
+          ipHash: null,
+          createdAt: ts,
+        });
+      }
+    });
+    return this.requireBatch(input.id);
+  }
+
+  /** API 批次和幂等记录放在同一事务；唯一键冲突时整批卡密自动回滚。 */
+  async createBatchWithIdempotency(input: CardBatchRecordInput, idempotency: CardIdempotencyInput) {
+    const ts = now();
+    await this.client.transaction(async (tx) => {
+      await tx.insert(cardBatches).values({
+        id: input.id,
+        batchNo: input.batchNo,
+        name: input.name,
+        benefitType: input.benefitType,
+        benefitJson: input.benefitJson,
+        quantity: input.quantity,
+        status: input.status ?? "active",
+        expiresAt: input.expiresAt ?? null,
+        source: input.source ?? "api",
+        apiKeyId: input.apiKeyId ?? idempotency.apiKeyId,
+        externalBatchId: input.externalBatchId ?? null,
+        salesChannel: input.salesChannel ?? null,
+        remark: input.remark ?? null,
+        createdBy: input.createdBy ?? null,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+      await tx.insert(redemptionCards).values(
+        input.cards.map((card) => ({
+          id: card.id,
+          batchId: input.id,
+          codeHash: card.codeHash,
+          codePrefix: card.codePrefix,
+          codeLast4: card.codeLast4,
+          status: "active",
+          expiresAt: card.expiresAt ?? input.expiresAt ?? null,
+          redeemedBy: null,
+          redeemedAt: null,
+          redemptionOrderId: null,
+          metadataJson: card.metadataJson ?? null,
+          createdAt: ts,
+          updatedAt: ts,
+        })),
+      );
+      await tx.insert(apiIdempotencyRecords).values({ ...idempotency, createdAt: ts });
+      if (input.audit) {
+        await tx.insert(cardAuditLogs).values({
+          id: newCardAuditId(),
+          actorType: input.audit.actorType,
+          actorId: input.audit.actorId ?? null,
+          action: input.audit.action,
+          batchId: input.id,
+          cardId: null,
+          apiKeyId: input.audit.apiKeyId ?? input.apiKeyId ?? idempotency.apiKeyId,
+          detailJson: input.audit.detailJson ?? null,
+          ipHash: null,
+          createdAt: ts,
+        });
+      }
+    });
+    return this.requireBatch(input.id);
+  }
+
+  async listBatches(input: { page?: number; pageSize?: number; q?: string; status?: string; source?: string; apiKeyId?: string } = {}) {
+    const paging = normalizePage(input.page, input.pageSize);
+    const filters = [
+      input.q ? or(like(cardBatches.batchNo, `%${input.q}%`), like(cardBatches.name, `%${input.q}%`), like(cardBatches.externalBatchId, `%${input.q}%`)) : undefined,
+      input.status ? eq(cardBatches.status, input.status) : undefined,
+      input.source ? eq(cardBatches.source, input.source) : undefined,
+      input.apiKeyId ? eq(cardBatches.apiKeyId, input.apiKeyId) : undefined,
+    ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+    const where = filters.length > 0 ? and(...filters) : sql`true`;
+    const [items, countRows] = await Promise.all([
+      this.client
+        .select()
+        .from(cardBatches)
+        .where(where)
+        .orderBy(desc(cardBatches.createdAt), desc(cardBatches.id))
+        .limit(paging.pageSize)
+        .offset((paging.page - 1) * paging.pageSize),
+      this.client.select({ n: sql<string>`count(*)` }).from(cardBatches).where(where),
+    ]);
+    return toPageResult(items, Number(countRows[0]?.n ?? 0), paging.page, paging.pageSize);
+  }
+
+  async batchStats(batchId?: string, nowMs = now()) {
+    const where = batchId ? eq(redemptionCards.batchId, batchId) : sql`true`;
+    const expiredWhere = and(
+      where,
+      eq(redemptionCards.status, "active"),
+      sql`(
+        (${redemptionCards.expiresAt} IS NOT NULL AND ${redemptionCards.expiresAt} <= ${nowMs})
+        OR (${redemptionCards.expiresAt} IS NULL AND ${cardBatches.expiresAt} IS NOT NULL AND ${cardBatches.expiresAt} <= ${nowMs})
+      )`,
+    );
+    const [rows, expiredRows] = await Promise.all([
+      this.client
+        .select({ status: redemptionCards.status, count: sql<string>`count(*)` })
+        .from(redemptionCards)
+        .where(where)
+        .groupBy(redemptionCards.status),
+      this.client
+        .select({ count: sql<string>`count(*)` })
+        .from(redemptionCards)
+        .innerJoin(cardBatches, eq(redemptionCards.batchId, cardBatches.id))
+        .where(expiredWhere),
+    ]);
+    const status = Object.fromEntries(rows.map((row) => [row.status, Number(row.count)]));
+    const expired = Number(expiredRows[0]?.count ?? 0);
+    return { ...status, active: Math.max((status.active ?? 0) - expired, 0), expired };
+  }
+
+  async summary(nowMs = now()) {
+    const [batchCountRows, cardCountRows, statusRows, expiredRows, redeemedRows] = await Promise.all([
+      this.client.select({ n: sql<string>`count(*)` }).from(cardBatches),
+      this.client.select({ n: sql<string>`count(*)` }).from(redemptionCards),
+      this.client
+        .select({ status: redemptionCards.status, count: sql<string>`count(*)` })
+        .from(redemptionCards)
+        .groupBy(redemptionCards.status),
+      this.client
+        .select({ n: sql<string>`count(*)` })
+        .from(redemptionCards)
+        .innerJoin(cardBatches, eq(redemptionCards.batchId, cardBatches.id))
+        .where(
+          and(
+            eq(redemptionCards.status, "active"),
+            sql`(
+              (${redemptionCards.expiresAt} IS NOT NULL AND ${redemptionCards.expiresAt} <= ${nowMs})
+              OR (${redemptionCards.expiresAt} IS NULL AND ${cardBatches.expiresAt} IS NOT NULL AND ${cardBatches.expiresAt} <= ${nowMs})
+            )`,
+          ),
+        ),
+      this.client
+        .select({ credits: sql<string>`coalesce(sum(${orders.credits}), 0)`, count: sql<string>`count(*)` })
+        .from(orders)
+        .where(and(eq(orders.type, "card_redeem"), eq(orders.status, "redeemed"))),
+    ]);
+    const status = Object.fromEntries(statusRows.map((row) => [row.status, Number(row.count)]));
+    return {
+      batchCount: Number(batchCountRows[0]?.n ?? 0),
+      cardCount: Number(cardCountRows[0]?.n ?? 0),
+      active: Math.max((status.active ?? 0) - Number(expiredRows[0]?.n ?? 0), 0),
+      redeemed: status.redeemed ?? 0,
+      disabled: status.disabled ?? 0,
+      expired: Number(expiredRows[0]?.n ?? 0),
+      redeemedCredits: Number(redeemedRows[0]?.credits ?? 0),
+      redeemedOrders: Number(redeemedRows[0]?.count ?? 0),
+    };
+  }
+
+  async listCardsPage(batchId: string, input: { page?: number; pageSize?: number; status?: string; q?: string } = {}) {
+    const paging = normalizePage(input.page, input.pageSize);
+    const filters = [
+      eq(redemptionCards.batchId, batchId),
+      input.status ? eq(redemptionCards.status, input.status) : undefined,
+      input.q ? or(like(redemptionCards.codePrefix, `%${input.q.toUpperCase()}%`), like(redemptionCards.codeLast4, `%${input.q.slice(-4).toUpperCase()}%`)) : undefined,
+    ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+    const where = and(...filters);
+    const [items, countRows] = await Promise.all([
+      this.client
+        .select({
+          id: redemptionCards.id,
+          batchId: redemptionCards.batchId,
+          codePrefix: redemptionCards.codePrefix,
+          codeLast4: redemptionCards.codeLast4,
+          status: redemptionCards.status,
+          expiresAt: redemptionCards.expiresAt,
+          redeemedBy: redemptionCards.redeemedBy,
+          redeemedAt: redemptionCards.redeemedAt,
+          redemptionOrderId: redemptionCards.redemptionOrderId,
+          createdAt: redemptionCards.createdAt,
+          batchExpiresAt: cardBatches.expiresAt,
+          username: users.username,
+        })
+        .from(redemptionCards)
+        .innerJoin(cardBatches, eq(redemptionCards.batchId, cardBatches.id))
+        .leftJoin(users, eq(redemptionCards.redeemedBy, users.id))
+        .where(where)
+        .orderBy(desc(redemptionCards.createdAt), desc(redemptionCards.id))
+        .limit(paging.pageSize)
+        .offset((paging.page - 1) * paging.pageSize),
+      this.client.select({ n: sql<string>`count(*)` }).from(redemptionCards).where(where),
+    ]);
+    const currentMs = now();
+    return toPageResult(
+      items.map((item) => {
+        const expiresAt = item.expiresAt ?? item.batchExpiresAt;
+        const status = item.status === "active" && expiresAt !== null && expiresAt !== undefined && expiresAt <= currentMs
+          ? "expired"
+          : item.status;
+        const { batchExpiresAt: _batchExpiresAt, ...rest } = item;
+        return { ...rest, expiresAt, status };
+      }),
+      Number(countRows[0]?.n ?? 0),
+      paging.page,
+      paging.pageSize,
+    );
+  }
+
+  async disableBatch(id: string, actorId?: string | null) {
+    const ts = now();
+    await this.client.transaction(async (tx) => {
+      const updated = await tx
+        .update(cardBatches)
+        .set({ status: "disabled", updatedAt: ts })
+        .where(and(eq(cardBatches.id, id), eq(cardBatches.status, "active")))
+        .returning({ id: cardBatches.id });
+      if (updated.length === 0) return;
+      await tx
+        .update(redemptionCards)
+        .set({ status: "disabled", updatedAt: ts })
+        .where(and(eq(redemptionCards.batchId, id), eq(redemptionCards.status, "active")));
+      await tx.insert(cardAuditLogs).values({
+        id: newCardAuditId(),
+        actorType: "admin",
+        actorId: actorId ?? null,
+        action: "batch_disabled",
+        batchId: id,
+        cardId: null,
+        apiKeyId: null,
+        detailJson: null,
+        ipHash: null,
+        createdAt: ts,
+      });
+    });
+    return this.requireBatch(id);
+  }
+
+  async disableCard(id: string, actorId?: string | null, apiKeyId?: string | null) {
+    const ts = now();
+    return this.client.transaction(async (tx) => {
+      const rows = await tx
+        .update(redemptionCards)
+        .set({ status: "disabled", updatedAt: ts })
+        .where(and(eq(redemptionCards.id, id), eq(redemptionCards.status, "active")))
+        .returning({ id: redemptionCards.id, batchId: redemptionCards.batchId });
+      if (rows.length > 0) {
+        await tx.insert(cardAuditLogs).values({
+          id: newCardAuditId(),
+          actorType: actorId ? "admin" : "api",
+          actorId: actorId ?? null,
+          action: "card_disabled",
+          batchId: rows[0]!.batchId,
+          cardId: id,
+          apiKeyId: apiKeyId ?? null,
+          detailJson: null,
+          ipHash: null,
+          createdAt: ts,
+        });
+      }
+      return rows.length > 0;
+    });
+  }
+
+  async findCardByHash(codeHash: string) {
+    return one(
+      this.client
+        .select({
+          card: redemptionCards,
+          batch: cardBatches,
+        })
+        .from(redemptionCards)
+        .innerJoin(cardBatches, eq(redemptionCards.batchId, cardBatches.id))
+        .where(eq(redemptionCards.codeHash, codeHash))
+        .limit(1),
+    );
+  }
+
+  async findCardById(id: string) {
+    return one(
+      this.client
+        .select({ card: redemptionCards, batch: cardBatches })
+        .from(redemptionCards)
+        .innerJoin(cardBatches, eq(redemptionCards.batchId, cardBatches.id))
+        .where(eq(redemptionCards.id, id))
+        .limit(1),
+    );
+  }
+
+  async findCardByIdForApi(id: string, apiKeyId: string) {
+    return one(
+      this.client
+        .select({ card: redemptionCards, batch: cardBatches })
+        .from(redemptionCards)
+        .innerJoin(cardBatches, eq(redemptionCards.batchId, cardBatches.id))
+        .where(and(eq(redemptionCards.id, id), eq(cardBatches.apiKeyId, apiKeyId)))
+        .limit(1),
+    );
+  }
+
+  /** 卡密兑换的完整事务：占用卡密、钱包、订阅、订单、流水、审计和 Webhook 同时提交。 */
+  async redeem(input: CardRedeemInput): Promise<CardRedeemOutcome> {
+    const nowMs = input.nowMs ?? now();
+    const orderId = newOrderId();
+    const orderNo = `CRD${nowMs}${orderId.slice(-8).toUpperCase()}`;
+    const redemptionId = newCardRedemptionId();
+
+    return this.client.transaction(async (tx) => {
+      const matched = await one(
+        tx
+          .select({ card: redemptionCards, batch: cardBatches })
+          .from(redemptionCards)
+          .innerJoin(cardBatches, eq(redemptionCards.batchId, cardBatches.id))
+          .where(eq(redemptionCards.codeHash, input.codeHash))
+          .limit(1),
+      );
+      if (!matched) return { status: "unavailable", reason: "invalid" };
+
+      // 锁住批次行，保证“兑换”和“停用批次”有明确的先后顺序。
+      await tx.execute(sql`SELECT "id" FROM "card_batches" WHERE "id" = ${matched.batch.id} FOR UPDATE`);
+      const batch = await one(tx.select().from(cardBatches).where(eq(cardBatches.id, matched.batch.id)).limit(1));
+      const card = await one(tx.select().from(redemptionCards).where(eq(redemptionCards.id, matched.card.id)).limit(1));
+      if (!batch || !card) return { status: "unavailable", reason: "invalid" };
+      if (card.status !== "active") {
+        if (card.status === "disabled") return { status: "unavailable", reason: "disabled" };
+        if (card.status === "redeemed" && card.redeemedBy === input.userId) {
+          const oldOrder = card.redemptionOrderId
+            ? await one(tx.select({ orderNo: orders.orderNo }).from(orders).where(eq(orders.id, card.redemptionOrderId)).limit(1))
+            : undefined;
+          return { status: "unavailable", reason: "redeemed", redeemedBy: card.redeemedBy, orderNo: oldOrder?.orderNo ?? null };
+        }
+        return { status: "unavailable", reason: "redeemed", redeemedBy: card.redeemedBy };
+      }
+      if (batch.status !== "active") return { status: "unavailable", reason: "batch_disabled" };
+      const expiresAt = card.expiresAt ?? batch.expiresAt;
+      if (expiresAt !== null && expiresAt !== undefined && expiresAt <= nowMs) {
+        return { status: "unavailable", reason: "expired" };
+      }
+
+      const claimed = await tx
+        .update(redemptionCards)
+        .set({ status: "redeemed", redeemedBy: input.userId, redeemedAt: nowMs, redemptionOrderId: orderId, updatedAt: nowMs })
+        .where(and(eq(redemptionCards.id, card.id), eq(redemptionCards.status, "active")))
+        .returning({ id: redemptionCards.id });
+      if (claimed.length === 0) return { status: "unavailable", reason: "redeemed" };
+
+      const subscription = input.benefit.type === "subscription" || input.benefit.type === "combo"
+        ? input.benefit
+        : null;
+      const credits = input.benefit.type === "credits"
+        ? input.benefit.credits
+        : input.benefit.creditsPerPeriod + (input.benefit.type === "combo" ? input.benefit.credits : 0);
+
+      const insertedWallets = await tx
+        .insert(wallets)
+        .values({
+          id: newWalletId(),
+          userId: input.userId,
+          balance: Math.max(0, input.starterCredits),
+          totalGranted: Math.max(0, input.starterCredits),
+          updatedAt: nowMs,
+        })
+        .onConflictDoNothing({ target: wallets.userId })
+        .returning();
+      if (insertedWallets.length > 0 && input.starterCredits > 0) {
+        await tx.insert(creditLedger).values({
+          id: newLedgerId(),
+          userId: input.userId,
+          delta: input.starterCredits,
+          balanceAfter: input.starterCredits,
+          reason: "starter",
+          runId: null,
+          cardId: null,
+          refType: null,
+          refId: null,
+          displayTitle: "注册赠送点数",
+          note: "注册赠送点数",
+          createdAt: nowMs,
+        });
+      }
+
+      if (subscription) {
+        const active = await one(
+          tx
+            .select()
+            .from(subscriptions)
+            .where(and(eq(subscriptions.userId, input.userId), eq(subscriptions.status, "active")))
+            .orderBy(desc(subscriptions.createdAt))
+            .limit(1),
+        );
+        const periodMs = Math.max(1, subscription.periodDays) * 24 * 60 * 60 * 1000;
+        if (active && active.expiresAt > nowMs) {
+          await tx
+            .update(subscriptions)
+            .set({
+              planId: subscription.planId,
+              expiresAt: active.expiresAt + periodMs,
+              lastGrantAt: nowMs,
+              updatedAt: nowMs,
+            })
+            .where(eq(subscriptions.id, active.id));
+        } else {
+          if (active) {
+            await tx.update(subscriptions).set({ status: "expired", updatedAt: nowMs }).where(eq(subscriptions.id, active.id));
+          }
+          await tx.insert(subscriptions).values({
+            id: newSubscriptionId(),
+            userId: input.userId,
+            planId: subscription.planId,
+            status: "active",
+            startedAt: nowMs,
+            expiresAt: nowMs + periodMs,
+            lastGrantAt: nowMs,
+            createdAt: nowMs,
+            updatedAt: nowMs,
+          });
+        }
+      }
+
+      const walletRows = await tx
+        .update(wallets)
+        .set({
+          balance: sql`${wallets.balance} + ${credits}`,
+          totalGranted: sql`${wallets.totalGranted} + ${credits}`,
+          updatedAt: nowMs,
+        })
+        .where(eq(wallets.userId, input.userId))
+        .returning({ balance: wallets.balance, reservedCredits: wallets.reservedCredits });
+      if (walletRows.length === 0) throw new Error("wallet not found after card redemption");
+      const wallet = walletRows[0]!;
+      const balance = wallet.balance - wallet.reservedCredits;
+
+      await tx.insert(orders).values({
+        id: orderId,
+        orderNo,
+        userId: input.userId,
+        operatorUserId: null,
+        type: "card_redeem",
+        planId: subscription?.planId ?? null,
+        packageId: null,
+        cardId: card.id,
+        batchId: batch.id,
+        title: `卡密兑换 · ${batch.name}`,
+        amountCents: 0,
+        credits,
+        channel: "card",
+        status: "redeemed",
+        qrCode: null,
+        channelTradeNo: null,
+        failReason: null,
+        paidAt: null,
+        expiresAt: null,
+        createdAt: nowMs,
+        updatedAt: nowMs,
+      });
+      await tx.insert(creditLedger).values({
+        id: newLedgerId(),
+        userId: input.userId,
+        delta: credits,
+        balanceAfter: balance,
+        reason: "card_redeem",
+        runId: null,
+        cardId: card.id,
+        refType: "order",
+        refId: orderId,
+        displayTitle: `卡密兑换 · ${batch.name}`,
+        note: input.benefit.type === "credits" ? `${credits} 点卡密到账` : `${batch.name}权益到账`,
+        createdAt: nowMs,
+      });
+      await tx.insert(cardRedemptions).values({
+        id: redemptionId,
+        cardId: card.id,
+        batchId: batch.id,
+        userId: input.userId,
+        orderId,
+        status: "succeeded",
+        failureCode: null,
+        ipHash: input.ipHash ?? null,
+        userAgentHash: input.userAgentHash ?? null,
+        createdAt: nowMs,
+      });
+
+      let webhookId: string | null = null;
+      if (batch.apiKeyId) {
+        const apiKey = await one(tx.select().from(externalApiKeys).where(eq(externalApiKeys.id, batch.apiKeyId)).limit(1));
+        if (apiKey?.webhookUrl) {
+          webhookId = newCardWebhookId();
+          await tx.insert(cardWebhookDeliveries).values({
+            id: webhookId,
+            eventId: redemptionId,
+            apiKeyId: apiKey.id,
+            eventType: "card.redeemed",
+            resourceId: card.id,
+            endpointUrl: apiKey.webhookUrl,
+            secretEncrypted: apiKey.webhookSecretEncrypted,
+            payloadJson: JSON.stringify({
+              event: "card.redeemed",
+              eventId: redemptionId,
+              createdAt: nowMs,
+              data: { cardId: card.id, batchNo: batch.batchNo, externalBatchId: batch.externalBatchId, orderNo, userId: input.userId, credits, redeemedAt: nowMs },
+            }),
+            status: "pending",
+            attempts: 0,
+            nextAttemptAt: nowMs,
+            lastError: null,
+            deliveredAt: null,
+            createdAt: nowMs,
+            updatedAt: nowMs,
+          });
+        }
+      }
+      await tx.insert(cardAuditLogs).values({
+        id: newCardAuditId(),
+        actorType: "user",
+        actorId: input.userId,
+        action: "card_redeemed",
+        batchId: batch.id,
+        cardId: card.id,
+        apiKeyId: batch.apiKeyId,
+        detailJson: JSON.stringify({ credits, orderNo }),
+        ipHash: input.ipHash ?? null,
+        createdAt: nowMs,
+      });
+
+      return {
+        status: "succeeded",
+        cardId: card.id,
+        batchId: batch.id,
+        batchNo: batch.batchNo,
+        orderId,
+        orderNo,
+        credits,
+        balance,
+        benefit: input.benefit,
+        webhookId,
+      };
+    });
+  }
+
+  async getApiKeyByHash(keyHash: string) {
+    return one(this.client.select().from(externalApiKeys).where(eq(externalApiKeys.keyHash, keyHash)).limit(1));
+  }
+
+  async getApiKey(id: string) {
+    return one(this.client.select().from(externalApiKeys).where(eq(externalApiKeys.id, id)).limit(1));
+  }
+
+  async listApiKeys() {
+    return this.client.select().from(externalApiKeys).orderBy(desc(externalApiKeys.createdAt));
+  }
+
+  async createApiKey(input: {
+    id: string;
+    name: string;
+    keyPrefix: string;
+    keyHash: string;
+    scopesJson: string;
+    ipAllowlistJson: string;
+    rateLimitPerMinute: number;
+    webhookUrl?: string | null;
+    webhookSecretEncrypted?: string | null;
+    expiresAt?: number | null;
+    createdBy?: string | null;
+  }) {
+    const ts = now();
+    await this.client.insert(externalApiKeys).values({ ...input, status: "active", lastUsedAt: null, createdAt: ts, updatedAt: ts });
+    return this.getApiKey(input.id);
+  }
+
+  async touchApiKey(id: string, nowMs = now()) {
+    await this.client.update(externalApiKeys).set({ lastUsedAt: nowMs, updatedAt: nowMs }).where(eq(externalApiKeys.id, id));
+  }
+
+  async revokeApiKey(id: string, actorId?: string | null) {
+    const ts = now();
+    return this.client.transaction(async (tx) => {
+      const rows = await tx
+        .update(externalApiKeys)
+        .set({ status: "revoked", updatedAt: ts })
+        .where(and(eq(externalApiKeys.id, id), eq(externalApiKeys.status, "active")))
+        .returning({ id: externalApiKeys.id });
+      if (rows.length > 0) {
+        await tx.insert(cardAuditLogs).values({
+          id: newCardAuditId(),
+          actorType: "admin",
+          actorId: actorId ?? null,
+          action: "api_key_revoked",
+          batchId: null,
+          cardId: null,
+          apiKeyId: id,
+          detailJson: null,
+          ipHash: null,
+          createdAt: ts,
+        });
+      }
+      return rows.length > 0;
+    });
+  }
+
+  async getIdempotency(apiKeyId: string, idempotencyKey: string) {
+    return one(
+      this.client
+        .select()
+        .from(apiIdempotencyRecords)
+        .where(and(eq(apiIdempotencyRecords.apiKeyId, apiKeyId), eq(apiIdempotencyRecords.idempotencyKey, idempotencyKey)))
+        .limit(1),
+    );
+  }
+
+  async deleteIdempotency(apiKeyId: string, idempotencyKey: string, nowMs = now()) {
+    return this.client
+      .delete(apiIdempotencyRecords)
+      .where(
+        and(
+          eq(apiIdempotencyRecords.apiKeyId, apiKeyId),
+          eq(apiIdempotencyRecords.idempotencyKey, idempotencyKey),
+          lte(apiIdempotencyRecords.expiresAt, nowMs),
+        ),
+      );
+  }
+
+  async deleteExpiredIdempotency(nowMs = now()) {
+    return this.client.delete(apiIdempotencyRecords).where(lte(apiIdempotencyRecords.expiresAt, nowMs));
+  }
+
+  async claimPendingWebhooks(nowMs = now(), limit = 20) {
+    const staleBefore = nowMs - 10 * 60 * 1000;
+    const candidates = await this.client
+      .select()
+      .from(cardWebhookDeliveries)
+      .where(
+        and(
+          or(
+            and(eq(cardWebhookDeliveries.status, "pending"), lte(cardWebhookDeliveries.nextAttemptAt, nowMs)),
+            and(eq(cardWebhookDeliveries.status, "sending"), lte(cardWebhookDeliveries.updatedAt, staleBefore)),
+          ),
+        ),
+      )
+      .orderBy(asc(cardWebhookDeliveries.nextAttemptAt), asc(cardWebhookDeliveries.createdAt))
+      .limit(limit);
+    const claimed: typeof candidates = [];
+    for (const candidate of candidates) {
+      const rows = await this.client
+        .update(cardWebhookDeliveries)
+        .set({ status: "sending", updatedAt: nowMs })
+        .where(
+          and(
+            eq(cardWebhookDeliveries.id, candidate.id),
+            or(
+              and(eq(cardWebhookDeliveries.status, "pending"), lte(cardWebhookDeliveries.nextAttemptAt, nowMs)),
+              and(eq(cardWebhookDeliveries.status, "sending"), lte(cardWebhookDeliveries.updatedAt, staleBefore)),
+            ),
+          ),
+        )
+        .returning();
+      if (rows.length > 0) claimed.push(rows[0]!);
+    }
+    return claimed;
+  }
+
+  async markWebhookDelivered(id: string, nowMs = now()) {
+    await this.client
+      .update(cardWebhookDeliveries)
+      .set({ status: "delivered", deliveredAt: nowMs, updatedAt: nowMs, lastError: null })
+      .where(and(eq(cardWebhookDeliveries.id, id), eq(cardWebhookDeliveries.status, "sending")));
+  }
+
+  async markWebhookFailed(id: string, error: string, nowMs = now()) {
+    const row = await one(this.client.select().from(cardWebhookDeliveries).where(and(eq(cardWebhookDeliveries.id, id), eq(cardWebhookDeliveries.status, "sending"))).limit(1));
+    if (!row) return;
+    const attempts = row.attempts + 1;
+    const terminal = attempts >= 10;
+    const backoffMs = Math.min(6 * 60 * 60 * 1000, Math.max(60_000, 2 ** Math.min(attempts - 1, 8) * 60_000));
+    await this.client
+      .update(cardWebhookDeliveries)
+      .set({
+        status: terminal ? "failed" : "pending",
+        attempts,
+        nextAttemptAt: nowMs + backoffMs,
+        lastError: error.slice(0, 500),
+        updatedAt: nowMs,
+      })
+      .where(and(eq(cardWebhookDeliveries.id, id), eq(cardWebhookDeliveries.status, "sending")));
+  }
+
+  async listWebhookDeliveries(page = 1, pageSize = 20) {
+    const paging = normalizePage(page, pageSize);
+    const [items, countRows] = await Promise.all([
+      this.client
+        .select()
+        .from(cardWebhookDeliveries)
+        .orderBy(desc(cardWebhookDeliveries.createdAt))
+        .limit(paging.pageSize)
+        .offset((paging.page - 1) * paging.pageSize),
+      this.client.select({ n: sql<string>`count(*)` }).from(cardWebhookDeliveries),
+    ]);
+    return toPageResult(items, Number(countRows[0]?.n ?? 0), paging.page, paging.pageSize);
   }
 }

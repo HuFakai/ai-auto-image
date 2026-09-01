@@ -7,6 +7,7 @@ import {
   AssetRepo,
   AssetStore,
   BrandKitRepo,
+  CardRepo,
   ChannelModelRepo,
   ChannelRepo,
   CreditPackageRepo,
@@ -22,6 +23,7 @@ import {
   RunRepo,
   SessionRepo,
   SubscriptionRepo,
+  SystemSettingsRepo,
   UserRepo,
   WalletRepo,
   openDatabase,
@@ -38,7 +40,8 @@ import {
   type TextRoute,
 } from "@aai/workflow-engine";
 import { autoImportFromEnv, ChannelService, mockRoutes } from "./channel-service";
-import { BillingService } from "./billing";
+import { BillingService, STARTER_CREDITS } from "./billing";
+import { CardSystemService } from "./card-system";
 import { PayService } from "./pay/service";
 
 /** 加载仓库根目录 .env（Next 只自动读 apps/web 下的 env 文件）；已存在的环境变量优先 */
@@ -116,6 +119,9 @@ export interface Runtime {
   subscriptionRepo: SubscriptionRepo;
   ledgerRepo: LedgerRepo;
   paymentConfigRepo: PaymentConfigRepo;
+  systemSettingsRepo: SystemSettingsRepo;
+  cardRepo: CardRepo;
+  cardSystem: CardSystemService;
   billing: BillingService;
   pay: PayService;
   assetStore: AssetStore;
@@ -136,6 +142,7 @@ declare global {
 const SESSION_CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000;
 /** 模块级句柄：buildRuntime 进程内仅执行一次，天然不会重复创建 */
 let sessionCleanupTimer: NodeJS.Timeout | null = null;
+let cardWebhookTimer: NodeJS.Timeout | null = null;
 
 export function getRuntime(): Promise<Runtime> {
   if (!globalThis.__aaiRuntimePromise) {
@@ -216,6 +223,8 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
   const subscriptionRepo = new SubscriptionRepo(db.db);
   const ledgerRepo = new LedgerRepo(db.db);
   const paymentConfigRepo = new PaymentConfigRepo(db.db);
+  const systemSettingsRepo = new SystemSettingsRepo(db.db);
+  const cardRepo = new CardRepo(db.db);
   const seeded = await planRepo.ensureDefaults() + (await packageRepo.ensureDefaults());
   if (seeded > 0) {
     console.log(
@@ -224,6 +233,7 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
   }
   const runRepo = new RunRepo(db.db);
   const billing = new BillingService(walletRepo, ledgerRepo, planRepo, subscriptionRepo, runRepo);
+  const cardSystem = new CardSystemService(cardRepo, systemSettingsRepo, dataDir, STARTER_CREDITS);
   // 生图计费：流水线先预留额度，节点成功产出图片后结算，失败/取消由流水线释放剩余预留。
   runRepo.onNodeSucceeded(billing.nodeImageHook());
   const pay = new PayService({
@@ -261,6 +271,9 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     subscriptionRepo,
     ledgerRepo,
     paymentConfigRepo,
+    systemSettingsRepo,
+    cardRepo,
+    cardSystem,
     billing,
     pay,
     assetStore: new AssetStore(assetsDir),
@@ -435,6 +448,19 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
       });
     }, SESSION_CLEANUP_INTERVAL_MS);
     sessionCleanupTimer.unref();
+  }
+
+  // 卡密兑换 Webhook：单容器阶段使用轻量定时器，投递状态持久化在 PostgreSQL，重启后可继续。
+  if (!cardWebhookTimer) {
+    cardWebhookTimer = setInterval(() => {
+      cardRepo.deleteExpiredIdempotency().catch((error) => {
+        console.log(JSON.stringify({ ts: toBeijingIsoString(), level: "error", msg: "card idempotency cleanup failed", error: String(error) }));
+      });
+      cardSystem.deliverPendingWebhooks().catch((error) => {
+        console.log(JSON.stringify({ ts: toBeijingIsoString(), level: "error", msg: "card webhook worker failed", error: String(error) }));
+      });
+    }, 30_000);
+    cardWebhookTimer.unref();
   }
 
   return runtime;

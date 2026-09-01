@@ -444,6 +444,9 @@ export const orders = pgTable(
     type: text("type").notNull(),
     planId: text("plan_id").references(() => plans.id, { onDelete: "set null" }),
     packageId: text("package_id").references(() => creditPackages.id, { onDelete: "set null" }),
+    /** 卡密兑换来源；不建立反向 FK，避免订单与卡密记录互相依赖迁移顺序。 */
+    cardId: text("card_id"),
+    batchId: text("batch_id"),
     title: text("title").notNull(),
     amountCents: integer("amount_cents").notNull(),
     credits: integer("credits").notNull().default(0),
@@ -462,6 +465,8 @@ export const orders = pgTable(
     index("idx_orders_user").on(t.userId, t.createdAt),
     index("idx_orders_status").on(t.status),
     index("idx_orders_operator").on(t.operatorUserId, t.createdAt),
+    index("idx_orders_card").on(t.cardId, t.createdAt),
+    index("idx_orders_batch").on(t.batchId, t.createdAt),
   ],
 );
 
@@ -516,10 +521,12 @@ export const creditLedger = pgTable(
     /** 正入负出；余额以 0 兜底时与实际 delta 一致 */
     delta: integer("delta").notNull(),
     balanceAfter: integer("balance_after").notNull(),
-    /** starter | purchase | subscription_grant | consume | admin_adjust | refund */
+    /** starter | purchase | subscription_grant | consume | admin_adjust | refund | card_redeem */
     reason: text("reason").notNull(),
     /** 生成消费所属的 Run；历史流水可为空 */
     runId: text("run_id").references(() => workflowRuns.id, { onDelete: "set null" }),
+    /** 卡密兑换来源；与 run_id 二选一或均为空 */
+    cardId: text("card_id"),
     refType: text("ref_type"),
     refId: text("ref_id"),
     /** 面向用户展示的任务/作品标题快照；管理员调点使用调整备注 */
@@ -543,6 +550,193 @@ export const paymentConfigs = pgTable("payment_configs", {
   updatedAt: epochColumn("updated_at").notNull(),
 });
 
+/** 运营级系统设置；值使用 JSON，避免把日常开关写入部署环境变量。 */
+export const systemSettings = pgTable("system_settings", {
+  key: text("key").primaryKey(),
+  valueJson: text("value_json").notNull().default("{}"),
+  updatedBy: text("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: epochColumn("updated_at").notNull(),
+});
+
+/** 卡密批次；benefitJson 保存生成时冻结的权益快照。 */
+export const cardBatches = pgTable(
+  "card_batches",
+  {
+    id: text("id").primaryKey(),
+    batchNo: text("batch_no").notNull(),
+    name: text("name").notNull(),
+    benefitType: text("benefit_type").notNull().default("credits"),
+    benefitJson: text("benefit_json").notNull().default("{}"),
+    quantity: integer("quantity").notNull(),
+    status: text("status").notNull().default("active"),
+    expiresAt: epochColumn("expires_at"),
+    source: text("source").notNull().default("admin"),
+    /** 外部 API 生成批次所属的 API Key；后台批次为空 */
+    apiKeyId: text("api_key_id"),
+    externalBatchId: text("external_batch_id"),
+    salesChannel: text("sales_channel"),
+    remark: text("remark"),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_card_batches_no").on(t.batchNo),
+    uniqueIndex("uq_card_batches_source_external").on(t.source, t.externalBatchId),
+    index("idx_card_batches_status_created").on(t.status, t.createdAt),
+    index("idx_card_batches_api_key").on(t.apiKeyId, t.createdAt),
+  ],
+);
+
+/** 一卡一密；只保存摘要和脱敏信息，不保存可兑换的完整明文。 */
+export const redemptionCards = pgTable(
+  "redemption_cards",
+  {
+    id: text("id").primaryKey(),
+    batchId: text("batch_id")
+      .notNull()
+      .references(() => cardBatches.id, { onDelete: "restrict" }),
+    codeHash: text("code_hash").notNull(),
+    codePrefix: text("code_prefix").notNull(),
+    codeLast4: text("code_last4").notNull(),
+    status: text("status").notNull().default("active"),
+    expiresAt: epochColumn("expires_at"),
+    redeemedBy: text("redeemed_by").references(() => users.id, { onDelete: "set null" }),
+    redeemedAt: epochColumn("redeemed_at"),
+    redemptionOrderId: text("redemption_order_id"),
+    metadataJson: text("metadata_json"),
+    createdAt: createdAt(),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_redemption_cards_hash").on(t.codeHash),
+    index("idx_redemption_cards_batch_status").on(t.batchId, t.status),
+    index("idx_redemption_cards_redeemed_by").on(t.redeemedBy, t.redeemedAt),
+  ],
+);
+
+/** 卡密兑换成功记录与风控审计。失败尝试不默认写入，避免被攻击者刷爆。 */
+export const cardRedemptions = pgTable(
+  "card_redemptions",
+  {
+    id: text("id").primaryKey(),
+    cardId: text("card_id")
+      .notNull()
+      .references(() => redemptionCards.id, { onDelete: "restrict" }),
+    batchId: text("batch_id")
+      .notNull()
+      .references(() => cardBatches.id, { onDelete: "restrict" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    orderId: text("order_id").notNull(),
+    status: text("status").notNull().default("succeeded"),
+    failureCode: text("failure_code"),
+    ipHash: text("ip_hash"),
+    userAgentHash: text("user_agent_hash"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_card_redemptions_card").on(t.cardId),
+    index("idx_card_redemptions_user_created").on(t.userId, t.createdAt),
+    index("idx_card_redemptions_batch_created").on(t.batchId, t.createdAt),
+  ],
+);
+
+/** 外部销售系统调用凭据；明文只在创建响应中出现一次。 */
+export const externalApiKeys = pgTable(
+  "external_api_keys",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    keyPrefix: text("key_prefix").notNull(),
+    keyHash: text("key_hash").notNull(),
+    scopesJson: text("scopes_json").notNull().default("[\"cards:generate\"]"),
+    ipAllowlistJson: text("ip_allowlist_json").notNull().default("[]"),
+    rateLimitPerMinute: integer("rate_limit_per_minute").notNull().default(60),
+    webhookUrl: text("webhook_url"),
+    webhookSecretEncrypted: text("webhook_secret_encrypted"),
+    status: text("status").notNull().default("active"),
+    lastUsedAt: epochColumn("last_used_at"),
+    expiresAt: epochColumn("expires_at"),
+    createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_external_api_keys_hash").on(t.keyHash),
+    index("idx_external_api_keys_status").on(t.status, t.createdAt),
+  ],
+);
+
+/** 外部接口幂等记录；响应短期加密保存，用于网络重试时原样重放明文卡密。 */
+export const apiIdempotencyRecords = pgTable(
+  "api_idempotency_records",
+  {
+    id: text("id").primaryKey(),
+    apiKeyId: text("api_key_id")
+      .notNull()
+      .references(() => externalApiKeys.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    responseEncrypted: text("response_encrypted").notNull(),
+    expiresAt: epochColumn("expires_at").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("uq_api_idempotency_key").on(t.apiKeyId, t.idempotencyKey),
+    index("idx_api_idempotency_expiry").on(t.expiresAt),
+  ],
+);
+
+/** 兑换成功后的外部通知投递队列；当前单进程用定时器处理，后续可迁移 Redis。 */
+export const cardWebhookDeliveries = pgTable(
+  "card_webhook_deliveries",
+  {
+    id: text("id").primaryKey(),
+    eventId: text("event_id").notNull(),
+    apiKeyId: text("api_key_id")
+      .notNull()
+      .references(() => externalApiKeys.id, { onDelete: "cascade" }),
+    eventType: text("event_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    endpointUrl: text("endpoint_url").notNull(),
+    secretEncrypted: text("secret_encrypted"),
+    payloadJson: text("payload_json").notNull(),
+    status: text("status").notNull().default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    nextAttemptAt: epochColumn("next_attempt_at").notNull(),
+    lastError: text("last_error"),
+    deliveredAt: epochColumn("delivered_at"),
+    createdAt: createdAt(),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_card_webhook_event").on(t.apiKeyId, t.eventId),
+    index("idx_card_webhook_pending").on(t.status, t.nextAttemptAt),
+  ],
+);
+
+/** 卡密管理动作审计。 */
+export const cardAuditLogs = pgTable(
+  "card_audit_logs",
+  {
+    id: text("id").primaryKey(),
+    actorType: text("actor_type").notNull(),
+    actorId: text("actor_id"),
+    action: text("action").notNull(),
+    batchId: text("batch_id"),
+    cardId: text("card_id"),
+    apiKeyId: text("api_key_id"),
+    detailJson: text("detail_json"),
+    ipHash: text("ip_hash"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("idx_card_audit_created").on(t.createdAt), index("idx_card_audit_batch").on(t.batchId, t.createdAt)],
+);
+
 export type Channel = typeof channels.$inferSelect;
 export type ChannelModel = typeof channelModels.$inferSelect;
 export type BrandKit = typeof brandKits.$inferSelect;
@@ -556,6 +750,14 @@ export type Wallet = typeof wallets.$inferSelect;
 export type Subscription = typeof subscriptions.$inferSelect;
 export type CreditLedgerRow = typeof creditLedger.$inferSelect;
 export type PaymentConfig = typeof paymentConfigs.$inferSelect;
+export type SystemSetting = typeof systemSettings.$inferSelect;
+export type CardBatch = typeof cardBatches.$inferSelect;
+export type RedemptionCard = typeof redemptionCards.$inferSelect;
+export type CardRedemption = typeof cardRedemptions.$inferSelect;
+export type ExternalApiKey = typeof externalApiKeys.$inferSelect;
+export type ApiIdempotencyRecord = typeof apiIdempotencyRecords.$inferSelect;
+export type CardWebhookDelivery = typeof cardWebhookDeliveries.$inferSelect;
+export type CardAuditLog = typeof cardAuditLogs.$inferSelect;
 
 export const workflowRunsRelations = relations(workflowRuns, ({ many }) => ({
   nodeRuns: many(nodeRuns),

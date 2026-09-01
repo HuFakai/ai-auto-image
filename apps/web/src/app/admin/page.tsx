@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 const yuan = (cents: number) => (cents / 100).toFixed(2);
 
-const CHANNEL_LABEL: Record<string, string> = { alipay: "支付宝", wechat: "微信支付", mock: "沙箱模拟", admin: "后台调整" };
+const CHANNEL_LABEL: Record<string, string> = { alipay: "支付宝", wechat: "微信支付", mock: "沙箱模拟", admin: "后台调整", card: "卡密兑换" };
 const STATUS_LABEL: Record<string, string> = {
   pending: "待支付",
   paid: "已支付",
@@ -15,6 +15,7 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "失败",
   refunded: "已退款",
   expired: "已过期",
+  redeemed: "已兑换",
 };
 
 /** 后台概览：收入统计 + 经营数字（服务端直取 Repo，无需中间 API） */

@@ -56,7 +56,7 @@ export interface PaginationMeta {
 
 const yuan = (cents: number) => (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
 
-const CHANNEL_LABEL: Record<string, string> = { alipay: "支付宝", wechat: "微信支付", mock: "沙箱模拟", admin: "后台调整" };
+const CHANNEL_LABEL: Record<string, string> = { alipay: "支付宝", wechat: "微信支付", mock: "沙箱模拟", admin: "后台调整", card: "卡密兑换" };
 const STATUS_LABEL: Record<string, string> = {
   pending: "待支付",
   paid: "已支付",
@@ -64,6 +64,7 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "失败",
   refunded: "已退款",
   expired: "已过期",
+  redeemed: "已兑换",
 };
 const REASON_LABEL: Record<string, string> = {
   starter: "注册赠送",
@@ -72,6 +73,7 @@ const REASON_LABEL: Record<string, string> = {
   consume: "生成消耗",
   admin_adjust: "管理员调整",
   refund: "退款扣回",
+  card_redeem: "卡密兑换",
 };
 
 type PayChannel = "alipay" | "wechat";
@@ -95,6 +97,7 @@ export function PricingView({
   ordersPagination,
   ledger,
   ledgerPagination,
+  cardRedeemEnabled,
 }: {
   username: string;
   summary: BillingSummary;
@@ -104,6 +107,7 @@ export function PricingView({
   ordersPagination: PaginationMeta;
   ledger: LedgerItem[];
   ledgerPagination: PaginationMeta;
+  cardRedeemEnabled: boolean;
 }) {
   const [wallet, setWallet] = useState(summary);
   const [orderRows, setOrderRows] = useState(orders);
@@ -119,6 +123,9 @@ export function PricingView({
   const [mockConfirming, setMockConfirming] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [paidFlash, setPaidFlash] = useState(false);
+  const [cardCode, setCardCode] = useState("");
+  const [redeemingCard, setRedeemingCard] = useState(false);
+  const [cardMessage, setCardMessage] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
@@ -261,6 +268,28 @@ export function PricingView({
     }
   }
 
+  async function redeemCard() {
+    if (!cardCode.trim() || redeemingCard) return;
+    setRedeemingCard(true);
+    setCardMessage(null);
+    try {
+      const response = await fetch("/api/cards/redeem", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: cardCode.trim() }),
+      });
+      const payload = (await response.json()) as { error?: string; credits?: number; balance?: number };
+      if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
+      setCardCode("");
+      setCardMessage(`✓ 兑换成功，到账 ${payload.credits ?? 0} 点，当前余额 ${payload.balance ?? 0} 点`);
+      await Promise.all([refreshSummary(), loadOrderPage(orderPaging.page), loadLedgerPage(ledgerPaging.page)]);
+    } catch (caught) {
+      setCardMessage(`⚠ ${caught instanceof Error ? caught.message : String(caught)}`);
+    } finally {
+      setRedeemingCard(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-[1080px] space-y-12 px-[26px] pb-24 pt-8 max-md:px-4">
       {/* 头部：余额（胶片计数）+ 订阅状态 */}
@@ -387,6 +416,29 @@ export function PricingView({
           )}
         </div>
       </section>
+
+      {cardRedeemEnabled && (
+        <section className="rise" style={{ animationDelay: "150ms" }}>
+          <div className="rule-double mb-4 flex items-baseline justify-between pt-2">
+            <h2 className="font-display text-lg font-bold">卡密兑换</h2>
+            <span className="kicker">兑换后立即到账</span>
+          </div>
+          <div className="flex flex-wrap gap-3 rounded-[14px] border border-line bg-paper-card p-5">
+            <input
+              className="field-input min-w-[260px] flex-1 font-mono uppercase"
+              placeholder="输入卡密，例如 AAI-XXXXX-XXXXX-…"
+              value={cardCode}
+              onChange={(event) => setCardCode(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") void redeemCard(); }}
+              disabled={redeemingCard}
+            />
+            <button className="btn-ink px-6 py-2 font-mono text-xs" disabled={redeemingCard || !cardCode.trim()} onClick={() => void redeemCard()}>
+              {redeemingCard ? "兑换中…" : "立即兑换"}
+            </button>
+          </div>
+          {cardMessage && <p className={`mt-2 font-mono text-xs ${cardMessage.startsWith("⚠") ? "text-seal" : "text-[#5FA36B]"}`}>{cardMessage}</p>}
+        </section>
+      )}
 
       {/* 流水与订单 */}
       <section className="rise grid gap-8 md:grid-cols-2" style={{ animationDelay: "180ms" }}>

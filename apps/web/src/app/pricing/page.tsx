@@ -14,6 +14,7 @@ export default async function PricingPage() {
     runtime.orderRepo.listByUserPage(user.id, 1, 20),
     runtime.ledgerRepo.listByUserPage(user.id, 1, 20),
   ]);
+  const cardSettings = await runtime.cardSystem.settings();
 
   return (
     <PricingView
@@ -73,6 +74,7 @@ export default async function PricingPage() {
         pageSize: ledgerPage.pageSize,
         totalPages: ledgerPage.totalPages,
       }}
+      cardRedeemEnabled={cardSettings.systemEnabled && cardSettings.redeemEnabled}
     />
   );
 }

@@ -275,6 +275,7 @@ stat -c '%a %n' .env 2>/dev/null || stat -f '%Lp %N' .env
 - 把根目录 .env 传入容器，保证模型、支付和 Provider 配置生效。
 - 应用监听容器内 1235；宿主机绑定地址由 `APP_BIND_ADDRESS` 控制，默认是 127.0.0.1。
 - 启动时执行 PostgreSQL 迁移。
+- 自动执行包括 `0010_card_code_system.sql` 在内的数据库迁移；卡密系统总开关默认关闭，不会因为部署新版本就向用户开放。
 - 把 /data 挂载到名为 aai-data 的持久卷。
 - 将容器内存限制为 4G。
 - 强制生产镜像关闭模拟支付。
@@ -315,6 +316,19 @@ docker compose --env-file /opt/1panel/apps/ai-auto-image/.env -f /opt/1panel/app
 ~~~
 
 不要使用 docker compose down -v 作为普通重启或更新命令，它会删除应用持久卷。
+
+### 5.1 卡密系统首次启用
+
+卡密系统的日常开关不写入 `.env`，由管理员在 `/admin/cards` 中控制。首次更新完成后按以下顺序操作：
+
+1. 查看应用日志，确认 `0010_card_code_system` 迁移成功，健康接口返回数据库正常。
+2. 保持“启用卡密系统”关闭，先在后台创建 1–2 张小批量测试卡，使用测试账号兑换并核对钱包、点数明细和订单号。
+3. 确认无误后开启“启用卡密系统”和“开放用户兑换”；需要外部销售系统时，再创建 API Key，保存只显示一次的 Token/Webhook Secret，最后开启“开放外部 API”。
+4. 外部系统调用正式域名下的 `https://<你的域名>/api/v1/cards/generate`，必须携带 `Authorization: Bearer aai_live_...` 和唯一的 `Idempotency-Key`；不要把管理员 Cookie、`APP_SECRET` 或 API Key 写入前端。
+
+Webhook 地址必须是公网可访问的 HTTPS 地址（本机联调才允许 localhost HTTP），签名使用请求头 `x-ai-timestamp` 与原始请求体校验 `x-ai-signature`。投递失败会自动退避重试，可在后台 Webhook 记录中查看。
+
+卡密系统当前不依赖 Redis；单容器阶段使用 PostgreSQL 持久化状态和应用内轻量投递定时器。多实例部署前必须把限流和 Webhook 领取迁移到共享队列/Redis，避免仅依赖进程内状态。
 
 ## 6. 在 1Panel 配置域名和 HTTPS
 

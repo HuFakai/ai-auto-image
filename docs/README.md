@@ -9,12 +9,13 @@
 3. [产品优化分阶段开发方案](./05-product-optimization-phased-plan.md)：余额门禁、失败恢复、删除确定性排版、账务追溯、模型目录与按次计费的当前执行方案。
 4. [开发与环境说明](./development.md)：本地开发、环境变量、命令、目录和故障排查。
 5. [服务器部署手册](./deployment.md)：Docker、1Panel、外部 PostgreSQL/Redis、HTTPS、备份和上线清单。
+6. [卡密系统设计与接口说明](./06-card-code-system-design.md)：卡密生成、兑换、后台开关、外部 API、幂等、Webhook 和分阶段实现状态。
 
 ## 方案与参考基线
 
-6. [GitHub 项目与 Skills 调研](./01-research-and-reference.md)：早期技术选型、可参考项目和复用边界。
-7. [总体开发规划方案](./02-master-development-plan.md)：产品愿景、领域模型和长期架构基线。
-8. [AI 图文基础框架解决方案](./04-ai-image-framework-solution.md)：本项目的任务、Provider、渲染和资产设计基线；其中“初期 SQLite”是历史决策，当前实现已演进为 PostgreSQL 方言 + PGlite/远程 PostgreSQL。
+7. [GitHub 项目与 Skills 调研](./01-research-and-reference.md)：早期技术选型、可参考项目和复用边界。
+8. [总体开发规划方案](./02-master-development-plan.md)：产品愿景、领域模型和长期架构基线。
+9. [AI 图文基础框架解决方案](./04-ai-image-framework-solution.md)：本项目的任务、Provider、渲染和资产设计基线；其中“初期 SQLite”是历史决策，当前实现已演进为 PostgreSQL 方言 + PGlite/远程 PostgreSQL。
 
 ## 阶段设计基线（历史范围）
 

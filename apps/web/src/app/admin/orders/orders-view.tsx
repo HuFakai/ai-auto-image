@@ -28,9 +28,9 @@ interface PaginationMeta {
 }
 
 const yuan = (cents: number) => (cents / 100).toFixed(2);
-const CHANNEL_LABEL: Record<string, string> = { alipay: "支付宝", wechat: "微信支付", mock: "沙箱", admin: "后台调整" };
-const TYPE_LABEL: Record<string, string> = { subscription: "订阅", credits: "点数", admin_adjust: "点数调整" };
-const STATUSES = ["pending", "paid", "adjusted", "failed", "refunded", "expired"];
+const CHANNEL_LABEL: Record<string, string> = { alipay: "支付宝", wechat: "微信支付", mock: "沙箱", admin: "后台调整", card: "卡密兑换" };
+const TYPE_LABEL: Record<string, string> = { subscription: "订阅", credits: "点数", admin_adjust: "点数调整", card_redeem: "卡密兑换" };
+const STATUSES = ["pending", "paid", "adjusted", "redeemed", "failed", "refunded", "expired"];
 const STATUS_LABEL: Record<string, string> = {
   pending: "待支付",
   paid: "已支付",
@@ -38,6 +38,7 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "失败",
   refunded: "已退款",
   expired: "已过期",
+  redeemed: "已兑换",
 };
 
 export function OrdersView() {
@@ -113,6 +114,7 @@ export function OrdersView() {
           <option value="alipay">支付宝</option>
           <option value="wechat">微信支付</option>
           <option value="mock">沙箱模拟</option>
+          <option value="card">卡密兑换</option>
         </select>
         <input
           className="field-input max-w-xs"
