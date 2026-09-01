@@ -24,6 +24,7 @@ export interface PackageItem {
 
 export interface OrderItem {
   id: string;
+  orderNo: string;
   title: string;
   type: string;
   amountCents: number;
@@ -31,6 +32,7 @@ export interface OrderItem {
   channel: string;
   status: string;
   createdAt: number;
+  paidAt: number | null;
 }
 
 export interface LedgerItem {
@@ -38,16 +40,26 @@ export interface LedgerItem {
   delta: number;
   balanceAfter: number;
   reason: string;
+  runId: string | null;
+  displayTitle: string | null;
   note: string | null;
   createdAt: number;
 }
 
+export interface PaginationMeta {
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 const yuan = (cents: number) => (cents / 100).toFixed(cents % 100 === 0 ? 0 : 2);
 
-const CHANNEL_LABEL: Record<string, string> = { alipay: "支付宝", wechat: "微信支付", mock: "沙箱模拟" };
+const CHANNEL_LABEL: Record<string, string> = { alipay: "支付宝", wechat: "微信支付", mock: "沙箱模拟", admin: "后台调整" };
 const STATUS_LABEL: Record<string, string> = {
   pending: "待支付",
   paid: "已支付",
+  adjusted: "已调整",
   failed: "失败",
   refunded: "已退款",
   expired: "已过期",
@@ -79,16 +91,26 @@ export function PricingView({
   plans,
   packages,
   orders,
+  ordersPagination,
   ledger,
+  ledgerPagination,
 }: {
   username: string;
   summary: BillingSummary;
   plans: PlanItem[];
   packages: PackageItem[];
   orders: OrderItem[];
+  ordersPagination: PaginationMeta;
   ledger: LedgerItem[];
+  ledgerPagination: PaginationMeta;
 }) {
   const [wallet, setWallet] = useState(summary);
+  const [orderRows, setOrderRows] = useState(orders);
+  const [ledgerRows, setLedgerRows] = useState(ledger);
+  const [orderPaging, setOrderPaging] = useState(ordersPagination);
+  const [ledgerPaging, setLedgerPaging] = useState(ledgerPagination);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
   const [paying, setPaying] = useState<{ kind: "plan" | "package"; id: string; name: string; amountCents: number } | null>(null);
   const [order, setOrder] = useState<PayOrder | null>(null);
   const [orderError, setOrderError] = useState<string | null>(null);
@@ -114,6 +136,32 @@ export function PricingView({
     }
   }, []);
 
+  const loadLedgerPage = useCallback(async (page: number) => {
+    setLedgerLoading(true);
+    try {
+      const response = await fetch(`/api/billing/ledger?page=${page}&pageSize=${ledgerPaging.pageSize}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const payload = (await response.json()) as { items: LedgerItem[]; pagination: PaginationMeta };
+      setLedgerRows(payload.items);
+      setLedgerPaging(payload.pagination);
+    } finally {
+      setLedgerLoading(false);
+    }
+  }, [ledgerPaging.pageSize]);
+
+  const loadOrderPage = useCallback(async (page: number) => {
+    setOrdersLoading(true);
+    try {
+      const response = await fetch(`/api/pay/orders?page=${page}&pageSize=${orderPaging.pageSize}`, { cache: "no-store" });
+      if (!response.ok) return;
+      const payload = (await response.json()) as { orders: OrderItem[]; pagination: PaginationMeta };
+      setOrderRows(payload.orders);
+      setOrderPaging(payload.pagination);
+    } finally {
+      setOrdersLoading(false);
+    }
+  }, [orderPaging.pageSize]);
+
   /* QR 弹窗打开时轮询订单状态（2s）；支付成功 → 停止轮询 + 刷新余额 */
   useEffect(() => {
     if (!order) {
@@ -137,6 +185,8 @@ export function PricingView({
           stopPolling();
           setPaidFlash(true);
           void refreshSummary();
+          void loadOrderPage(orderPaging.page);
+          void loadLedgerPage(ledgerPaging.page);
           setTimeout(() => setOrder(null), 1600);
         }
         if (payload.status === "failed" || payload.status === "expired") {
@@ -149,7 +199,7 @@ export function PricingView({
       }
     }, 2000);
     return stopPolling;
-  }, [order, stopPolling, refreshSummary]);
+  }, [order, stopPolling, refreshSummary, loadOrderPage, loadLedgerPage, orderPaging.page, ledgerPaging.page]);
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -200,6 +250,8 @@ export function PricingView({
       if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
       setPaidFlash(true);
       void refreshSummary();
+      void loadOrderPage(orderPaging.page);
+      void loadLedgerPage(ledgerPaging.page);
       setTimeout(() => setOrder(null), 1200);
     } catch (caught) {
       setOrderError(caught instanceof Error ? caught.message : String(caught));
@@ -340,15 +392,18 @@ export function PricingView({
         <div>
           <div className="rule-double mb-3 flex items-baseline justify-between pt-2">
             <h2 className="font-display text-base font-bold">点数明细</h2>
-            <span className="kicker">最近 {ledger.length} 条</span>
+            <span className="kicker">共 {ledgerPaging.total} 条</span>
           </div>
           <ul className="space-y-1.5">
-            {ledger.map((row) => (
+            {ledgerRows.map((row) => (
               <li key={row.id} className="flex items-center justify-between rounded-lg border border-line bg-paper-card px-3.5 py-2.5">
                 <div className="min-w-0">
-                  <div className="text-[13px]">{REASON_LABEL[row.reason] ?? row.reason}</div>
+                  <div className="truncate text-[13px]" title={row.displayTitle ?? undefined}>
+                    {row.displayTitle ?? REASON_LABEL[row.reason] ?? row.reason}
+                  </div>
                   <div className="truncate font-mono text-[10px] text-ink-faint">
-                    {row.note ?? ""} · {new Date(row.createdAt).toLocaleString("zh-CN")}
+                    {REASON_LABEL[row.reason] ?? row.reason}
+                    {row.note ? ` · ${row.note}` : ""} · {new Date(row.createdAt).toLocaleString("zh-CN")}
                   </div>
                 </div>
                 <div className="ml-3 shrink-0 text-right font-mono text-sm">
@@ -360,29 +415,41 @@ export function PricingView({
                 </div>
               </li>
             ))}
-            {ledger.length === 0 && (
+            {ledgerRows.length === 0 && !ledgerLoading && (
               <li className="rounded-lg border border-dashed border-line-dark px-4 py-6 text-center text-xs text-ink-faint">
                 还没有点数变动，去创作第一套图文吧。
               </li>
             )}
           </ul>
+          {ledgerPaging.totalPages > 1 && (
+            <HistoryPager
+              pagination={ledgerPaging}
+              loading={ledgerLoading}
+              onPageChange={(page) => void loadLedgerPage(page)}
+            />
+          )}
         </div>
         <div>
           <div className="rule-double mb-3 flex items-baseline justify-between pt-2">
             <h2 className="font-display text-base font-bold">我的订单</h2>
-            <span className="kicker">最近 {orders.length} 条</span>
+            <span className="kicker">共 {orderPaging.total} 条</span>
           </div>
           <ul className="space-y-1.5">
-            {orders.map((order) => (
+            {orderRows.map((order) => (
               <li key={order.id} className="flex items-center justify-between rounded-lg border border-line bg-paper-card px-3.5 py-2.5">
                 <div className="min-w-0">
                   <div className="text-[13px]">{order.title}</div>
                   <div className="font-mono text-[10px] text-ink-faint">
-                    {CHANNEL_LABEL[order.channel] ?? order.channel} · {new Date(order.createdAt).toLocaleString("zh-CN")}
+                    订单号 {order.orderNo} · {CHANNEL_LABEL[order.channel] ?? order.channel} · {new Date(order.createdAt).toLocaleString("zh-CN")}
                   </div>
                 </div>
                 <div className="ml-3 shrink-0 text-right">
                   <div className="font-mono text-sm">¥{yuan(order.amountCents)}</div>
+                  {order.credits !== 0 && (
+                    <div className={`font-mono text-[10px] ${order.credits > 0 ? "text-[#5FA36B]" : "text-seal"}`}>
+                      {order.credits > 0 ? "+" : ""}{order.credits} 点
+                    </div>
+                  )}
                   <span
                     className={`stamp text-[10px] ${
                       order.status === "paid" ? "text-seal" : order.status === "pending" ? "stamp-quiet text-ink-faint" : "stamp-quiet text-ink-faint"
@@ -393,12 +460,19 @@ export function PricingView({
                 </div>
               </li>
             ))}
-            {orders.length === 0 && (
+            {orderRows.length === 0 && (
               <li className="rounded-lg border border-dashed border-line-dark px-4 py-6 text-center text-xs text-ink-faint">
                 还没有订单。
               </li>
             )}
           </ul>
+          {orderPaging.totalPages > 1 && (
+            <HistoryPager
+              pagination={orderPaging}
+              loading={ordersLoading}
+              onPageChange={(page) => void loadOrderPage(page)}
+            />
+          )}
         </div>
       </section>
 
@@ -467,7 +541,7 @@ export function PricingView({
               <div className="pointer-events-none absolute inset-0 rounded-xl bg-seal/10 animate-pulse" style={{ animationDuration: "2.4s" }} />
               {paidFlash ? (
                 <div className="grid h-64 w-64 place-items-center max-md:h-52 max-md:w-52">
-                  <span className="stamp rotate-[-8deg] px-4 py-2 text-xl text-seal">已 讫</span>
+                  <span className="stamp rotate-[-8deg] px-4 py-2 text-xl text-seal">已完成</span>
                 </div>
               ) : order.mock ? (
                 <div className="grid h-64 w-64 place-items-center px-6 text-center max-md:h-52 max-md:w-52">
@@ -510,6 +584,42 @@ export function PricingView({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function HistoryPager({
+  pagination,
+  loading,
+  onPageChange,
+}: {
+  pagination: PaginationMeta;
+  loading: boolean;
+  onPageChange: (page: number) => void;
+}) {
+  return (
+    <div className="mt-3 flex items-center justify-between gap-2 font-mono text-[10px] text-ink-faint">
+      <span>
+        第 {pagination.page} / {pagination.totalPages} 页
+      </span>
+      <div className="flex gap-1.5">
+        <button
+          type="button"
+          className="btn-ghost px-2.5 py-1"
+          disabled={loading || pagination.page <= 1}
+          onClick={() => onPageChange(pagination.page - 1)}
+        >
+          上一页
+        </button>
+        <button
+          type="button"
+          className="btn-ghost px-2.5 py-1"
+          disabled={loading || pagination.page >= pagination.totalPages}
+          onClick={() => onPageChange(pagination.page + 1)}
+        >
+          下一页
+        </button>
+      </div>
     </div>
   );
 }

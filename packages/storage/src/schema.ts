@@ -402,6 +402,8 @@ export const orders = pgTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /** 管理员调点的操作者；支付订单为空 */
+    operatorUserId: text("operator_user_id").references(() => users.id, { onDelete: "set null" }),
     type: text("type").notNull(),
     planId: text("plan_id").references(() => plans.id, { onDelete: "set null" }),
     packageId: text("package_id").references(() => creditPackages.id, { onDelete: "set null" }),
@@ -422,6 +424,7 @@ export const orders = pgTable(
     uniqueIndex("uq_orders_no").on(t.orderNo),
     index("idx_orders_user").on(t.userId, t.createdAt),
     index("idx_orders_status").on(t.status),
+    index("idx_orders_operator").on(t.operatorUserId, t.createdAt),
   ],
 );
 
@@ -478,12 +481,19 @@ export const creditLedger = pgTable(
     balanceAfter: integer("balance_after").notNull(),
     /** starter | purchase | subscription_grant | consume | admin_adjust | refund */
     reason: text("reason").notNull(),
+    /** 生成消费所属的 Run；历史流水可为空 */
+    runId: text("run_id").references(() => workflowRuns.id, { onDelete: "set null" }),
     refType: text("ref_type"),
     refId: text("ref_id"),
+    /** 面向用户展示的任务/作品标题快照；管理员调点使用调整备注 */
+    displayTitle: text("display_title"),
     note: text("note"),
     createdAt: createdAt(),
   },
-  (t) => [index("idx_credit_ledger_user").on(t.userId, t.createdAt)],
+  (t) => [
+    index("idx_credit_ledger_user").on(t.userId, t.createdAt),
+    index("idx_credit_ledger_run").on(t.runId),
+  ],
 );
 
 /** 支付渠道参数（alipay | wechat）；非敏感参数存 config_json，密钥经 AES 加密存 secrets */

@@ -89,6 +89,7 @@ describe("payment mock gate", () => {
       id: "ord_duplicate_test",
       orderNo: "NO_duplicate_test",
       userId: "user_test",
+      operatorUserId: null,
       type: "credits",
       planId: null,
       packageId: "pkg_test",

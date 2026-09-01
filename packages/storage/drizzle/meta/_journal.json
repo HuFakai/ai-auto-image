@@ -57,6 +57,13 @@
       "when": 1788192399865,
       "tag": "0007_uneven_tarantula",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788242398639,
+      "tag": "0008_brainy_scorpion",
+      "breakpoints": true
     }
   ]
 }

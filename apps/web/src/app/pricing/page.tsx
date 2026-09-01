@@ -7,12 +7,12 @@ export const dynamic = "force-dynamic";
 export default async function PricingPage() {
   const user = await requireUser();
   const runtime = await getRuntime();
-  const [summary, plans, packages, orders, ledger] = await Promise.all([
+  const [summary, plans, packages, ordersPage, ledgerPage] = await Promise.all([
     runtime.billing.summary(user.id),
     runtime.planRepo.list(true),
     runtime.packageRepo.list(true),
-    runtime.orderRepo.listByUser(user.id, 20),
-    runtime.ledgerRepo.listByUser(user.id, 20),
+    runtime.orderRepo.listByUserPage(user.id, 1, 20),
+    runtime.ledgerRepo.listByUserPage(user.id, 1, 20),
   ]);
 
   return (
@@ -35,9 +35,10 @@ export default async function PricingPage() {
         bonusCredits: pkg.bonusCredits,
         priceCents: pkg.priceCents,
       }))}
-      orders={orders.map(
+      orders={ordersPage.items.map(
         (order): OrderItem => ({
           id: order.id,
+          orderNo: order.orderNo,
           title: order.title,
           type: order.type,
           amountCents: order.amountCents,
@@ -45,18 +46,33 @@ export default async function PricingPage() {
           channel: order.channel,
           status: order.status,
           createdAt: order.createdAt,
+          paidAt: order.paidAt,
         }),
       )}
-      ledger={ledger.map(
+      ordersPagination={{
+        total: ordersPage.total,
+        page: ordersPage.page,
+        pageSize: ordersPage.pageSize,
+        totalPages: ordersPage.totalPages,
+      }}
+      ledger={ledgerPage.items.map(
         (row): LedgerItem => ({
           id: row.id,
           delta: row.delta,
           balanceAfter: row.balanceAfter,
           reason: row.reason,
+          runId: row.runId,
+          displayTitle: row.displayTitle,
           note: row.note,
           createdAt: row.createdAt,
         }),
       )}
+      ledgerPagination={{
+        total: ledgerPage.total,
+        page: ledgerPage.page,
+        pageSize: ledgerPage.pageSize,
+        totalPages: ledgerPage.totalPages,
+      }}
     />
   );
 }

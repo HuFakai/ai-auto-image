@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 const STATUS_LABEL: Record<string, string> = {
   pending: "待支付",
   paid: "已支付",
+  adjusted: "已调整",
   failed: "失败",
   refunded: "已退款",
   expired: "已过期",
@@ -19,17 +20,18 @@ export async function GET(request: Request) {
   if (!admin) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const url = new URL(request.url);
   const runtime = await getRuntime();
-  const orders = await runtime.orderRepo.listAdmin({
+  const result = await runtime.orderRepo.listAdminPage({
     status: url.searchParams.get("status") || undefined,
     channel: url.searchParams.get("channel") || undefined,
     q: url.searchParams.get("q")?.trim() || undefined,
-    limit: 100,
+    page: Number.parseInt(url.searchParams.get("page") ?? "1", 10),
+    pageSize: Number.parseInt(url.searchParams.get("pageSize") ?? "20", 10),
   });
-  const userIds = [...new Set(orders.map((order) => order.userId))];
+  const userIds = [...new Set(result.items.map((order) => order.userId))];
   const users = userIds.length > 0 ? await runtime.userRepo.listAdmin(undefined, 500) : [];
   const usernames = new Map(users.map((user) => [user.id, user.username]));
   return NextResponse.json({
-    orders: orders.map((order) => ({
+    orders: result.items.map((order) => ({
       id: order.id,
       orderNo: order.orderNo,
       username: usernames.get(order.userId) ?? order.userId,
@@ -45,6 +47,12 @@ export async function GET(request: Request) {
       createdAt: order.createdAt,
       paidAt: order.paidAt,
     })),
+    pagination: {
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      totalPages: result.totalPages,
+    },
   });
 }
 

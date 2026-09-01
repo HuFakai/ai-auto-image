@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { InsufficientWalletCreditsError } from "@aai/storage";
 import { getRuntime } from "@/server/runtime";
 import { requireAdmin } from "@/server/auth";
 
@@ -72,11 +73,22 @@ export async function POST(request: Request) {
   const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   const body = (await request.json().catch(() => ({}))) as { userId?: string; delta?: number; note?: string };
-  if (!body.userId || typeof body.delta !== "number" || !Number.isInteger(body.delta) || body.delta === 0) {
-    return NextResponse.json({ error: "userId 与整数 delta（≠0）必填" }, { status: 400 });
+  const note = body.note?.trim() ?? "";
+  if (!body.userId || typeof body.delta !== "number" || !Number.isInteger(body.delta) || body.delta === 0 || !note) {
+    return NextResponse.json({ error: "userId、非零整数 delta 与调整理由均必填" }, { status: 400 });
   }
   const runtime = await getRuntime();
   await runtime.userRepo.require(body.userId);
-  const balance = await runtime.billing.adminAdjust(body.userId, body.delta, body.note ?? `管理员 ${admin.username} 调整`);
-  return NextResponse.json({ balance });
+  try {
+    const result = await runtime.billing.adminAdjust(body.userId, body.delta, note, admin.id);
+    return NextResponse.json(result);
+  } catch (error) {
+    if (error instanceof InsufficientWalletCreditsError) {
+      return NextResponse.json(
+        { error: `用户可用余额不足：当前 ${error.balance} 点，无法扣减 ${error.needed} 点` },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json({ error: String(error).slice(0, 200) }, { status: 500 });
+  }
 }

@@ -25,18 +25,19 @@ async function createFixture() {
   const projectRepo = new ProjectRepo(db.db);
   const runRepo = new RunRepo(db.db);
   const walletRepo = new WalletRepo(db.db);
+  const ledgerRepo = new LedgerRepo(db.db);
   const user = await userRepo.create({ username: `billing-${Math.random()}`, role: "user" });
   const project = await projectRepo.create({ title: "billing", userId: user.id });
   const run = await runRepo.create({ projectId: project.id, inputJson: "{}", userId: user.id });
   const billing = new BillingService(
     walletRepo,
-    new LedgerRepo(db.db),
+    ledgerRepo,
     new PlanRepo(db.db),
     new SubscriptionRepo(db.db),
     runRepo,
   );
   await billing.ensureWallet(user.id);
-  return { db, user, run, billing, walletRepo, runRepo };
+  return { db, user, run, billing, walletRepo, runRepo, ledgerRepo };
 }
 
 afterEach(async () => {
@@ -96,5 +97,7 @@ describe("billing reservation lifecycle", () => {
     expect(wallet?.totalConsumed).toBe(3);
     expect(run.creditsReserved).toBe(0);
     expect(run.creditsCharged).toBe(3);
+    const ledger = await fixture.ledgerRepo.listByUser(fixture.user.id, 10);
+    expect(ledger.some((row) => row.runId === fixture.run.id && row.displayTitle === "billing")).toBe(true);
   });
 });

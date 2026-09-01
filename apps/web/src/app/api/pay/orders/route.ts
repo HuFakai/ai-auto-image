@@ -59,13 +59,21 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+function positiveInt(value: string | null, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export async function GET(request: Request) {
   const user = await requireApiUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const runtime = await getRuntime();
-  const orders = await runtime.orderRepo.listByUser(user.id, 20);
+  const url = new URL(request.url);
+  const page = positiveInt(url.searchParams.get("page"), 1);
+  const pageSize = positiveInt(url.searchParams.get("pageSize"), 20);
+  const result = await runtime.orderRepo.listByUserPage(user.id, page, pageSize);
   return NextResponse.json({
-    orders: orders.map((order) => ({
+    orders: result.items.map((order) => ({
       id: order.id,
       orderNo: order.orderNo,
       title: order.title,
@@ -77,5 +85,11 @@ export async function GET() {
       createdAt: order.createdAt,
       paidAt: order.paidAt,
     })),
+    pagination: {
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+      totalPages: result.totalPages,
+    },
   });
 }

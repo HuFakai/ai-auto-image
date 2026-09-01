@@ -1,6 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { openDatabase, type OpenDatabase } from "./database";
-import { AssetRepo, BrandKitRepo, JobRepo, ProjectRepo, RunRepo } from "./repositories";
+import {
+  AssetRepo,
+  BrandKitRepo,
+  InsufficientWalletCreditsError,
+  JobRepo,
+  LedgerRepo,
+  OrderRepo,
+  ProjectRepo,
+  RunRepo,
+  UserRepo,
+} from "./repositories";
 
 function migrationsDir(): string {
   const moduleUrl = import.meta.url;
@@ -260,5 +270,97 @@ describe("JobRepo", () => {
     expect(found?.id).toBe(second.job.id);
     expect(first.job.id).not.toBe(second.job.id);
     expect(await jobs.findByRunId("no-such-run")).toBeNull();
+  });
+});
+
+describe("Billing trace and pagination", () => {
+  let db: OpenDatabase;
+  beforeAll(async () => {
+    db = await openSharedDb();
+  });
+  afterAll(async () => {
+    await db.close();
+  });
+
+  it("keeps work titles in ledger pages and atomically creates admin adjustment orders", async () => {
+    const userRepo = new UserRepo(db.db);
+    const projectRepo = new ProjectRepo(db.db);
+    const runRepo = new RunRepo(db.db);
+    const ledgerRepo = new LedgerRepo(db.db);
+    const orderRepo = new OrderRepo(db.db);
+    const user = await userRepo.create({ username: `trace-user-${Math.random()}`, role: "user" });
+    const admin = await userRepo.create({ username: `trace-admin-${Math.random()}`, role: "admin" });
+    const project = await projectRepo.create({ title: "作品标题可追溯", userId: user.id });
+    const run = await runRepo.create({ projectId: project.id, userId: user.id, inputJson: "{}" });
+
+    await ledgerRepo.append({
+      userId: user.id,
+      delta: -1,
+      balanceAfter: 9,
+      reason: "consume",
+      runId: run.id,
+      refType: "workflow_node",
+      refId: "node_trace",
+      displayTitle: project.title,
+      note: "生图 1 点",
+    });
+    const granted = await ledgerRepo.applyAdminAdjustment({
+      userId: user.id,
+      operatorUserId: admin.id,
+      delta: 12,
+      note: "内测补偿",
+      starterCredits: 0,
+    });
+    for (let index = 1; index <= 9; index += 1) {
+      await ledgerRepo.applyAdminAdjustment({
+        userId: user.id,
+        operatorUserId: admin.id,
+        delta: 1,
+        note: `批量调整 ${index}`,
+        starterCredits: 0,
+      });
+    }
+    const deducted = await ledgerRepo.applyAdminAdjustment({
+      userId: user.id,
+      operatorUserId: admin.id,
+      delta: -5,
+      note: "撤回多发点数",
+      starterCredits: 0,
+    });
+
+    expect(granted.balance).toBe(12);
+    expect(deducted.balance).toBe(16);
+    expect(granted.orderNo).toMatch(/^ADJ/);
+    const ledgerPage = await ledgerRepo.listByUserPage(user.id, 1, 10);
+    const ledgerPage2 = await ledgerRepo.listByUserPage(user.id, 2, 10);
+    expect(ledgerPage.total).toBe(12);
+    const ledgerItems = [...ledgerPage.items, ...ledgerPage2.items];
+    expect(ledgerItems.some((row) => row.runId === run.id && row.displayTitle === project.title)).toBe(true);
+    expect(ledgerItems.filter((row) => row.reason === "admin_adjust").map((row) => row.displayTitle)).toEqual(
+      expect.arrayContaining(["内测补偿", "撤回多发点数"]),
+    );
+
+    const orderPage = await orderRepo.listByUserPage(user.id, 1, 10);
+    expect(orderPage.total).toBe(11);
+    expect(orderPage.totalPages).toBe(2);
+    expect(orderPage.items[0]?.type).toBe("admin_adjust");
+    expect(orderPage.items[0]?.status).toBe("adjusted");
+    expect(orderPage.items[0]?.title).toBe("撤回多发点数");
+    expect(orderPage.items[0]?.credits).toBe(-5);
+    const adminSearch = await orderRepo.listAdminPage({ q: granted.orderNo, page: 1, pageSize: 10 });
+    expect(adminSearch.total).toBe(1);
+    expect(adminSearch.items[0]?.orderNo).toBe(granted.orderNo);
+    expect((await orderRepo.revenueByChannel()).length).toBe(0);
+
+    await expect(
+      ledgerRepo.applyAdminAdjustment({
+        userId: user.id,
+        operatorUserId: admin.id,
+        delta: -17,
+        note: "超额扣减",
+        starterCredits: 0,
+      }),
+    ).rejects.toBeInstanceOf(InsufficientWalletCreditsError);
+    expect((await orderRepo.listByUserPage(user.id, 1, 20)).total).toBe(11);
   });
 });

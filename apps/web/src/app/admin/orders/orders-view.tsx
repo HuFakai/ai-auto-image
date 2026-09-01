@@ -19,13 +19,21 @@ interface AdminOrderItem {
   paidAt: number | null;
 }
 
+interface PaginationMeta {
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 const yuan = (cents: number) => (cents / 100).toFixed(2);
-const CHANNEL_LABEL: Record<string, string> = { alipay: "支付宝", wechat: "微信支付", mock: "沙箱" };
-const TYPE_LABEL: Record<string, string> = { subscription: "订阅", credits: "点数" };
-const STATUSES = ["pending", "paid", "failed", "refunded", "expired"];
+const CHANNEL_LABEL: Record<string, string> = { alipay: "支付宝", wechat: "微信支付", mock: "沙箱", admin: "后台调整" };
+const TYPE_LABEL: Record<string, string> = { subscription: "订阅", credits: "点数", admin_adjust: "点数调整" };
+const STATUSES = ["pending", "paid", "adjusted", "failed", "refunded", "expired"];
 const STATUS_LABEL: Record<string, string> = {
   pending: "待支付",
   paid: "已支付",
+  adjusted: "已调整",
   failed: "失败",
   refunded: "已退款",
   expired: "已过期",
@@ -36,21 +44,27 @@ export function OrdersView() {
   const [status, setStatus] = useState("");
   const [channel, setChannel] = useState("");
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState<PaginationMeta>({ total: 0, page: 1, pageSize: 20, totalPages: 0 });
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (targetPage = 1) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (status) params.set("status", status);
       if (channel) params.set("channel", channel);
       if (q.trim()) params.set("q", q.trim());
+      params.set("page", String(targetPage));
+      params.set("pageSize", "20");
       const response = await fetch(`/api/admin/orders?${params.toString()}`, { cache: "no-store" });
       if (response.ok) {
-        const payload = (await response.json()) as { orders: AdminOrderItem[] };
+        const payload = (await response.json()) as { orders: AdminOrderItem[]; pagination: PaginationMeta };
         setOrders(payload.orders);
+        setPagination(payload.pagination);
+        setPage(payload.pagination.page);
       }
     } finally {
       setLoading(false);
@@ -58,7 +72,7 @@ export function OrdersView() {
   }, [status, channel, q]);
 
   useEffect(() => {
-    void reload();
+    void reload(1);
   }, [reload]);
 
   async function refund(order: AdminOrderItem) {
@@ -74,7 +88,7 @@ export function OrdersView() {
       const payload = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? `HTTP ${response.status}`);
       setMessage(`✓ 订单 ${order.orderNo} 已退款，点数已扣回`);
-      await reload();
+      await reload(page);
     } catch (caught) {
       setMessage(`⚠ ${caught instanceof Error ? caught.message : String(caught)}`);
     } finally {
@@ -101,7 +115,7 @@ export function OrdersView() {
         </select>
         <input
           className="field-input max-w-xs"
-          placeholder="搜索标题…"
+          placeholder="搜索标题或订单号…"
           value={q}
           onChange={(event) => setQ(event.target.value)}
         />
@@ -161,6 +175,27 @@ export function OrdersView() {
         )}
         {loading && <li className="font-mono text-xs text-ink-faint">加载中…</li>}
       </ul>
+      {pagination.totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-between gap-3 font-mono text-[11px] text-ink-faint">
+          <span>共 {pagination.total} 条 · 第 {pagination.page} / {pagination.totalPages} 页</span>
+          <div className="flex gap-2">
+            <button
+              className="btn-ghost px-3 py-1"
+              disabled={loading || page <= 1}
+              onClick={() => void reload(page - 1)}
+            >
+              上一页
+            </button>
+            <button
+              className="btn-ghost px-3 py-1"
+              disabled={loading || page >= pagination.totalPages}
+              onClick={() => void reload(page + 1)}
+            >
+              下一页
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -69,6 +69,33 @@ async function one<TRow>(query: Promise<TRow[]>): Promise<TRow | undefined> {
   return rows[0];
 }
 
+export interface PageResult<TRow> {
+  items: TRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+function normalizePage(page: number | undefined, pageSize: number | undefined): { page: number; pageSize: number } {
+  return {
+    page: Number.isInteger(page) && (page ?? 0) > 0 ? page! : 1,
+    pageSize: Number.isInteger(pageSize) && (pageSize ?? 0) >= 10
+      ? Math.min(pageSize!, 100)
+      : 20,
+  };
+}
+
+function toPageResult<TRow>(items: TRow[], total: number, page: number, pageSize: number): PageResult<TRow> {
+  return {
+    items,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.ceil(total / pageSize),
+  };
+}
+
 /* ── Projects ─────────────────────────────────────────────────── */
 
 export interface CreateProjectInput {
@@ -144,6 +171,19 @@ export class RunRepo {
     );
     if (!row) throw new Error(`workflow run not found: ${id}`);
     return row;
+  }
+
+  /** 返回 Run 对应的作品标题，供点数流水生成稳定的展示标题快照。 */
+  async projectTitle(runId: string): Promise<string | null> {
+    const row = await one(
+      this.client
+        .select({ title: projects.title })
+        .from(workflowRuns)
+        .innerJoin(projects, eq(workflowRuns.projectId, projects.id))
+        .where(eq(workflowRuns.id, runId))
+        .limit(1),
+    );
+    return row?.title ?? null;
   }
 
   async list(limit = 50) {
@@ -1511,10 +1551,22 @@ export type CreateOrderInput = {
   amountCents: number;
   credits: number;
   channel: "alipay" | "wechat" | "mock";
+  operatorUserId?: string | null;
   /** 二维码内容（渠道返回的 code_url / qr_code）；mock 为空 */
   qrCode?: string | null;
   expiresAt?: number | null;
 };
+
+export interface AdminOrderFilter {
+  status?: string;
+  channel?: string;
+  userId?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+  page?: number;
+  pageSize?: number;
+}
 
 export class OrderRepo {
   private readonly client: DbClient;
@@ -1529,6 +1581,7 @@ export class OrderRepo {
       id,
       orderNo: id.replace("ord_", "NO"),
       userId: input.userId,
+      operatorUserId: input.operatorUserId ?? null,
       type: input.type,
       planId: input.planId ?? null,
       packageId: input.packageId ?? null,
@@ -1588,23 +1641,65 @@ export class OrderRepo {
       .select()
       .from(orders)
       .where(eq(orders.userId, userId))
-      .orderBy(desc(orders.createdAt))
+      .orderBy(desc(orders.createdAt), desc(orders.id))
       .limit(limit);
   }
 
-  async listAdmin(filter: { status?: string; channel?: string; userId?: string; q?: string; limit?: number; offset?: number }) {
+  async listByUserPage(userId: string, page = 1, pageSize = 20): Promise<PageResult<typeof orders.$inferSelect>> {
+    const paging = normalizePage(page, pageSize);
+    const where = eq(orders.userId, userId);
+    const [items, countRows] = await Promise.all([
+      this.client
+        .select()
+        .from(orders)
+        .where(where)
+        .orderBy(desc(orders.createdAt), desc(orders.id))
+        .limit(paging.pageSize)
+        .offset((paging.page - 1) * paging.pageSize),
+      this.client.select({ n: sql<string>`count(*)` }).from(orders).where(where),
+    ]);
+    return toPageResult(items, Number(countRows[0]?.n ?? 0), paging.page, paging.pageSize);
+  }
+
+  private orderConditions(filter: AdminOrderFilter) {
     const conditions = [];
     if (filter.status) conditions.push(eq(orders.status, filter.status));
     if (filter.channel) conditions.push(eq(orders.channel, filter.channel));
     if (filter.userId) conditions.push(eq(orders.userId, filter.userId));
-    if (filter.q) conditions.push(like(orders.title, `%${filter.q}%`));
+    if (filter.q) {
+      conditions.push(
+        sql`(${orders.title} ILIKE ${`%${filter.q}%`} OR ${orders.orderNo} ILIKE ${`%${filter.q}%`})`,
+      );
+    }
+    return conditions;
+  }
+
+  async listAdmin(filter: AdminOrderFilter = {}) {
+    const conditions = this.orderConditions(filter);
     return this.client
       .select()
       .from(orders)
       .where(conditions.length > 0 ? and(...conditions) : sql`true`)
-      .orderBy(desc(orders.createdAt))
+      .orderBy(desc(orders.createdAt), desc(orders.id))
       .limit(Math.min(filter.limit ?? 50, 200))
       .offset(filter.offset ?? 0);
+  }
+
+  async listAdminPage(filter: AdminOrderFilter = {}): Promise<PageResult<typeof orders.$inferSelect>> {
+    const paging = normalizePage(filter.page, filter.pageSize);
+    const conditions = this.orderConditions(filter);
+    const where = conditions.length > 0 ? and(...conditions) : sql`true`;
+    const [items, countRows] = await Promise.all([
+      this.client
+        .select()
+        .from(orders)
+        .where(where)
+        .orderBy(desc(orders.createdAt), desc(orders.id))
+        .limit(paging.pageSize)
+        .offset((paging.page - 1) * paging.pageSize),
+      this.client.select({ n: sql<string>`count(*)` }).from(orders).where(where),
+    ]);
+    return toPageResult(items, Number(countRows[0]?.n ?? 0), paging.page, paging.pageSize);
   }
 
   async countAll() {
@@ -1621,7 +1716,7 @@ export class OrderRepo {
         count: sql<string>`count(*)`,
       })
       .from(orders)
-      .where(and(eq(orders.status, "paid"), gte(orders.paidAt, sinceMs)))
+      .where(and(eq(orders.status, "paid"), ne(orders.type, "admin_adjust"), gte(orders.paidAt, sinceMs)))
       .groupBy(sql`1`)
       .orderBy(sql`1`);
     return rows.map((row) => ({ day: row.day, totalCents: Number(row.totalCents), count: Number(row.count) }));
@@ -1636,7 +1731,7 @@ export class OrderRepo {
         count: sql<string>`count(*)`,
       })
       .from(orders)
-      .where(eq(orders.status, "paid"))
+      .where(and(eq(orders.status, "paid"), ne(orders.type, "admin_adjust")))
       .groupBy(orders.channel);
     return rows.map((row) => ({ channel: row.channel, totalCents: Number(row.totalCents), count: Number(row.count) }));
   }
@@ -1903,10 +1998,19 @@ export type LedgerEntryInput = {
   delta: number;
   balanceAfter: number;
   reason: "starter" | "purchase" | "subscription_grant" | "consume" | "admin_adjust" | "refund";
+  runId?: string | null;
   refType?: string | null;
   refId?: string | null;
+  displayTitle?: string | null;
   note?: string | null;
 };
+
+export class InsufficientWalletCreditsError extends Error {
+  constructor(public readonly balance: number, public readonly needed: number) {
+    super(`insufficient available credits: balance=${balance} needed=${needed}`);
+    this.name = "InsufficientWalletCreditsError";
+  }
+}
 
 export class LedgerRepo {
   private readonly client: DbClient;
@@ -1922,8 +2026,10 @@ export class LedgerRepo {
       delta: entry.delta,
       balanceAfter: entry.balanceAfter,
       reason: entry.reason,
+      runId: entry.runId ?? null,
       refType: entry.refType ?? null,
       refId: entry.refId ?? null,
+      displayTitle: entry.displayTitle ?? null,
       note: entry.note ?? null,
       createdAt: now(),
     });
@@ -1935,9 +2041,25 @@ export class LedgerRepo {
       .select()
       .from(creditLedger)
       .where(eq(creditLedger.userId, userId))
-      .orderBy(desc(creditLedger.createdAt))
+      .orderBy(desc(creditLedger.createdAt), desc(creditLedger.id))
       .limit(Math.min(limit, 100))
       .offset(offset);
+  }
+
+  async listByUserPage(userId: string, page = 1, pageSize = 20): Promise<PageResult<typeof creditLedger.$inferSelect>> {
+    const paging = normalizePage(page, pageSize);
+    const where = eq(creditLedger.userId, userId);
+    const [items, countRows] = await Promise.all([
+      this.client
+        .select()
+        .from(creditLedger)
+        .where(where)
+        .orderBy(desc(creditLedger.createdAt), desc(creditLedger.id))
+        .limit(paging.pageSize)
+        .offset((paging.page - 1) * paging.pageSize),
+      this.client.select({ n: sql<string>`count(*)` }).from(creditLedger).where(where),
+    ]);
+    return toPageResult(items, Number(countRows[0]?.n ?? 0), paging.page, paging.pageSize);
   }
 
   async listAdmin(limit = 50, offset = 0, userId?: string) {
@@ -1948,6 +2070,137 @@ export class LedgerRepo {
       .orderBy(desc(creditLedger.createdAt))
       .limit(Math.min(limit, 200))
       .offset(offset);
+  }
+
+  /**
+   * 在一个数据库事务中完成管理员调点：钱包、调整订单、点数流水必须同时落库。
+   * 首次触发时也把注册赠送流水放在同一事务内，避免出现孤立的钱包或半笔审计记录。
+   */
+  async applyAdminAdjustment(input: {
+    userId: string;
+    operatorUserId?: string | null;
+    delta: number;
+    note: string;
+    starterCredits: number;
+  }): Promise<{ balance: number; orderId: string; orderNo: string; delta: number }> {
+    if (!Number.isInteger(input.delta) || input.delta === 0) {
+      throw new Error("admin adjustment delta must be a non-zero integer");
+    }
+    const note = input.note.trim();
+    if (!note) throw new Error("admin adjustment note is required");
+
+    const orderId = newOrderId();
+    const orderNo = orderId.replace("ord_", "ADJ");
+    const ledgerId = newLedgerId();
+    const starterCredits = Math.max(0, Math.trunc(input.starterCredits));
+    const adjusted = input.delta;
+
+    return this.client.transaction(async (tx) => {
+      const ts = now();
+      const insertedWallets = await tx
+        .insert(wallets)
+        .values({
+          id: newWalletId(),
+          userId: input.userId,
+          balance: starterCredits,
+          totalGranted: starterCredits,
+          updatedAt: ts,
+        })
+        .onConflictDoNothing({ target: wallets.userId })
+        .returning();
+
+      if (insertedWallets.length > 0 && starterCredits > 0) {
+        await tx.insert(creditLedger).values({
+          id: newLedgerId(),
+          userId: input.userId,
+          delta: starterCredits,
+          balanceAfter: starterCredits,
+          reason: "starter",
+          runId: null,
+          refType: null,
+          refId: null,
+          displayTitle: "注册赠送点数",
+          note: "注册赠送点数",
+          createdAt: ts,
+        });
+      }
+
+      const walletRows = adjusted > 0
+        ? await tx
+            .update(wallets)
+            .set({
+              balance: sql`${wallets.balance} + ${adjusted}`,
+              totalGranted: sql`${wallets.totalGranted} + ${adjusted}`,
+              updatedAt: ts,
+            })
+            .where(eq(wallets.userId, input.userId))
+            .returning({ balance: wallets.balance, reservedCredits: wallets.reservedCredits })
+        : await tx
+            .update(wallets)
+            .set({
+              balance: sql`${wallets.balance} - ${-adjusted}`,
+              totalConsumed: sql`${wallets.totalConsumed} + ${-adjusted}`,
+              updatedAt: ts,
+            })
+            .where(
+              and(
+                eq(wallets.userId, input.userId),
+                sql`${wallets.balance} - ${wallets.reservedCredits} >= ${-adjusted}`,
+              ),
+            )
+            .returning({ balance: wallets.balance, reservedCredits: wallets.reservedCredits });
+
+      if (walletRows.length === 0) {
+        const current = await one(
+          tx.select({ balance: wallets.balance, reservedCredits: wallets.reservedCredits })
+            .from(wallets)
+            .where(eq(wallets.userId, input.userId))
+            .limit(1),
+        );
+        throw new InsufficientWalletCreditsError(
+          current ? current.balance - current.reservedCredits : 0,
+          -adjusted,
+        );
+      }
+
+      const wallet = walletRows[0]!;
+      const balance = wallet.balance - wallet.reservedCredits;
+      await tx.insert(orders).values({
+        id: orderId,
+        orderNo,
+        userId: input.userId,
+        operatorUserId: input.operatorUserId ?? null,
+        type: "admin_adjust",
+        planId: null,
+        packageId: null,
+        title: note,
+        amountCents: 0,
+        credits: adjusted,
+        channel: "admin",
+        status: "adjusted",
+        qrCode: null,
+        channelTradeNo: null,
+        failReason: null,
+        paidAt: null,
+        expiresAt: null,
+        createdAt: ts,
+        updatedAt: ts,
+      });
+      await tx.insert(creditLedger).values({
+        id: ledgerId,
+        userId: input.userId,
+        delta: adjusted,
+        balanceAfter: balance,
+        reason: "admin_adjust",
+        runId: null,
+        refType: "order",
+        refId: orderId,
+        displayTitle: note,
+        note,
+        createdAt: ts,
+      });
+      return { balance, orderId, orderNo, delta: adjusted };
+    });
   }
 
   /** 按原因汇总（对账用） */

@@ -79,6 +79,7 @@ export class BillingService {
         delta: wallet.balance,
         balanceAfter: wallet.balance,
         reason: "starter",
+        displayTitle: "注册赠送点数",
         note: "注册赠送点数",
       });
     }
@@ -237,13 +238,16 @@ export class BillingService {
       throw new Error(`wallet capture failed for run ${runId}`);
     }
     try {
+      const displayTitle = await this.runRepo.projectTitle(runId).catch(() => null);
       await this.ledgerRepo.append({
         userId,
         delta: -images,
         balanceAfter: walletState.available,
         reason: "consume",
+        runId,
         refType,
         refId,
+        displayTitle,
         note: `生图 ${images} 点`,
       });
     } catch (error) {
@@ -315,25 +319,19 @@ export class BillingService {
   }
 
   /** 管理员手工调整点数（可正可负；负数只允许扣除可用余额） */
-  async adminAdjust(userId: string, delta: number, note: string): Promise<number> {
-    await this.ensureWallet(userId);
-    let balanceAfter: number;
-    if (delta >= 0) {
-      balanceAfter = await this.walletRepo.credit(userId, delta);
-    } else {
-      const result = await this.walletRepo.debit(userId, -delta);
-      balanceAfter = result.balanceAfter;
-      delta = -result.deducted;
-    }
-    await this.ledgerRepo.append({
+  async adminAdjust(
+    userId: string,
+    delta: number,
+    note: string,
+    operatorUserId?: string | null,
+  ): Promise<{ balance: number; orderId: string; orderNo: string; delta: number }> {
+    return this.ledgerRepo.applyAdminAdjustment({
       userId,
+      operatorUserId,
       delta,
-      balanceAfter,
-      reason: "admin_adjust",
-      refType: "manual",
-      note: note || "管理员调整",
+      note,
+      starterCredits: STARTER_CREDITS,
     });
-    return balanceAfter;
   }
 
   /** 退款扣回点数（订单退款时调用；余额不足时不做部分扣减） */

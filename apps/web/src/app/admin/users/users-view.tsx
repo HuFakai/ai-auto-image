@@ -200,10 +200,10 @@ export function UsersView() {
                 <input className="field-input mt-1 font-mono" value={delta} onChange={(event) => setDelta(event.target.value)} placeholder="如 10 / -5" />
               </div>
               <div>
-                <span className="field-label">备注（可选）</span>
+                <span className="field-label">调整理由（必填）</span>
                 <input className="field-input mt-1" value={note} onChange={(event) => setNote(event.target.value)} placeholder="调整原因" />
               </div>
-              <p className="font-mono text-[11px] text-ink-faint">当前余额 {adjusting.balance} 点；调整会记入点数流水（admin_adjust）。</p>
+              <p className="font-mono text-[11px] text-ink-faint">当前余额 {adjusting.balance} 点；理由会同步显示在用户订单与点数明细中。</p>
               {message?.startsWith("⚠") && <p className="font-mono text-xs text-seal">{message}</p>}
               <div className="flex justify-end gap-3 pt-1">
                 <button className="btn-ghost px-5 py-2 text-sm" onClick={() => setAdjusting(null)}>
