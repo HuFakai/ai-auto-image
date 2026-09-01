@@ -4,6 +4,7 @@ import { PAGE_REGEN_KIND } from "@aai/workflow-engine";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser } from "@/server/auth";
 import { requireCredits } from "@/server/billing";
+import { estimateImageCallCredits } from "@/server/model-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -84,8 +85,17 @@ export async function POST(
     return NextResponse.json({ error: "该作品已有页面重试任务在处理中" }, { status: 409 });
   }
 
-  // 单图重试只消耗 1 点；完整运行的其余图片由工作流按实际需求预留。
-  const billingGuard = await requireCredits(user.id, 1);
+  // 单图重试按当前 Run 冻结的图片模型价格预检；最终仍由工作流按实际成功路由结算。
+  let retryCredits: number;
+  try {
+    retryCredits = await estimateImageCallCredits(runtime, JSON.parse(run.inputJson));
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "图片模型当前不可用" },
+      { status: 409 },
+    );
+  }
+  const billingGuard = await requireCredits(user.id, retryCredits);
   if (billingGuard) return billingGuard;
 
   if (run.status === "failed") {

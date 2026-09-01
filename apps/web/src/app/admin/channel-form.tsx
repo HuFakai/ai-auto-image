@@ -282,7 +282,7 @@ export function ChannelForm({
             允许用户在创作条自定义选择模型
           </label>
           <p className="-mt-3 font-mono text-[10px] text-ink-faint">
-            阶段 F 接入创作条后生效；关闭时用户只能使用渠道默认模型。
+            开启后用户可在创作条选择该渠道的已启用模型；关闭时用户只能使用自动路由。
           </p>
 
           {!isNew && (

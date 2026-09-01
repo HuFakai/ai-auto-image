@@ -269,7 +269,7 @@ export function PricingView({
           <div>
             <h1 className="font-display text-2xl font-bold">充值中心</h1>
             <p className="mt-1.5 text-xs leading-relaxed text-ink-soft">
-              你好，{username}。生成一张图片消耗 1 点（1 点 = 0.1 元）；点数长期有效，订阅每月自动发放。
+              你好，{username}。文本和图片模型按渠道配置的单次点数计费（1 点 = 0.1 元）；点数长期有效，订阅每月自动发放。
             </p>
           </div>
           <div className="flex items-end gap-8">

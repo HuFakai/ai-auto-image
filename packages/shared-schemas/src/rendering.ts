@@ -25,6 +25,31 @@ const ModelSelectionSnapshotItemSchema = z.object({
   }),
 });
 
+/** 自动路由候选快照：冻结候选顺序、Provider 模型名和单次价格。 */
+const ModelRouteSnapshotItemSchema = z.object({
+  /** 当前路由实例 ID；模型目录项存在时与 channelModelId 一致 */
+  routeId: z.string().min(1).max(200),
+  modelId: z.string().min(1).max(200).optional(),
+  channelId: z.string().min(1).max(200).optional(),
+  providerModelId: z.string().min(1).max(200),
+  model: z.string().min(1).max(200),
+  maxAttempts: z.number().int().min(1).max(5).optional(),
+  creditsPerCall: z.number().int().nonnegative().max(100_000),
+  capabilities: z.object({
+    textToImage: z.boolean(),
+    imageEditSingle: z.boolean(),
+    imageEditMulti: z.boolean(),
+    maskEdit: z.boolean(),
+  }),
+});
+export type ModelRouteSnapshotItem = z.infer<typeof ModelRouteSnapshotItemSchema>;
+
+export const ModelRouteSnapshotSchema = z.object({
+  text: z.array(ModelRouteSnapshotItemSchema).max(100).optional(),
+  image: z.array(ModelRouteSnapshotItemSchema).max(100).optional(),
+}).optional();
+export type ModelRouteSnapshot = z.infer<typeof ModelRouteSnapshotSchema>;
+
 /** 服务端在创建时写入的模型与价格快照，防止后续后台改价影响历史运行 */
 export const ModelSelectionSnapshotSchema = z.object({
   text: ModelSelectionSnapshotItemSchema.optional(),
@@ -62,5 +87,7 @@ export const CreateRunInputSchema = z.object({
   modelSelection: ModelSelectionSchema,
   /** 创建时由服务端冻结的模型价格与能力快照，客户端不应直接提交 */
   modelSelectionSnapshot: ModelSelectionSnapshotSchema,
+  /** 服务端冻结自动路由候选与价格，客户端不应直接提交 */
+  modelRouteSnapshot: ModelRouteSnapshotSchema,
 });
 export type CreateRunInput = z.infer<typeof CreateRunInputSchema>;

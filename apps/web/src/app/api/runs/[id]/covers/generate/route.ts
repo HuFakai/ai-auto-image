@@ -3,6 +3,7 @@ import type { CreateRunInput } from "@aai/shared-schemas";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser, userActionLimit } from "@/server/auth";
 import { requireCredits } from "@/server/billing";
+import { estimateImageCallCredits } from "@/server/model-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +23,6 @@ export async function POST(_request: Request, ctx: { params: Promise<{ id: strin
       { status: 429, headers: { "Retry-After": "60" } },
     );
   }
-
-  // 计费预检：封面候选约消耗 3 点（3 张候选图）
-  const billingGuard = await requireCredits(user.id, 3);
-  if (billingGuard) return billingGuard;
 
   const runtime = await getRuntime();
   let run;
@@ -47,6 +44,19 @@ export async function POST(_request: Request, ctx: { params: Promise<{ id: strin
       { status: 400 },
     );
   }
+
+  // 三张封面候选按当前图片模型单次价格预检；实际生成仍逐张按成功路由结算。
+  let coverCredits: number;
+  try {
+    coverCredits = 3 * (await estimateImageCallCredits(runtime, input));
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "图片模型当前不可用" },
+      { status: 409 },
+    );
+  }
+  const billingGuard = await requireCredits(user.id, coverCredits);
+  if (billingGuard) return billingGuard;
 
   // 已成功生成过封面：整体跳过（generate-covers 幂等），不重复消耗额度
   const nodes = await runtime.runRepo.listNodeRuns(id);

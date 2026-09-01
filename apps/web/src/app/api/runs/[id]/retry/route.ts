@@ -5,6 +5,7 @@ import { CreateRunInputSchema, type CreateRunInput } from "@aai/shared-schemas";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser, userActionLimit } from "@/server/auth";
 import { MIN_CREATION_CREDITS, requireCredits } from "@/server/billing";
+import { estimateCheckpointCredits } from "@/server/model-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -72,10 +73,21 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
     return NextResponse.json({ error: "作品输入已损坏，无法重试" }, { status: 409 });
   }
 
-  // checkpoint 通常只补失败图片；restart 可能重新生成完整作品，至少要求创作准入额度。
+  // checkpoint 通常只补失败节点，按当前冻结候选价格做保守预检；restart 至少要求创作准入额度。
+  let neededCredits = MIN_CREATION_CREDITS;
+  if (parsed.data.mode === "checkpoint") {
+    try {
+      neededCredits = await estimateCheckpointCredits(runtime, input);
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "模型渠道当前不可用" },
+        { status: 409 },
+      );
+    }
+  }
   const billingGuard = await requireCredits(
     user.id,
-    parsed.data.mode === "restart" ? MIN_CREATION_CREDITS : 1,
+    neededCredits,
   );
   if (billingGuard) return billingGuard;
 

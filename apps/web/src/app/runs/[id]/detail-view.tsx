@@ -701,7 +701,7 @@ function PageFrame({
           onClick={() => void retryPage()}
           disabled={retrying}
         >
-          {retrying ? "提交中…" : "重新生成本页（1 点）"}
+          {retrying ? "提交中…" : "重新生成本页（按模型价格扣点）"}
         </button>
         {retryMessage && <p className={`font-mono text-[10px] ${messageTone(retryMessage)}`}>{retryMessage}</p>}
       </div>

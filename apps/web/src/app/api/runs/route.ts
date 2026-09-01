@@ -7,6 +7,7 @@ import { listRunItems } from "@/server/run-views";
 import { requireApiUser, userActionLimit } from "@/server/auth";
 import { MIN_CREATION_CREDITS, requireCredits } from "@/server/billing";
 import { ModelSelectionError } from "@/server/channel-service";
+import { createModelRouteSnapshot } from "@aai/workflow-engine";
 import type { RunListItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -53,6 +54,7 @@ export async function POST(request: Request) {
   const parsed = CreateRunInputSchema.safeParse({
     ...body,
     modelSelectionSnapshot: undefined,
+    modelRouteSnapshot: undefined,
     ...(brandKit ? { brandKit } : {}),
   });
   if (!parsed.success) {
@@ -80,9 +82,17 @@ export async function POST(request: Request) {
     }
     throw error;
   }
+  const assembledRoutes = await runtime.channelService.assembleRoutes();
+  const textRouteSnapshot = createModelRouteSnapshot(assembledRoutes.textRoutes);
+  const imageRouteSnapshot = createModelRouteSnapshot(assembledRoutes.imageRoutes);
+  const modelRouteSnapshot = {
+    ...(textRouteSnapshot.length > 0 ? { text: textRouteSnapshot } : {}),
+    ...(imageRouteSnapshot.length > 0 ? { image: imageRouteSnapshot } : {}),
+  };
   const finalInput = CreateRunInputSchema.parse({
     ...input,
     modelSelectionSnapshot: Object.keys(modelSelectionSnapshot).length > 0 ? modelSelectionSnapshot : undefined,
+    modelRouteSnapshot: Object.keys(modelRouteSnapshot).length > 0 ? modelRouteSnapshot : undefined,
   });
 
   const project = await runtime.projectRepo.create({ title: finalInput.topic.slice(0, 60), userId: user.id });
