@@ -12,7 +12,7 @@
 
 - 9 种内容类型，知识卡片与漫画两条工作流骨架。
 - OpenAI、xAI/Grok、OpenAI-compatible 和 Mock Provider；文本/图片渠道可独立配置和回退。
-- 原生中文图片模式默认开启；确定性文字渲染可控开启，默认关闭，用于精确文字兜底。
+- 由图片模型直接生成包含中文的最终图片；新建、重试和单页重生统一使用原生图片链路。
 - 文本/图片模型仅按后台渠道配置限流，默认 `0` 表示不限制并发。
 - 单页返修、版本链、封面候选、平台适配、Brand Kit、评审和 ZIP 导出。
 - 登录注册、资源隔离、套餐点数、订阅、订单、支付宝/微信支付接口和管理后台第一版。
@@ -24,7 +24,6 @@
 ```bash
 pnpm install
 cp .env.example .env
-pnpm fonts
 pnpm dev
 ```
 
@@ -55,7 +54,7 @@ pnpm verify:openai   # 需要真实 OpenAI 密钥
 pnpm verify:xai      # 需要真实 xAI 密钥
 ```
 
-本轮代码门禁已全绿：`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 和 `pnpm eval` 均通过；真实渠道和服务器验收仍见状态报告。
+阶段性类型检查和相关工作流测试会随每个版本提交执行；完整的 lint、全量测试、构建和真实渠道验收在产品优化方案的全部阶段完成后统一执行。
 
 ## 文档
 

@@ -46,7 +46,6 @@ export async function runVerify(input: VerifyInput): Promise<void> {
     topic: "三分钟看懂量子纠缠",
     aspectRatio: "3:4",
     platform: "xiaohongshu",
-    textRenderingMode: "native",
   });
 
   /* 1. 结构化 Brief + Storyboard（与流水线相同的 Schema 校验） */
@@ -69,7 +68,7 @@ export async function runVerify(input: VerifyInput): Promise<void> {
 
   /* 2. 原生中文出图（封面页），经过统一路由重试 */
   const slide = storyboard.slides[0]!;
-  const plan = buildSlidePrompt(slide, storyboard, runInput, "native");
+  const plan = buildSlidePrompt(slide, storyboard, runInput);
   console.log(`[2/3] 生成封面图（原生中文，预期文案 ${plan.expectedCopy.length} 条）`);
   const imageStartedAt = Date.now();
   const attempts: Array<{

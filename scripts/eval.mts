@@ -1,11 +1,10 @@
 /**
  * 阶段 0 评测脚本（Mock Provider，零费用，可进 CI）：
- * 固定 6 类主题 × 双文字模式，度量结构化输出解析成功率与页面渲染成功率。
+ * 固定主题用例，度量结构化输出解析成功率与页面生成成功率。
  * 用法：pnpm eval ；报告写入 fixtures/reports/eval.json，低于阈值时退出码 1。
  */
 import fs from "node:fs";
 import path from "node:path";
-import { fontsPresent } from "@aai/render-engine";
 import {
   createHarness,
   createRunWith,
@@ -13,14 +12,13 @@ import {
   startEvalRunner,
   waitUntil,
 } from "@aai/workflow-engine";
-import type { CreateRunInput, Recipe, TextRenderingMode } from "@aai/shared-schemas";
+import type { CreateRunInput, Recipe } from "@aai/shared-schemas";
 import { loadDotEnv } from "./lib/env.js";
 
 loadDotEnv();
 
 interface EvalCase {
   topic: string;
-  mode: TextRenderingMode;
   category: string;
   recipe?: Recipe;
   productInfo?: CreateRunInput["productInfo"];
@@ -29,32 +27,29 @@ interface EvalCase {
 }
 
 const CASES: EvalCase[] = [
-  { topic: "三分钟看懂量子纠缠", mode: "native", category: "中文知识主题" },
-  { topic: "《置身事内》：为什么地方政府像公司", mode: "deterministic", category: "图书推荐" },
-  { topic: "保温杯怎么选：四个关键参数", mode: "native", category: "商品（缺价格，禁止编造）" },
-  { topic: "什么是复利", mode: "native", category: "概念解释" },
-  { topic: "睡眠的三个常见误区", mode: "deterministic", category: "生活科普" },
-  { topic: "咖啡因是如何起作用的", mode: "native", category: "机制科普" },
-  { topic: "保持专注的三句话", mode: "native", category: "金句卡", recipe: "quote_cards" },
-  { topic: "搬家必做的五件事", mode: "deterministic", category: "清单卡", recipe: "checklist_cards" },
-  { topic: "骑自行车还是坐地铁通勤", mode: "deterministic", category: "对比卡", recipe: "comparison_cards" },
+  { topic: "三分钟看懂量子纠缠", category: "中文知识主题" },
+  { topic: "《置身事内》：为什么地方政府像公司", category: "图书推荐" },
+  { topic: "保温杯怎么选：四个关键参数", category: "商品（缺价格，禁止编造）" },
+  { topic: "什么是复利", category: "概念解释" },
+  { topic: "睡眠的三个常见误区", category: "生活科普" },
+  { topic: "咖啡因是如何起作用的", category: "机制科普" },
+  { topic: "保持专注的三句话", category: "金句卡", recipe: "quote_cards" },
+  { topic: "搬家必做的五件事", category: "清单卡", recipe: "checklist_cards" },
+  { topic: "骑自行车还是坐地铁通勤", category: "对比卡", recipe: "comparison_cards" },
   {
     topic: "这款便携咖啡机值得买吗",
-    mode: "native",
     category: "产品种草",
     recipe: "product_showcase",
     productInfo: { name: "便携咖啡机", sellingPoints: ["小巧", "出杯快", "好清洗"] },
   },
   {
     topic: "《置身事内》为什么值得读",
-    mode: "deterministic",
     category: "图书推荐",
     recipe: "book_recommendations",
     bookInfo: { title: "置身事内", author: "兰小欢" },
   },
   {
     topic: "复利思维入门",
-    mode: "native",
     category: "长文拆解",
     recipe: "article_digest",
     sourceText: "第一，复利需要时间。第二，收益率不是全部。第三，越早开始越好。",
@@ -69,7 +64,6 @@ const root = path.resolve(import.meta.dirname, "..");
 interface CaseResult {
   topic: string;
   category: string;
-  mode: TextRenderingMode;
   recipe: string;
   runStatus: string;
   briefOk: boolean;
@@ -86,7 +80,6 @@ async function runCase(evaluationCase: EvalCase): Promise<CaseResult> {
     const startedAt = Date.now();
     const { runId, jobId } = await createRunWith(harness, {
       topic: evaluationCase.topic,
-      textRenderingMode: evaluationCase.mode,
       ...(evaluationCase.recipe ? { recipe: evaluationCase.recipe } : {}),
       ...(evaluationCase.productInfo ? { productInfo: evaluationCase.productInfo } : {}),
       ...(evaluationCase.bookInfo ? { bookInfo: evaluationCase.bookInfo } : {}),
@@ -108,7 +101,6 @@ async function runCase(evaluationCase: EvalCase): Promise<CaseResult> {
     return {
       topic: evaluationCase.topic,
       category: evaluationCase.category,
-      mode: evaluationCase.mode,
       recipe: evaluationCase.recipe ?? "knowledge_cards",
       runStatus: (await harness.runRepo.require(runId)).status,
       briefOk,
@@ -123,13 +115,7 @@ async function runCase(evaluationCase: EvalCase): Promise<CaseResult> {
 }
 
 async function main(): Promise<void> {
-  const fontsAvailable = fontsPresent();
-  const cases = CASES.map((evaluationCase) =>
-    // 确定性模式需要字体；缺失时降级为 native 并在报告中说明
-    evaluationCase.mode === "deterministic" && !fontsAvailable
-      ? { ...evaluationCase, mode: "native" as const, category: `${evaluationCase.category}（字体缺失，降级 native）` }
-      : evaluationCase,
-  );
+  const cases = CASES;
 
   console.log(`评测开始：${cases.length} 个用例（Mock Provider，零费用）\n`);
   const results: CaseResult[] = [];
@@ -151,7 +137,6 @@ async function main(): Promise<void> {
   const report = {
     at: new Date().toISOString(),
     provider: "mock",
-    fontsAvailable,
     cases: results,
     metrics: {
       structuredParseSuccessRate: structuredAttempts > 0 ? structuredOk / structuredAttempts : 0,

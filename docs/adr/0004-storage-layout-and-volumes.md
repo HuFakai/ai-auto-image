@@ -22,11 +22,10 @@
 2. 生产 PostgreSQL 数据由数据库服务自身持久化和备份；不把 PostgreSQL 数据目录映射到 Web 容器的 `/data`。
 3. 文件落盘三原则：先写 `.part` 临时文件 → 校验（非空 + PNG/JPEG/WebP/GIF 魔数）→ 原子 `rename`；远程下载用流式管道 + 逐块 SHA-256，中断文件不会看起来完整。
 4. 迁移文件进入版本控制（`packages/storage/drizzle/`），应用启动和 `pnpm db:migrate` 都执行迁移；健康检查 `/api/health` 触发真实 DB 读取。
-5. 生产镜像使用 standalone 运行文件、静态资源、迁移 SQL 和中文字体；非 root 用户运行；健康检查使用 Node 内置 fetch。
+5. 生产镜像使用 standalone 运行文件、静态资源和迁移 SQL；非 root 用户运行；健康检查使用 Node 内置 fetch。图片模型直接生成中文，生产镜像不再携带确定性排版字体。
 6. 备份分开处理：PostgreSQL 使用原生备份/1Panel 备份，`/data` 使用 Docker volume 备份；恢复演练必须同时验证业务表、资产和导出包。
 
 ## 后果
 
-- 字体通过 `FONT_DIR` 注入，与源码布局解耦。
 - 本地无 `DATABASE_URL` 的 PGlite 运行适合测试和快速试验；需要可复用本地业务数据时，应使用开发 PostgreSQL 或显式设计 PGlite 持久化，而不是假设存在 SQLite 文件。
 - 资产路径保持相对 `/data`，未来迁移到 S3/R2 只替换 AssetStore 实现，不改变资产血缘和版本语义。

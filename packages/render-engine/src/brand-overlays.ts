@@ -43,7 +43,7 @@ function escapeXml(text: string): string {
   });
 }
 
-/** 文本宽度估算：CJK ≈ 1em，ASCII ≈ 0.55em（与 render.ts 同一套口径） */
+/** 品牌水印/签名的安全宽度估算：CJK ≈ 1em，ASCII ≈ 0.55em。 */
 function textUnits(text: string): number {
   let units = 0;
   for (const char of text) {

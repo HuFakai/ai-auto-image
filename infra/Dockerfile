@@ -4,8 +4,6 @@ WORKDIR /repo
 RUN apk add --no-cache bash curl
 RUN corepack enable
 COPY . .
-# 字体不进 Git；在构建阶段下载到镜像，保证确定性中文渲染在全新服务器上可用。
-RUN bash scripts/fetch-fonts.sh
 RUN pnpm install --frozen-lockfile
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
@@ -19,15 +17,12 @@ ENV NODE_ENV=production \
     DATA_DIR=/data \
     ASSETS_DIR=/data/assets \
     EXPORTS_DIR=/data/exports \
-    SQLITE_MIGRATIONS_DIR=/app/drizzle \
-    FONT_DIR=/app/fonts
+    SQLITE_MIGRATIONS_DIR=/app/drizzle
 
 COPY --from=build /repo/apps/web/.next/standalone ./
 COPY --from=build /repo/apps/web/public ./apps/web/public
 COPY --from=build /repo/apps/web/.next/static ./apps/web/.next/static
 COPY --from=build /repo/packages/storage/drizzle ./drizzle
-COPY --from=build /repo/packages/render-engine/assets/fonts ./fonts
-
 RUN addgroup -S aai && adduser -S aai -G aai \
   && mkdir -p /data/db /data/assets /data/exports \
   && chown -R aai:aai /data /app

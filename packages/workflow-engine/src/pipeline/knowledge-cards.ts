@@ -4,8 +4,6 @@ import type { z } from "zod";
 import {
   ContentBriefSchema,
   StoryboardSchema,
-  normalizeSlideLayout,
-  resolveSlideLayout,
   type ContentBrief,
   type CreateRunInput,
   type GeneratedImage,
@@ -29,7 +27,7 @@ import type {
   RunRepo,
   AssetStore,
 } from "@aai/storage";
-import { applyBrandOverlays, hasBrandOverlays, renderSlideDeterministic, themeById } from "@aai/render-engine";
+import { applyBrandOverlays, hasBrandOverlays } from "@aai/render-engine";
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import { buildBriefPrompt, buildSlidePrompt, buildStoryboardPrompt } from "../prompts";
@@ -65,8 +63,6 @@ export interface WorkflowDeps {
   visualQuality: VisualQualityModel | null;
   assetsDir: string;
   exportsDir: string;
-  /** 确定性渲染模板版本（冻结进 RunSnapshot） */
-  templateVersion: string;
   /** 可选计费回调：运行在首次调用图片 Provider 前预留额度 */
   reserveImageCredits?: (runId: string, amount: number) => Promise<void>;
   /** 可选计费回调：运行结束、失败或取消时释放未结算额度 */
@@ -129,7 +125,7 @@ async function retryExistingImageNode(
 /**
  * 阶段 0 Spike 流水线（docs/phases/00 §7）：
  * parse-input → generate-brief → generate-storyboard → generate-images（并行，渠道可选限流）
- * → render-slides（仅确定性模式）→ package-export。
+ * → package-export。
  *
  * 所有节点幂等：Job 重试或应用重启恢复时，已成功的节点与页面直接跳过，
  * 因此"单页失败仅重试该页"与"重启恢复不重跑已完成页面"天然成立。
@@ -178,16 +174,14 @@ async function executeKnowledgeCardRun(
         outputRef: JSON.stringify({
           platform: input.platform,
           aspectRatio: input.aspectRatio,
-          mode: input.textRenderingMode,
         }),
       });
     }
 
-    /* RunSnapshot：冻结模式、渠道并发、路由与模板版本 */
+    /* RunSnapshot：冻结渠道并发与路由 */
     await deps.runRepo.setSnapshot(
       runId,
       JSON.stringify({
-        textRenderingMode: input.textRenderingMode,
         concurrency: {
           channels: [
             ...deps.textRoutes.map((route) => ({
@@ -207,7 +201,6 @@ async function executeKnowledgeCardRun(
           kind: route.config.kind,
           model: route.model,
         })),
-        templateVersion: deps.templateVersion,
       }),
     );
 
@@ -228,10 +221,8 @@ async function executeKnowledgeCardRun(
       buildPrompt: () => buildStoryboardPrompt(input, brief),
     });
     // LLM 可能输出 1-based 页码；统一归一化为 0-based，保证文件名、页码标签与顺序一致
-    // 版式路由归一化：hint 与 layoutData 不匹配或非法时删除字段回退 default（不抛错）
     storyboard.slides.forEach((slide, index) => {
       slide.index = index;
-      normalizeSlideLayout(slide);
     });
     // LLM 可能输出 1-based 页码：把归一化后的分镜写回节点，
     // 保证详情/导出/返修等消费方读到的 index 与图片资产一致
@@ -242,12 +233,8 @@ async function executeKnowledgeCardRun(
     await throwIfAborted(deps, runId, ctx.signal);
     const pageCount = storyboard.slides.length;
 
-    // 先按分镜计算本次运行的最大图片需求，再启动任何图片 Provider；
-    // deterministic 的非 default 版式是纯排版页，不计入图片额度。
-    const pageImageCount = storyboard.slides.filter(
-      (slide) => input.textRenderingMode !== "deterministic" || resolveSlideLayout(slide).layout === "default",
-    ).length;
-    const expectedImageCount = pageImageCount + (input.generateCoverCandidates ? 3 : 0);
+    // 先按分镜计算本次运行的最大图片需求，再启动任何图片 Provider。
+    const expectedImageCount = storyboard.slides.length + (input.generateCoverCandidates ? 3 : 0);
     await reserveCreditsToTarget(deps, runId, expectedImageCount);
 
     /* generate-images：所有页面并行发起；模型渠道自身决定是否限流 */
@@ -271,11 +258,6 @@ async function executeKnowledgeCardRun(
       await runCoverStage(deps, ctx, runId, input, storyboard);
     }
 
-    /* render-slides：仅确定性模式 */
-    if (input.textRenderingMode === "deterministic") {
-      await renderAllSlides(deps, runId, input, storyboard, pageCount);
-    }
-
     /* package-export */
     const totals = await writeExportManifest(deps, runId, input, brief, storyboard, failedPages);
 
@@ -294,7 +276,6 @@ async function executeKnowledgeCardRun(
     logger.info("knowledge card run completed", {
       runId: runId,
       pages: pageCount,
-      mode: input.textRenderingMode,
       images: totals.images,
       costUsd: totals.costUsd,
     });
@@ -310,31 +291,7 @@ async function generatePage(
   pageCount: number,
   failedPages: number[],
 ): Promise<void> {
-  const mode = input.textRenderingMode;
-  // 版式路由：非 default 版式页为纯排版（无视觉层），deterministic 模式下跳过 AI 生图省额度。
-  // native 模式的整图即内容（含文字），不跳过。
-  const resolved = resolveSlideLayout(slide);
-  if (resolved.layout !== "default" && mode === "deterministic") {
-    const node = await deps.runRepo.createNodeRun(runId, "generate-images");
-    await deps.runRepo.startNode(node.id);
-    await deps.runRepo.succeedNode(node.id, {
-      outputRef: JSON.stringify({
-        pageIndex: slide.index,
-        skipped: "layout-page",
-        layout: resolved.layout,
-        role: slide.role,
-        headline: slide.headline,
-        pageCount,
-      }),
-    });
-    logger.info("layout page skips image generation", {
-      runId,
-      page: slide.index,
-      layout: resolved.layout,
-    });
-    return;
-  }
-  const plan = buildSlidePrompt(slide, storyboard, input, mode);
+  const plan = buildSlidePrompt(slide, storyboard, input);
   const node = await deps.runRepo.createNodeRun(runId, "generate-images");
   await deps.runRepo.startNode(node.id, {
     routeId: deps.imageRoutes[0]?.config.id,
@@ -382,15 +339,15 @@ async function generatePage(
 
     const image = result[0]!;
 
-    /* 原生直出图叠加 Brand Kit 水印/签名；deterministic 模式渲染函数内部已叠，不重复 */
+    /* 原生直出图叠加 Brand Kit 水印/签名 */
     let imageToSave: GeneratedImage = image;
-    if (mode !== "deterministic" && hasBrandOverlays(input.brandKit)) {
+    if (hasBrandOverlays(input.brandKit)) {
       imageToSave = await overlayGeneratedImage(image, input.brandKit);
     }
 
-    /* 原生模式文字审查：记录结果，不自动重试（不静默增加费用） */
-    let metadata: Record<string, unknown> = { mode, expectedCopy: plan.expectedCopy };
-    if (mode === "native" && deps.visualQuality && plan.expectedCopy.length > 0) {
+    /* 记录视觉质量审查结果，不自动重试（不静默增加费用） */
+    let metadata: Record<string, unknown> = { expectedCopy: plan.expectedCopy };
+    if (deps.visualQuality && plan.expectedCopy.length > 0) {
       try {
         const inspection = await deps.visualQuality.inspect({
           imageBase64: image.base64,
@@ -458,21 +415,8 @@ async function generatePage(
   }
 }
 
-/** 读取 Brand Kit Logo（缺失或读取失败时返回 undefined，不阻塞渲染） */
-async function readLogoBase64(deps: WorkflowDeps, input: CreateRunInput): Promise<string | undefined> {
-  const logoAssetId = input.brandKit?.logoAssetId;
-  if (!logoAssetId) return undefined;
-  try {
-    const asset = await deps.assetRepo.require(logoAssetId);
-    return fs.readFileSync(deps.assetStore.resolve(asset.filePath)).toString("base64");
-  } catch {
-    return undefined;
-  }
-}
-
 /**
- * 对原生直出图叠加 Brand Kit 水印/签名（deterministic 的 composite 由渲染函数叠加，
- * 这里只处理直出图，遵守「只对 generated 直出图叠加」的规则）。
+ * 对原生直出图叠加 Brand Kit 水印/签名。
  * 仅 base64 直出可叠加；URL 直出不下载，跳过叠加并原样返回。
  */
 async function overlayGeneratedImage(
@@ -488,74 +432,6 @@ async function overlayGeneratedImage(
   } catch (error) {
     logger.warn("brand overlay skipped", { error: String(error).slice(0, 200) });
     return image;
-  }
-}
-
-async function renderAllSlides(
-  deps: WorkflowDeps,
-  runId: string,
-  input: CreateRunInput,
-  storyboard: Storyboard,
-  pageCount: number,
-): Promise<void> {
-  const renderNode = await deps.runRepo.createNodeRun(runId, "render-slides");
-  await deps.runRepo.startNode(renderNode.id, { model: deps.templateVersion });
-  try {
-    await Promise.all(storyboard.slides.map(async (slide) => {
-      const rows = (await deps.runRepo.listNodeRuns(runId)) as unknown as NodeRowLike[];
-      const pageNode = succeededPageNode(rows, slide.index);
-      if (!pageNode) return;
-
-      const output = JSON.parse(pageNode.outputRef ?? "{}") as {
-        assetId?: string;
-        skipped?: string;
-      };
-      // 非 default 版式页：无 AI 视觉层，直接纯排版（visualImageBase64 为空由渲染函数支持）
-      let visualBase64: string | undefined;
-      if (!output.skipped) {
-        const visualAsset = await deps.assetRepo.require(output.assetId!);
-        visualBase64 = fs.readFileSync(deps.assetStore.resolve(visualAsset.filePath)).toString("base64");
-      }
-      const logoBase64 = await readLogoBase64(deps, input);
-
-      const buffer = await renderSlideDeterministic({
-        theme: themeById(input.brandKit?.themeId),
-        aspectRatio: input.aspectRatio,
-        slide,
-        pageCount,
-        visualImageBase64: visualBase64,
-        logoBase64,
-        brand: input.brandKit,
-      });
-      const saved = await deps.assetStore.saveBuffer(
-        buffer,
-        path.join("runs", runId, "pages", `page-${slide.index}-composite.png`),
-      );
-      await deps.assetRepo.create({
-        runId,
-        nodeRunId: renderNode.id,
-        pageIndex: slide.index,
-        kind: "composite",
-        filePath: saved.filePath,
-        mimeType: saved.mimeType,
-        bytes: saved.bytes,
-        checksum: saved.checksum,
-        metadataJson: JSON.stringify({
-          mode: "deterministic",
-          expectedCopy: [slide.headline, ...slide.body],
-          templateVersion: deps.templateVersion,
-          // 版式标注：详情展示与后续统计用；default 页恒为 "default"
-          layout: resolveSlideLayout(slide).layout,
-        }),
-      });
-    }));
-    await deps.runRepo.succeedNode(renderNode.id, {
-      outputRef: JSON.stringify({ templateVersion: deps.templateVersion }),
-    });
-  } catch (error) {
-    const aiError = toAiError(error);
-    await deps.runRepo.failNode(renderNode.id, aiError.category, aiError.message.slice(0, 400));
-    throw error;
   }
 }
 
@@ -585,19 +461,10 @@ async function writeExportManifest(
       slide.index,
     );
     if (!pageNode) return [];
-    const output = JSON.parse(pageNode.outputRef ?? "{}") as {
-      assetId?: string;
-      skipped?: string;
-    };
-    let asset = output.assetId
+    const output = JSON.parse(pageNode.outputRef ?? "{}") as { assetId?: string };
+    const asset = output.assetId
       ? allAssetsCache.find((row) => row.id === output.assetId)
       : undefined;
-    // 非 default 版式页没有 generated 资产：落到该页的 composite 资产（渲染阶段产出）
-    if (!asset && output.skipped) {
-      const composites = allAssetsCache
-        .filter((row) => row.kind === "composite" && row.pageIndex === slide.index);
-      asset = composites[composites.length - 1];
-    }
     if (!asset) return [];
     const metadata = JSON.parse(asset.metadataJson ?? "{}") as Record<string, unknown>;
     return [
@@ -605,12 +472,8 @@ async function writeExportManifest(
         pageIndex: slide.index,
         role: slide.role,
         headline: slide.headline,
-        // 版式标注：非 default 页在详情/统计中可见
-        layout: resolveSlideLayout(slide).layout,
-        skippedLayout: Boolean(output.skipped),
         assetId: asset.id,
         filePath: asset.filePath,
-        mode: metadata.mode,
         expectedCopy: metadata.expectedCopy,
         visualCheckPassed: metadata.visualCheckPassed,
       },

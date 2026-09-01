@@ -169,14 +169,6 @@ function defaultStoryboard(topic: string, aspectRatio: string, platform: string)
         body: [`${topic}的一句话解释`, "把复杂概念翻译成人话"],
         visualIntent: "大数字版式：一个关键数字做视觉主角",
         layoutHint: "大数字",
-        // 版式路由演示：数据冲击页 → big-number（deterministic 模式跳过 AI 生图）
-        layout: "big-number",
-        layoutData: {
-          layout: "big-number",
-          value: "3",
-          caption: `${topic}的三个关键判断，一图讲透`.slice(0, 80),
-          source: "来源：mock 资料整理",
-        },
       },
       {
         index: 2,
@@ -185,17 +177,6 @@ function defaultStoryboard(topic: string, aspectRatio: string, platform: string)
         body: ["和日常场景建立联系", "给出一个可记忆的类比"],
         visualIntent: "目录版式：本篇内容导览",
         layoutHint: "目录",
-        // 版式路由演示：导览页 → index（deterministic 模式跳过 AI 生图）
-        layout: "index",
-        layoutData: {
-          layout: "index",
-          items: [
-            { title: "它到底是什么" },
-            { title: "为什么重要" },
-            { title: "怎么用起来" },
-            { title: "记住这一句" },
-          ],
-        },
       },
       {
         index: 3,
@@ -209,7 +190,7 @@ function defaultStoryboard(topic: string, aspectRatio: string, platform: string)
   });
 }
 
-/** 构造 Mock Provider：开发和 CI 的确定性基础，也用于演示占位图卡 */
+/** 构造 Mock Provider：开发和 CI 的稳定基础，也用于演示占位图卡 */
 export function createMockProvider(options: MockProviderOptions = {}): MockProvider {
   const controls: MockControls = {
     calls: { text: 0, object: 0, image: 0, inspect: 0 },

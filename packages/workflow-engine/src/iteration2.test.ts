@@ -8,7 +8,6 @@ import {
   type ExportPageFile,
 } from "./export";
 import { buildBriefPrompt, buildStoryboardPrompt, buildSlidePrompt } from "./prompts";
-import { themeById } from "@aai/render-engine";
 import {
   createHarness,
   createRunWith,
@@ -185,15 +184,9 @@ describe("iteration 2: density pagination & brand style prompts", () => {
         { index: 0, role: "cover" as const, headline: "标题", body: ["正文"], visualIntent: "插画", layoutHint: "居中" },
       ],
     };
-    const nativePlan = buildSlidePrompt(storyboard.slides[0]!, storyboard, input, "native");
-    expect(nativePlan.imagePrompt).toContain("水彩插画");
-    expect(nativePlan.imagePrompt).toContain("真人照片");
-    const detPlan = buildSlidePrompt(storyboard.slides[0]!, storyboard, input, "deterministic");
-    expect(detPlan.imagePrompt).toContain("水彩插画");
-  });
-
-  it("falls back to the default theme for unknown theme ids", () => {
-    expect(themeById("unknown").name).toBe("darkroom-knowledge");
-    expect(themeById("paper_minimal").templateVersion).toBe("paper-minimal@1");
+    const plan = buildSlidePrompt(storyboard.slides[0]!, storyboard, input);
+    expect(plan.imagePrompt).toContain("水彩插画");
+    expect(plan.imagePrompt).toContain("真人照片");
+    expect(plan.imagePrompt).toContain("必须逐字出现");
   });
 });

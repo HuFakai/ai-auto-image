@@ -62,7 +62,6 @@ export async function createHarness(options: { mock?: MockProviderOptions } = {}
     visualQuality: mock.bundle.visualQuality,
     assetsDir: assetsRoot,
     exportsDir: exportsRoot,
-    templateVersion: "darkroom-knowledge@1",
   };
 
   const revisionRepo = new RevisionRepo(db.db);

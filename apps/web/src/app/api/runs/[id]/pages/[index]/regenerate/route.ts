@@ -13,7 +13,7 @@ const RegenSchema = z.object({
   imagePromptOverride: z.string().max(4000).optional(),
 });
 
-/** 单页返修：重新生成目标页（native 重出整图；deterministic 重出视觉层并重新排版） */
+/** 单页返修：重新生成目标页的完整图片 */
 export async function POST(
   request: Request,
   ctx: { params: Promise<{ id: string; index: string }> },

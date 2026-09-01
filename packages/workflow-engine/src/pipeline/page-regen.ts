@@ -1,9 +1,8 @@
-import fs from "node:fs";
 import path from "node:path";
 import { toAiError, withModelFallbacks, type VisualQualityModel } from "@aai/ai-core";
 import type { CreateRunInput, GeneratedImage, Storyboard, StoryboardSlide } from "@aai/shared-schemas";
 import type { AssetRepo, JobRepo, ProviderRepo, RevisionRepo, RunRepo, AssetStore } from "@aai/storage";
-import { applyBrandOverlays, hasBrandOverlays, renderSlideDeterministic, themeById } from "@aai/render-engine";
+import { applyBrandOverlays, hasBrandOverlays } from "@aai/render-engine";
 import type { ImageRoute } from "./knowledge-cards";
 import { buildSlidePrompt } from "../prompts";
 import { logger } from "../logger";
@@ -112,7 +111,7 @@ async function retryExistingRegenOutput(
 }
 
 /**
- * 单页返修：只重生成目标页（native 重出图；deterministic 重出视觉层并重新排版），
+ * 单页返修：只重生成目标页，模型直接输出包含中文内容的完整图片，
  * 旧版本资产保留（superseded），写入 Revision 版本链，其余页面零调用。
  */
 export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps): void {
@@ -132,10 +131,9 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       body: payload.body ?? original.body,
     };
     if (await retryExistingRegenOutput(deps, ctx.runId, payload.pageIndex)) return;
-    const mode = input.textRenderingMode;
     const plan = payload.imagePromptOverride
       ? { imagePrompt: payload.imagePromptOverride, expectedCopy: [slide.headline, ...slide.body] }
-      : buildSlidePrompt(slide, storyboard, input, mode);
+      : buildSlidePrompt(slide, storyboard, input);
 
     const node = await deps.runRepo.createNodeRun(ctx.runId, "generate-images");
     await deps.runRepo.startNode(node.id, {
@@ -184,34 +182,7 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       const image = result[0]!;
       const version = (await deps.assetRepo.pageVersionCount(ctx.runId, payload.pageIndex)) + 1;
 
-      /* deterministic：AI 只出视觉层，文字由程序重新排版合成 */
-      if (mode === "deterministic") {
-        const visualRel = path.join("runs", ctx.runId, "pages", `page-${payload.pageIndex}-v${version}-visual.png`);
-        const visualSaved = await deps.assetStore.saveGeneratedImage(image, visualRel);
-        const visualBase64 = fs.readFileSync(visualSaved.filePath).toString("base64");
-        const logoBase64 = await readLogoBase64(deps, input);
-        const composite = await renderSlideDeterministic({
-          theme: themeById(input.brandKit?.themeId),
-          aspectRatio: input.aspectRatio,
-          slide,
-          pageCount: storyboard.slides.length,
-          visualImageBase64: visualBase64,
-          logoBase64,
-          brand: input.brandKit,
-        });
-        await finishRegen(deps, ctx, {
-          runId: ctx.runId,
-          input,
-          slide,
-          payload,
-          node,
-          buffer: composite,
-          version,
-        });
-        return;
-      }
-
-      /* native：模型出完整图，直接作为新版本 */
+      /* 模型出完整图，直接作为新版本 */
       await syncStoryboardSlide(deps, ctx.runId, payload.pageIndex, slide);
       const relPath = path.join("runs", ctx.runId, "pages", `page-${payload.pageIndex}-v${version}.png`);
       let imageToSave: GeneratedImage = image;
@@ -230,7 +201,6 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
         bytes: saved.bytes,
         checksum: saved.checksum,
         metadataJson: JSON.stringify({
-          mode,
           expectedCopy: plan.expectedCopy,
           revision: version,
         }),
@@ -239,7 +209,7 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
         runId: ctx.runId,
         pageIndex: payload.pageIndex,
         kind: "page-regen",
-        payloadJson: JSON.stringify({ ...payload, mode }),
+        payloadJson: JSON.stringify(payload),
         assetId: asset.id,
       });
       await deps.runRepo.succeedNode(node.id, {
@@ -279,64 +249,4 @@ async function overlayGeneratedImage(
   } catch {
     return image;
   }
-}
-
-/** 读取 Brand Kit Logo（缺失或读取失败时返回 undefined，不阻塞渲染） */
-async function readLogoBase64(deps: PageRegenDeps, input: CreateRunInput): Promise<string | undefined> {
-  const logoAssetId = input.brandKit?.logoAssetId;
-  if (!logoAssetId) return undefined;
-  try {
-    const asset = await deps.assetRepo.require(logoAssetId);
-    return fs.readFileSync(deps.assetStore.resolve(asset.filePath)).toString("base64");
-  } catch {
-    return undefined;
-  }
-}
-
-async function finishRegen(
-  deps: PageRegenDeps,
-  ctx: { runId: string | null; signal: AbortSignal; onProgress: () => void },
-  args: {
-    runId: string;
-    input: CreateRunInput;
-    slide: StoryboardSlide;
-    payload: PageRegenPayload;
-    node: { id: string };
-    buffer: Buffer;
-    version: number;
-  },
-): Promise<void> {
-  await syncStoryboardSlide(deps, args.runId, args.payload.pageIndex, args.slide);
-  const relPath = path.join("runs", args.runId, "pages", `page-${args.payload.pageIndex}-v${args.version}.png`);
-  const saved = await deps.assetStore.saveBuffer(args.buffer, relPath);
-  await deps.assetRepo.supersedePage(args.runId, args.payload.pageIndex);
-  const asset = await deps.assetRepo.create({
-    runId: args.runId,
-    nodeRunId: args.node.id,
-    pageIndex: args.payload.pageIndex,
-    kind: "composite",
-    filePath: saved.filePath,
-    mimeType: saved.mimeType,
-    bytes: saved.bytes,
-    checksum: saved.checksum,
-    metadataJson: JSON.stringify({
-      mode: "deterministic",
-      expectedCopy: [args.slide.headline, ...args.slide.body],
-      revision: args.version,
-    }),
-  });
-  await deps.revisionRepo.create({
-    runId: args.runId,
-    pageIndex: args.payload.pageIndex,
-    kind: "page-regen",
-    payloadJson: JSON.stringify({ ...args.payload, mode: "deterministic" }),
-    assetId: asset.id,
-  });
-  await deps.runRepo.succeedNode(args.node.id, {
-    outputRef: JSON.stringify({ pageIndex: args.payload.pageIndex, assetId: asset.id, revision: args.version }),
-    images: 1,
-  });
-  await deps.runRepo.setReview(args.runId, "pending");
-  void ctx;
-  logger.info("page regenerated (deterministic)", { runId: args.runId, page: args.payload.pageIndex, version: args.version });
 }

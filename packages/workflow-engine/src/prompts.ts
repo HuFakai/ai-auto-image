@@ -1,6 +1,6 @@
-import type { ContentBrief, CreateRunInput, Storyboard, StoryboardSlide, TextRenderingMode } from "@aai/shared-schemas";
+import type { ContentBrief, CreateRunInput, Storyboard, StoryboardSlide } from "@aai/shared-schemas";
 
-/** Brand Kit 风格注入片段（native 与 deterministic 共用） */
+/** Brand Kit 风格注入片段 */
 export function buildStyleHint(input: CreateRunInput): string[] {
   const kit = input.brandKit;
   if (!kit) return [];
@@ -148,22 +148,11 @@ function buildRecipeStoryboardLines(input: CreateRunInput): string[] {
   }
 }
 
-/**
- * 版式路由指令段：逐页根据内容形态选择 layout 并输出 layout/layoutData，
- * 让「页面信息结构决定视觉结构」（确定性渲染端按 layout 分派纯排版布局）。
- * 数据格式与 shared-schemas 的 LayoutDataSchema 严格对应；非法数据会被管线归一化回退 default。
- */
-const LAYOUT_ROUTING_RULES = [
-  "版式路由（每页输出 layout 字段；非 default 页必须同时输出形状匹配的 layoutData）：",
-  '- default：普通要点页（标题 + 要点列表），未命中以下形态时使用，不输出 layoutData。',
-  '- big-number：数据冲击页（一个关键数字/结论）。layoutData 示例：{"layout":"big-number","value":"93%","caption":"用户更信任带来源的数据","source":"来源：2025 行业报告"}（value ≤12 字，caption ≤80 字，source ≤60 字可选）。',
-  '- timeline：历程/阶段/演进页。layoutData 示例：{"layout":"timeline","nodes":[{"time":"2020","title":"起步","note":"…"},{"time":"2022","title":"加速","note":"…"},{"time":"2025","title":"成熟","note":"…"}]}（3–6 个节点，time ≤12 字可选，title ≤30 字，note ≤60 字可选）。',
-  '- table：对比/参数/多维度页。layoutData 示例：{"layout":"table","columns":["维度","方案A","方案B"],"rows":[["价格","低","高"],["上手","快","慢"]]}（2–3 个列头，首个为维度列名；2–6 行，每行格数=列数，每格 ≤40 字）。',
-  '- index：目录页（只用于长内容全套的第 2 页，且全套页数 ≥4 时才允许）。layoutData 示例：{"layout":"index","items":[{"title":"它是什么"},{"title":"为什么重要"},{"title":"怎么用"}]}（2–8 项，每项 ≤24 字）。',
-  '- quote：引用/金句页。layoutData 示例：{"layout":"quote","quote":"慢慢来，比较快。","attribution":"——佚名"}（引文 6–120 字，attribution ≤40 字可选）。',
-  '- process：步骤/方法页。layoutData 示例：{"layout":"process","steps":[{"title":"明确目标","note":"…"},{"title":"拆解任务","note":"…"},{"title":"复盘迭代","note":"…"}]}（2–6 步，title ≤16 字，note ≤40 字可选）。',
-  "选择规则：数据冲击页用 big-number；历程/阶段用 timeline；对比页用 table；长内容第 2 页用 index；引用/金句页用 quote；步骤方法页用 process；其余 default。",
-  "全套要求：有合适内容时至少使用 2 种非 default 版式；不要为了凑版式硬套（内容形态不匹配就保持 default）。",
+/** 视觉结构指令：只帮助图片模型组织画面，不生成或消费程序排版数据。 */
+const VISUAL_STRUCTURE_RULES = [
+  "视觉结构：根据每页内容选择清晰的构图，不要输出供程序排版的结构化字段。",
+  "数据或结论突出时使用醒目的数字/标题；对比内容使用左右分栏或对照关系；步骤、时间线和目录使用清晰的视觉层级。",
+  "所有标题、正文和页码都由图片模型直接绘制在最终图片中；画面应保留手机阅读安全边距。",
 ].join("\n");
 
 export function buildStoryboardPrompt(input: CreateRunInput, brief: ContentBrief): string {
@@ -199,8 +188,7 @@ export function buildStoryboardPrompt(input: CreateRunInput, brief: ContentBrief
   } else if (recipeLines.length === 0) {
     lines.push("任务：生成 4–6 页。");
   }
-  // 版式路由指令：所有卡片类 recipe 共用（comic 管线不走本函数，不受影响）
-  lines.push(LAYOUT_ROUTING_RULES);
+  lines.push(VISUAL_STRUCTURE_RULES);
   return lines.join("\n");
 }
 
@@ -209,7 +197,7 @@ export interface SlidePromptPlan {
   expectedCopy: string[];
 }
 
-/** 单页图片 Prompt 的 Recipe 附加指令（native 模式；默认空） */
+/** 单页图片 Prompt 的 Recipe 附加指令（默认空） */
 function buildSlideRecipeLines(input: CreateRunInput): string[] {
   switch (input.recipe) {
     case "quote_cards":
@@ -220,24 +208,21 @@ function buildSlideRecipeLines(input: CreateRunInput): string[] {
 }
 
 /**
- * 组装单页图片 Prompt 与预期文案。
- * native：已确认文案逐字写入 Prompt，要求模型生成含中文的完整图片；
- * deterministic：只要无文字视觉层，为程序排版预留安全区。
+ * 组装单页图片 Prompt 与预期文案。模型直接生成包含中文文案的完整图片。
  */
 export function buildSlidePrompt(
   slide: StoryboardSlide,
   storyboard: Storyboard,
   input: CreateRunInput,
-  mode: TextRenderingMode,
 ): SlidePromptPlan {
   const pageCount = storyboard.slides.length;
   const pageLabel = `${slide.index + 1}/${pageCount}`;
   const styleLines = buildStyleHint(input);
 
-  if (mode === "native") {
-    const copyLines = [slide.headline, ...slide.body].filter((line) => line.trim().length > 0);
-    const expectedCopy = [...copyLines, pageLabel];
-    const imagePrompt = [
+  const copyLines = [slide.headline, ...slide.body].filter((line) => line.trim().length > 0);
+  const expectedCopy = [...copyLines, pageLabel];
+  return {
+    imagePrompt: [
       `主题：${input.topic}`,
       `标题：${slide.headline}`,
       slide.body.length > 0
@@ -250,19 +235,8 @@ export function buildSlidePrompt(
       ...buildSlideRecipeLines(input),
       ...styleLines,
       "要求：图中中文必须清晰可读、无错字、无缺字；除上述文字外，画面中不得出现任何其他文字、数字、水印或 Logo。",
-    ].join("\n");
-    return { imagePrompt, expectedCopy };
-  }
-
-  return {
-    imagePrompt: [
-      `主题：${input.topic}`,
-      `画布比例：${input.aspectRatio}`,
-      `画面：${slide.visualIntent}。版式：${slide.layoutHint}。`,
-      ...styleLines,
-      "要求：只生成无文字的视觉层（背景、插画、装饰）；画面中绝对不要出现任何文字、数字、字母、水印或 Logo；四周各预留 8% 安全边距供后续排版。",
     ].join("\n"),
-    expectedCopy: [],
+    expectedCopy,
   };
 }
 

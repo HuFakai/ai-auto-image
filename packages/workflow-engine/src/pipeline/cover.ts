@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import { toAiError, withModelFallbacks } from "@aai/ai-core";
 import {
@@ -11,7 +10,7 @@ import {
   type Storyboard,
 } from "@aai/shared-schemas";
 import type { AssetRepo, JobRepo, ProviderRepo, RunRepo, AssetStore } from "@aai/storage";
-import { applyBrandOverlays, hasBrandOverlays, renderSlideDeterministic, themeById } from "@aai/render-engine";
+import { applyBrandOverlays, hasBrandOverlays } from "@aai/render-engine";
 import { buildCoverPlanPrompt, buildStyleHint } from "../prompts";
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
@@ -140,39 +139,17 @@ async function generateCoverPlan(
 function buildCoverImagePrompt(
   input: CreateRunInput,
   candidate: CoverCandidatePlan,
-  mode: "native" | "deterministic",
 ): string {
   const styleLines = buildStyleHint(input);
-  if (mode === "native") {
-    return [
-      `主题：${input.topic}`,
-      `封面主视觉：${candidate.visualPrompt}。`,
-      `封面大字标题（必须逐字出现在画面上，粗体、居中、不超过 12 字）：${candidate.hookTitle}`,
-      `画布比例：${input.aspectRatio}`,
-      `目标平台：${input.platform}`,
-      ...styleLines,
-      "要求：图中中文必须清晰可读、无错字、无缺字；除封面大字标题外，画面中不得出现任何其他文字、数字、水印或 Logo。",
-    ].join("\n");
-  }
   return [
     `主题：${input.topic}`,
+    `封面主视觉：${candidate.visualPrompt}。`,
+    `封面大字标题（必须逐字出现在画面上，粗体、居中、不超过 12 字）：${candidate.hookTitle}`,
     `画布比例：${input.aspectRatio}`,
-    `画面：${candidate.visualPrompt}。版式：封面主视觉，主体突出、构图简洁。`,
+    `目标平台：${input.platform}`,
     ...styleLines,
-    "要求：只生成无文字的视觉层（背景、插画、装饰）；画面中绝对不要出现任何文字、数字、字母、水印或 Logo；四周各预留 8% 安全边距供后续排版。",
+    "要求：图中中文必须清晰可读、无错字、无缺字；除封面大字标题外，画面中不得出现任何其他文字、数字、水印或 Logo。",
   ].join("\n");
-}
-
-/** 读取 Brand Kit Logo（缺失或读取失败时返回 undefined，不阻塞渲染） */
-async function readLogoBase64(deps: CoverDeps, input: CreateRunInput): Promise<string | undefined> {
-  const logoAssetId = input.brandKit?.logoAssetId;
-  if (!logoAssetId) return undefined;
-  try {
-    const asset = await deps.assetRepo.require(logoAssetId);
-    return fs.readFileSync(deps.assetStore.resolve(asset.filePath)).toString("base64");
-  } catch {
-    return undefined;
-  }
 }
 
 /** 对原生直出图叠加 Brand Kit 水印/签名（与 page-regen 同规则；仅 base64 直出可叠加） */
@@ -252,7 +229,6 @@ export async function generateCoverCandidates(
     }
   }
 
-  const mode = input.textRenderingMode === "deterministic" ? "deterministic" : "native";
   const node = await deps.runRepo.createNodeRun(runId, COVER_NODE_NAME);
   await deps.runRepo.startNode(node.id, {
     routeId: deps.imageRoutes[0]?.config.id,
@@ -263,15 +239,13 @@ export async function generateCoverCandidates(
     const coreMessage = args.coreMessage ?? (await loadCoreMessage(deps, runId));
     const plan = await generateCoverPlan(deps, ctx, runId, node.id, input, storyboard, coreMessage);
 
-    const pageCount = storyboard.slides.length;
-    const logoBase64 = await readLogoBase64(deps, input);
     const failedVariants: number[] = [];
     let produced = 0;
 
     await Promise.all(plan.candidates.map(async (candidate, i) => {
       const variant = i + 1;
       try {
-        const imagePrompt = buildCoverImagePrompt(input, candidate, mode);
+        const imagePrompt = buildCoverImagePrompt(input, candidate);
         const result = await withModelFallbacks({
           routes: deps.imageRoutes.map((route) => ({ config: route.config, model: route.model })),
           signal: ctx.signal,
@@ -304,46 +278,13 @@ export async function generateCoverCandidates(
         });
         const image = result[0]!;
 
-        // deterministic：AI 只出视觉层，文字（hookTitle + styleNote）由程序排版合成；
-        // native：模型直出成品封面（含大字标题），叠加 Brand Kit 水印后直接落库
-        let saved: { filePath: string; bytes: number };
-        if (mode === "deterministic") {
-          let visualBase64 = image.base64 ?? null;
-          if (!visualBase64) {
-            // URL 直出无 base64：先落盘再读（与 page-regen 同模式）
-            const visualRel = path.join("runs", runId, "covers", `cover-${variant}-visual.png`);
-            const visualSaved = await deps.assetStore.saveGeneratedImage(image, visualRel);
-            visualBase64 = fs.readFileSync(visualSaved.filePath).toString("base64");
-          }
-          const buffer = await renderSlideDeterministic({
-            theme: themeById(input.brandKit?.themeId),
-            aspectRatio: input.aspectRatio,
-            slide: {
-              index: 0,
-              role: "cover",
-              headline: candidate.hookTitle,
-              body: [candidate.styleNote],
-              visualIntent: candidate.visualPrompt,
-              layoutHint: "封面候选",
-            },
-            pageCount,
-            visualImageBase64: visualBase64,
-            logoBase64,
-            brand: input.brandKit,
-          });
-          saved = await deps.assetStore.saveBuffer(
-            buffer,
-            path.join("runs", runId, "covers", `cover-${variant}.png`),
-          );
-        } else {
-          const imageToSave = hasBrandOverlays(input.brandKit)
-            ? await overlayGeneratedImage(image, input.brandKit)
-            : image;
-          saved = await deps.assetStore.saveGeneratedImage(
-            imageToSave,
-            path.join("runs", runId, "covers", `cover-${variant}.png`),
-          );
-        }
+        const imageToSave = hasBrandOverlays(input.brandKit)
+          ? await overlayGeneratedImage(image, input.brandKit)
+          : image;
+        const saved = await deps.assetStore.saveGeneratedImage(
+          imageToSave,
+          path.join("runs", runId, "covers", `cover-${variant}.png`),
+        );
 
         await deps.assetRepo.create({
           runId,
@@ -358,7 +299,6 @@ export async function generateCoverCandidates(
             variant,
             hookTitle: candidate.hookTitle,
             styleNote: candidate.styleNote,
-            mode,
           }),
         });
         produced += 1;
@@ -379,7 +319,7 @@ export async function generateCoverCandidates(
       outputRef: JSON.stringify({ produced, failedVariants, variants: plan.candidates.length }),
       images: produced,
     });
-    logger.info("cover candidates generated", { runId, produced, failedVariants, mode });
+    logger.info("cover candidates generated", { runId, produced, failedVariants });
     return { skipped: false, produced, failedVariants };
   } catch (error) {
     const aiError = toAiError(error);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import type { BrandKitView } from "@/lib/types";
 
 const THEME_SWATCH: Record<string, { bg: string; ink: string; accent: string; label: string }> = {
@@ -36,7 +36,7 @@ export function SettingsView({ initialKits }: { initialKits: BrandKitView[] }) {
         <p className="kicker">SETTINGS · 品牌手册</p>
         <h1 className="mt-2 font-display text-xl font-bold">品牌手册</h1>
         <p className="mt-1.5 text-xs leading-relaxed text-ink-soft">
-          主题决定确定性排版的配色；风格关键词注入图片 Prompt；Logo 出现在确定性页面页脚。
+          主题用于品牌手册预览与风格识别；风格关键词注入图片 Prompt；Logo、品牌名和水印作为成品品牌覆盖。
           创作时在「品牌手册」下拉选择。模型渠道请在 <span className="font-mono text-ink">管理后台 → 模型渠道</span> 维护。
         </p>
       </section>
@@ -166,10 +166,6 @@ function KitForm({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [previewBusy, setPreviewBusy] = useState(false);
-  const [previewLive, setPreviewLive] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
   const swatch = THEME_SWATCH[themeId] ?? THEME_SWATCH.darkroom!;
 
   const splitKeywords = (value: string) =>
@@ -201,62 +197,6 @@ function KitForm({
       ink: palette.ink?.trim() || null,
     },
   });
-
-  /** 预览入参：显式 null（清除语义）在样张中与省略等价，剥离后发送（预览接口按可选字段处理） */
-  const previewPayload = () => {
-    const payload = kitPayload();
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(payload)) {
-      if (value === null || value === undefined) continue;
-      if (key === "paletteJson") {
-        const kept = Object.fromEntries(
-          Object.entries(value as Record<string, string | null | undefined>).filter(
-            ([, color]) => Boolean(color?.trim()),
-          ),
-        );
-        if (Object.keys(kept).length > 0) out[key] = kept;
-        continue;
-      }
-      out[key] = value;
-    }
-    return out;
-  };
-
-  async function runPreview() {
-    setPreviewBusy(true);
-    setPreviewError(null);
-    try {
-      const response = await fetch("/api/brand-kits/preview", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(previewPayload()),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `HTTP ${response.status}`);
-      }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      setPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return url;
-      });
-    } catch (caught) {
-      setPreviewError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setPreviewBusy(false);
-    }
-  }
-
-  // 实时预览（可选）：点击预览样张后开启；配置变化 1s 防抖自动刷新，避免过频调用
-  const paletteKey = JSON.stringify(palette);
-  useEffect(() => {
-    if (!previewLive) return;
-    const timer = setTimeout(() => {
-      void runPreview();
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [name, themeId, brandName, slogan, footerSignature, watermarkText, watermarkPosition, watermarkOpacity, titleFont, coverLayout, paletteKey, previewLive]);
 
   async function uploadLogo(file: File) {
     setUploading(true);
@@ -326,7 +266,7 @@ function KitForm({
           </div>
 
           <div>
-            <span className="field-label">主题（确定性排版配色）</span>
+            <span className="field-label">主题配色</span>
             <div className="mt-2 grid grid-cols-3 gap-2">
               {Object.entries(THEME_SWATCH).map(([id, preset]) => (
                 <button
@@ -376,7 +316,7 @@ function KitForm({
           </div>
 
           <div>
-            <span className="field-label">Logo（PNG，≤5MB · 确定性页面页脚）</span>
+            <span className="field-label">Logo（PNG，≤5MB · 成品品牌覆盖）</span>
             <div className="mt-2 flex items-center gap-3">
               {logoAssetId ? (
                 <img
@@ -551,47 +491,17 @@ function KitForm({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              className="btn-ghost px-3 py-1.5 font-mono text-[11px]"
-              onClick={() => {
-                setPreviewLive(true);
-                void runPreview();
-              }}
-              disabled={previewBusy}
-            >
-              {previewBusy ? "预览中…" : "预览样张"}
-            </button>
-            <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-ink-soft">
-              <input
-                type="checkbox"
-                checked={previewLive}
-                onChange={(event) => {
-                  setPreviewLive(event.target.checked);
-                  if (event.target.checked) void runPreview();
-                }}
-                className="accent-[#ff2442]"
-              />
-              实时预览（改动 1s 后自动刷新）
-            </label>
-            {previewLive && (
-              <span className="font-mono text-[10px] text-ink-faint">
-                零模型费用 · 3:4 样张
-              </span>
-            )}
+          <div className="flex items-center justify-between gap-2">
+            <span className="field-label">预览样张（静态效果图）</span>
+            <span className="font-mono text-[10px] text-ink-faint">零模型费用 · 3:4</span>
           </div>
-          {previewUrl && (
-            <div className="flex justify-center">
-              <img
-                src={previewUrl}
-                alt="品牌样张预览"
-                className="max-h-[360px] w-auto rounded-md border border-line shadow-[0_10px_30px_rgba(0,0,0,0.4)]"
-              />
-            </div>
-          )}
-          {previewError && (
-            <p className="font-mono text-[11px] text-seal">⚠ 预览失败：{previewError}</p>
-          )}
+          <div className="flex justify-center">
+            <img
+              src={`/previews/brands/${themeId}.png`}
+              alt={`${swatch.label}品牌手册预览`}
+              className="max-h-[360px] w-auto rounded-md border border-line shadow-[0_10px_30px_rgba(0,0,0,0.4)]"
+            />
+          </div>
 
           {error && <p className="font-mono text-xs text-seal">⚠ {error}</p>}
 

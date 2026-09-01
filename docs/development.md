@@ -16,7 +16,6 @@
 ```bash
 pnpm install
 cp .env.example .env
-pnpm fonts                 # 确定性渲染和中文字体检查需要
 pnpm dev
 ```
 
@@ -27,7 +26,7 @@ pnpm dev
 - 未设置 `DATABASE_URL`：使用进程内 PGlite；当前 Web runtime 不把 PGlite 数据库句柄持久化到 `DATA_DIR`，适合本地快速试验和测试。
 - 设置 `DATABASE_URL`：使用 `postgres.js` 连接远程 PostgreSQL，启动时自动执行 `packages/storage/drizzle/` 中的迁移。
 - 未配置真实文本/图片渠道：可使用 Mock Provider 完成零费用占位图卡流程。
-- `native` 是默认文字模式；`deterministic` 需要显式选择，用于程序化叠加准确中文；文本和图片模型仅服从后台渠道级并发配置，默认 `0` 不限制。
+- 新建、重试和单页重生统一由图片模型直接生成包含中文的最终图片；项目不再提供确定性正文排版开关。文本和图片模型仅服从后台渠道级并发配置，默认 `0` 不限制。
 
 首次打开应用后，可在 Studio 的渠道设置中分别配置文本和图片渠道；Brand Kit、计费和支付配置分别由设置页/管理后台维护。
 
@@ -58,7 +57,6 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm eval
-pnpm fonts
 pnpm db:migrate
 pnpm db:seed
 pnpm verify:live
@@ -83,11 +81,11 @@ packages/provider-xai/     xAI/Grok 适配
 packages/provider-compatible/ 自定义兼容端点
 packages/provider-mock/    零费用 Mock Provider
 packages/workflow-engine/  知识卡片/漫画/封面/返修/导出管线与 Job Runner
-packages/render-engine/    原生资产处理、Satori/Sharp 确定性渲染
+packages/render-engine/    原生图片资产处理、品牌水印/签名叠加
 packages/storage/          Drizzle PostgreSQL 方言、PGlite/远程 PG、Repository、迁移
 packages/config/           共享 TypeScript 配置
 infra/                     Dockerfile、生产 Compose、部署验证脚本
-scripts/                   字体、迁移、种子、真实调用和评测脚本
+scripts/                   迁移、种子、真实调用和评测脚本
 fixtures/                  评测输入与报告
 docs/                      当前状态、路线图、部署手册和设计基线
 ```

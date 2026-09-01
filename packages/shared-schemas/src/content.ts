@@ -8,10 +8,7 @@ export type Platform = z.infer<typeof PlatformSchema>;
 export const AspectRatioSchema = z.enum(["3:4", "9:16", "1:1", "16:9"]);
 export type AspectRatio = z.infer<typeof AspectRatioSchema>;
 
-/**
- * 多平台一键适配预设：已完成的作品按目标平台比例确定性重排（零模型费用）。
- * xiaohongshu 是原始创作平台（不参与适配，直接用现有导出）。
- */
+/** 平台比例预设（用于新任务的目标比例选择）。 */
 export const PLATFORM_PRESETS = {
   xiaohongshu: { aspectRatio: "3:4", label: "小红书" },
   douyin: { aspectRatio: "9:16", label: "抖音/视频号" },
@@ -53,128 +50,6 @@ export type ContentBrief = z.infer<typeof ContentBriefSchema>;
 export const SlideRoleSchema = z.enum(["cover", "content", "summary", "cta"]);
 export type SlideRole = z.infer<typeof SlideRoleSchema>;
 
-/**
- * 版式路由 hint：页面信息结构决定视觉结构（六种新页面版式 + default）。
- * default 表示沿用经典排版；其余版式为纯排版布局（不使用 AI 背景图）。
- */
-export const LayoutHintSchema = z.enum([
-  "default",
-  "big-number",
-  "timeline",
-  "table",
-  "index",
-  "quote",
-  "process",
-]);
-export type LayoutHint = z.infer<typeof LayoutHintSchema>;
-
-/* ── 各版式的结构化数据（字段中英皆可，z.string() 不限语言）────────────── */
-
-/** big-number：数据冲击页（大数字 + 说明 + 可选来源） */
-export const BigNumberLayoutDataSchema = z.object({
-  layout: z.literal("big-number"),
-  value: z.string().min(1).max(12),
-  caption: z.string().min(1).max(80),
-  source: z.string().max(60).optional(),
-});
-
-/** timeline：历程/阶段页（3–6 个节点） */
-export const TimelineLayoutDataSchema = z.object({
-  layout: z.literal("timeline"),
-  nodes: z
-    .array(
-      z.object({
-        time: z.string().max(12).optional(),
-        title: z.string().min(1).max(30),
-        note: z.string().max(60).optional(),
-      }),
-    )
-    .min(3)
-    .max(6),
-});
-
-/** table：对比/参数页（2–3 列 × 2–6 行；首个列头为维度列名；每格 ≤40 字） */
-export const TableLayoutDataSchema = z.object({
-  layout: z.literal("table"),
-  columns: z.array(z.string().min(1).max(40)).min(2).max(3),
-  rows: z.array(z.array(z.string().max(40))).min(2).max(6),
-}).refine(
-  (data) => data.rows.every((row) => row.length === data.columns.length),
-  { message: "each row must have the same number of cells as columns" },
-);
-
-/** index：目录页（2–8 个章节标题） */
-export const IndexLayoutDataSchema = z.object({
-  layout: z.literal("index"),
-  items: z.array(z.object({ title: z.string().min(1).max(24) })).min(2).max(8),
-});
-
-/** quote：引用/金句页（引文 6–120 字 + 可选署名） */
-export const QuoteLayoutDataSchema = z.object({
-  layout: z.literal("quote"),
-  quote: z.string().min(6).max(120),
-  attribution: z.string().max(40).optional(),
-});
-
-/** process：步骤/方法页（2–6 步） */
-export const ProcessLayoutDataSchema = z.object({
-  layout: z.literal("process"),
-  steps: z
-    .array(
-      z.object({
-        title: z.string().min(1).max(16),
-        note: z.string().max(40).optional(),
-      }),
-    )
-    .min(2)
-    .max(6),
-});
-
-/** 版式数据 discriminated union：按 layout 字面量分发校验数据形状 */
-export const LayoutDataSchema = z.discriminatedUnion("layout", [
-  BigNumberLayoutDataSchema,
-  TimelineLayoutDataSchema,
-  TableLayoutDataSchema,
-  IndexLayoutDataSchema,
-  QuoteLayoutDataSchema,
-  ProcessLayoutDataSchema,
-]);
-export type LayoutData = z.infer<typeof LayoutDataSchema>;
-
-/**
- * 解析单页版式（防御式）：hint 合法、layoutData 通过 zod 校验且与 hint 匹配才生效；
- * 否则一律回退 default（不抛错）。渲染侧与管线归一化共用这一判定。
- */
-export function resolveSlideLayout(slide: Pick<StoryboardSlide, "layout" | "layoutData">): {
-  layout: LayoutHint;
-  layoutData?: LayoutData;
-} {
-  const hint = slide.layout;
-  if (!hint || hint === "default" || !LayoutHintSchema.safeParse(hint).success) {
-    return { layout: "default" };
-  }
-  const parsed = LayoutDataSchema.safeParse(slide.layoutData);
-  if (!parsed.success || parsed.data.layout !== hint) {
-    return { layout: "default" };
-  }
-  return { layout: parsed.data.layout, layoutData: parsed.data };
-}
-
-/**
- * 管线侧归一化（就地清洗）：hint 与 data 不匹配或 data 非法 → 删除 layout/layoutData
- * 字段回退 default，不抛错。旧分镜无这两个字段时原样保留。
- */
-export function normalizeSlideLayout(slide: StoryboardSlide): void {
-  const resolved = resolveSlideLayout(slide);
-  if (resolved.layout === "default") {
-    delete slide.layout;
-    delete slide.layoutData;
-    return;
-  }
-  slide.layout = resolved.layout;
-  slide.layoutData = resolved.layoutData;
-}
-
 /** Storyboard 单页 */
 export const StoryboardSlideSchema = z.object({
   index: z.number().int().min(0),
@@ -183,13 +58,6 @@ export const StoryboardSlideSchema = z.object({
   body: z.array(z.string()),
   visualIntent: z.string(),
   layoutHint: z.string(),
-  /**
-   * 版式路由 hint（宽松接受：未知值由 resolveSlideLayout/normalizeSlideLayout
-   * 归一化为 default，不在 parse 时抛错，保证 LLM 输出不致整单失败）。
-   */
-  layout: z.string().optional(),
-  /** 版式数据（形状由 LayoutDataSchema 校验；非法时管线归一化回退 default） */
-  layoutData: z.unknown().optional(),
 });
 export type StoryboardSlide = z.infer<typeof StoryboardSlideSchema>;
 
@@ -207,16 +75,6 @@ export type Storyboard = z.infer<typeof StoryboardSchema>;
  * 而图片资产按归一化后的 0-based page_index 存储。
  * 所有从节点持久化值解析 Storyboard 的消费方都必须先调用本函数，防止页文错位。
  */
-/** 版式中文名（详情页徽标展示用；default 不显示） */
-export const LAYOUT_LABELS: Record<string, string> = {
-  "big-number": "数据大字",
-  timeline: "时间线",
-  table: "对比表格",
-  index: "目录",
-  quote: "引言",
-  process: "流程步骤",
-};
-
 export function normalizeSlideIndices(storyboard: Storyboard): Storyboard {
   storyboard.slides.forEach((slide, index) => {
     slide.index = index;

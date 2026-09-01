@@ -166,7 +166,7 @@ describe("quote_cards slide prompt", () => {
       aspectRatio: "3:4" as const,
       slides: [{ index: 0, role: "cover" as const, headline: "标题", body: [], visualIntent: "插画", layoutHint: "居中" }],
     };
-    const plan = buildSlidePrompt(storyboard.slides[0]!, storyboard, input, "native");
+    const plan = buildSlidePrompt(storyboard.slides[0]!, storyboard, input);
     expect(plan.imagePrompt).toContain("金句为画面绝对主角");
   });
 });

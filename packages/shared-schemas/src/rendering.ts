@@ -6,15 +6,6 @@ import { BookInfoSchema, ProductInfoSchema, RecipeSchema } from "./comic";
 export * from "./brand-kit";
 export * from "./comic";
 
-/**
- * 双文字渲染模式（docs/02 §9.1）：
- * - native：默认。已确认文案写入图片 Prompt，由主力图片模型直接生成含中文的完整图片。
- * - deterministic：显式开启。图片模型生成无文字视觉层，Satori/SVG + Sharp 合成文字。
- * - auto_fallback：可选。先原生，质量检查失败后按策略转入确定性渲染。默认不开启。
- */
-export const TextRenderingModeSchema = z.enum(["native", "deterministic", "auto_fallback"]);
-export type TextRenderingMode = z.infer<typeof TextRenderingModeSchema>;
-
 /** Studio 发起一次生成运行的输入 */
 export const CreateRunInputSchema = z.object({
   recipe: RecipeSchema.default("knowledge_cards"),
@@ -23,7 +14,6 @@ export const CreateRunInputSchema = z.object({
   topic: z.string().min(1).max(4000),
   platform: PlatformSchema.default("xiaohongshu"),
   aspectRatio: AspectRatioSchema.default("3:4"),
-  textRenderingMode: TextRenderingModeSchema.default("native"),
   /** 粘贴的参考资料正文（URL 抓取结果或用户粘贴），驱动密度拆页 */
   sourceText: z.string().max(20000).optional(),
   sourceUrl: z.string().max(500).optional(),

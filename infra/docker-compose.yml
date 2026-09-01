@@ -34,7 +34,6 @@ services:
       ASSETS_DIR: /data/assets
       EXPORTS_DIR: /data/exports
       SQLITE_MIGRATIONS_DIR: /app/drizzle
-      FONT_DIR: /app/fonts
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # 生产镜像禁止模拟支付；即使 .env.example 未被改写也不会误开。
       PAYMENT_MOCK_ENABLED: "0"

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LAYOUT_LABELS } from "@aai/shared-schemas";
 import type { Recipe } from "@aai/shared-schemas";
 import type { RunDetailPage, RunDetailPayload } from "@/lib/types";
 import { RECIPE_LABELS } from "@/lib/types";
@@ -13,8 +12,6 @@ const ADAPT_TARGETS = [
   { platform: "wechat", label: "公众号", aspect: "16:9" },
   { platform: "instagram", label: "Instagram", aspect: "1:1" },
 ] as const;
-
-type AdaptPlatformChoice = (typeof ADAPT_TARGETS)[number]["platform"];
 
 /** 发布文案（与 workflow-engine PlatformCopy 结构对齐） */
 interface PublishCopy {
@@ -178,8 +175,6 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
   const readyCount = detail.pages.filter((page) => page.status === "ready").length;
   const failedCount = detail.pages.filter((page) => page.status === "failed").length;
   const stamp = runStamp(detail.status);
-  const isDeterministic = detail.input.textRenderingMode === "deterministic";
-
   // 顶栏面包屑：作品标题截断
   const crumbTitle = detail.storyboardTitle ?? detail.input.topic;
   const crumbShort = crumbTitle.length > 14 ? `${crumbTitle.slice(0, 14)}…` : crumbTitle;
@@ -264,7 +259,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         </h1>
         <p className="mt-2 font-mono text-xs text-ink-soft">
           {detail.input.aspectRatio} · {detail.input.platform} ·{" "}
-          {isDeterministic ? "确定性排版" : "原生中文"}
+          AI 原生中文
           {detail.concurrency ? " · 并发由模型渠道控制" : ""}
           {active ? ` · ${readyCount}/${detail.pages.length || "?"}` : ""}
         </p>
@@ -296,9 +291,6 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
               {readyCount} 已成{failedCount > 0 ? ` · ${failedCount} 失败` : ""}
               {detail.pages.some((p) => (p.revision ?? 1) > 1) ? " · 含返修版本" : ""}
             </span>
-            {detail.status === "succeeded" && isDeterministic && (
-              <RerenderAllButton runId={detail.runId} pages={detail.pages} onDone={refresh} />
-            )}
           </div>
         </div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-4">
@@ -308,7 +300,6 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
               page={page}
               no={index + 1}
               runId={detail.runId}
-              isDeterministic={isDeterministic}
               onPreview={() => setPreviewPageIndex(page.index)}
               editing={editingPage === page.index}
               onToggleEdit={() => setEditingPage(editingPage === page.index ? null : page.index)}
@@ -334,7 +325,6 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         </div>
         <div className="grid grid-cols-2 gap-x-8 gap-y-0 sm:grid-cols-3">
           <InfoRow label="内容类型" value={RECIPE_LABELS[detail.generation.recipe as Recipe] ?? detail.generation.recipe} />
-          <InfoRow label="文字模式" value={detail.generation.textRenderingMode === "native" ? "原生中文（模型出图）" : "确定性排版（程序合成）"} />
           <InfoRow label="比例 · 平台" value={`${detail.generation.aspectRatio} · ${detail.generation.platform}`} />
           <InfoRow
             label="品牌手册"
@@ -376,7 +366,6 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
                 : "—"
             }
           />
-          <InfoRow label="排版模板" value={detail.generation.templateVersion ?? "—"} />
           <InfoRow
             label="角色定妆图"
             value={
@@ -409,12 +398,12 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
 
       {/* 右列侧栏：发布文案 / 平台适配 / 删除作品（lg 起吸附跟随滚动） */}
       <aside className="min-w-0 space-y-6 lg:sticky lg:top-[72px]">
-        {/* 发布文案：基于 storyboard，deterministic 与 native 都可展示 */}
+        {/* 发布文案：加载已保存的生成结果，不因进入详情页重复调用模型 */}
         {detail.status === "succeeded" && <PublishCopyCard runId={detail.runId} />}
 
         {/* 平台适配包：确定性模式零模型费用一键重排其他平台 */}
         {detail.status === "succeeded" && (
-          <PlatformAdaptCard runId={detail.runId} isDeterministic={isDeterministic} input={detail.input} />
+          <PlatformAdaptCard runId={detail.runId} input={detail.input} />
         )}
 
         <DeleteRunButton runId={detail.runId} />
@@ -545,7 +534,6 @@ function PageFrame({
   page,
   no,
   runId,
-  isDeterministic,
   onPreview,
   editing,
   onToggleEdit,
@@ -554,7 +542,6 @@ function PageFrame({
   page: RunDetailPage;
   no: number;
   runId: string;
-  isDeterministic: boolean;
   onPreview: () => void;
   editing: boolean;
   onToggleEdit: () => void;
@@ -585,11 +572,6 @@ function PageFrame({
           <span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-ink-faint">
             图{String(no).padStart(2, "0")} · {page.role}
             {revised ? ` · 第${page.revision}版` : ""}
-            {page.layout && page.layout !== "default" && LAYOUT_LABELS[page.layout] && (
-              <span className="ml-1 rounded bg-seal px-1.5 py-0.5 text-[9px] tracking-wider text-white">
-                {LAYOUT_LABELS[page.layout]}
-              </span>
-            )}
           </span>
           <span className="min-w-0 truncate px-2 text-xs text-ink-soft">{page.headline}</span>
           <span className="flex shrink-0 items-center gap-1">
@@ -606,7 +588,7 @@ function PageFrame({
           </span>
         </figcaption>
         {editing && (
-          <RegenPanel page={page} no={no} isDeterministic={isDeterministic} onDone={onDone} />
+          <RegenPanel page={page} no={no} onDone={onDone} />
         )}
       </figure>
     );
@@ -817,47 +799,20 @@ function RegionImage({
   );
 }
 
-/** 返修面板：改文案 → deterministic 免费重排 / native 或强改画面时重新出图（提示费用） */
+/** 返修面板：修改文案后通过图片模型重新生成完整页面。 */
 function RegenPanel({
   page,
   no,
-  isDeterministic,
   onDone,
 }: {
   page: RunDetailPage;
   no: number;
-  isDeterministic: boolean;
   onDone: () => Promise<void>;
 }) {
   const [headline, setHeadline] = useState(page.headline);
   const [bodyText, setBodyText] = useState((page.expectedCopy ?? []).slice(1).join("\n"));
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-
-  const copyChanged = headline !== page.headline || bodyText !== (page.expectedCopy ?? []).slice(1).join("\n");
-
-  async function rerender() {
-    if (busy) return;
-    setBusy("rerender");
-    setMessage(null);
-    try {
-      const response = await fetch(`/api/runs/${pageAssetScope}/pages/${page.index}/rerender`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ headline, body: bodyText.split("\n").map((l) => l.trim()).filter(Boolean) }),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `HTTP ${response.status}`);
-      }
-      await onDone();
-      setMessage("已重新排版。");
-    } catch (caught) {
-      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
-    } finally {
-      setBusy(null);
-    }
-  }
 
   async function regenerate() {
     if (busy) return;
@@ -904,27 +859,15 @@ function RegenPanel({
         placeholder="正文（每行一条）"
       />
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        {isDeterministic && (
-          <button
-            className="btn-ghost px-3 py-1.5 font-mono text-[11px]"
-            onClick={() => void rerender()}
-            disabled={Boolean(busy) || !copyChanged}
-            title="只改文字重新排版：不调用模型、零费用"
-          >
-            {busy === "rerender" ? "排版中…" : "重新排版（免费）"}
-          </button>
-        )}
         <button
           className="btn-ink px-3 py-1.5 font-mono text-[11px]"
           onClick={() => void regenerate()}
           disabled={Boolean(busy)}
-          title={isDeterministic ? "重新生成视觉层并排版：一次图片调用" : "按新文案重新出图：一次图片调用"}
+          title="按新文案重新出图：一次图片调用"
         >
-          {busy === "regen" ? "返修中…" : isDeterministic ? "重出画面并排版（收费）" : "重新生成本页（收费）"}
+          {busy === "regen" ? "返修中…" : "重新生成本页（收费）"}
         </button>
-        {!isDeterministic && copyChanged && (
-          <span className="font-mono text-[10px] text-seal">改文案需重新出图</span>
-        )}
+        <span className="font-mono text-[10px] text-ink-faint">修改文案将重新调用图片模型</span>
       </div>
       {message && <p className={`mt-2 font-mono text-[10px] ${messageTone(message)}`}>{message}</p>}
     </div>
@@ -1082,7 +1025,7 @@ function CoverCandidatesCard({ detail, onDone }: { detail: RunDetailPayload; onD
 
 /**
  * 发布文案卡片：标题 / 正文 / 标签，一键复制与 AI 润色。
- * 文案基于 storyboard（与图无关），deterministic 与 native 都显示。
+ * 文案基于 storyboard（与图片资产分离），进入详情页时只读取已保存结果。
  */
 function PublishCopyCard({ runId }: { runId: string }) {
   const [copy, setCopy] = useState<PublishCopy | null>(null);
@@ -1193,135 +1136,21 @@ function PublishCopyCard({ runId }: { runId: string }) {
 }
 
 /**
- * 按当前品牌重排全部页（deterministic 专属）：
- * 逐页调用 rerender（零模型费用），headline/body 取详情数据里该页现值。
- */
-function RerenderAllButton({
-  runId,
-  pages,
-  onDone,
-}: {
-  runId: string;
-  pages: RunDetailPage[];
-  onDone: () => Promise<void>;
-}) {
-  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-
-  const readyPages = pages.filter((page) => page.status === "ready" && page.assetId);
-
-  async function rerenderAll() {
-    if (progress) return;
-    const total = readyPages.length;
-    if (total === 0) {
-      setMessage("没有可重排的页面。");
-      return;
-    }
-    if (!window.confirm(`将逐页重新排版（零生成费用，耗时约 ${total * 2} 秒）。继续？`)) return;
-    setMessage(null);
-    setProgress({ done: 0, total });
-    for (let i = 0; i < readyPages.length; i++) {
-      const page = readyPages[i]!;
-      try {
-        const response = await fetch(`/api/runs/${runId}/pages/${page.index}/rerender`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            headline: page.headline,
-            body: (page.expectedCopy ?? []).slice(1).map((line) => line.trim()).filter(Boolean),
-          }),
-        });
-        if (!response.ok) {
-          const body = (await response.json().catch(() => ({}))) as { error?: string };
-          throw new Error(body.error ?? `HTTP ${response.status}`);
-        }
-      } catch (caught) {
-        setMessage(
-          `第 ${i + 1} 页失败：${caught instanceof Error ? caught.message : caught}，已完成 ${i}/${total}`,
-        );
-        setProgress(null);
-        await onDone();
-        return;
-      }
-      setProgress({ done: i + 1, total });
-    }
-    setProgress(null);
-    setMessage(`已按当前品牌重排全部 ${total} 页。`);
-    await onDone();
-  }
-
-  if (readyPages.length === 0) return null;
-  return (
-    <span className="inline-flex flex-wrap items-center gap-2">
-      <button
-        className="btn-ghost px-3 py-1 font-mono text-[11px]"
-        onClick={() => void rerenderAll()}
-        disabled={Boolean(progress)}
-        title="只重排文字版式，沿用现有视觉层，零模型费用"
-      >
-        {progress ? `重排中 ${progress.done}/${progress.total}…` : "按品牌重排全部页"}
-      </button>
-      {message && <span className={`font-mono text-[10px] ${messageTone(message)}`}>{message}</span>}
-    </span>
-  );
-}
-
-/**
  * 平台适配包卡片：已完成作品一键导出其他平台规格。
- * deterministic 模式 → POST /api/runs/:id/adapt 零模型费用重排并下载 ZIP；
- * native 模式 → 以目标比例创建新 run 重新生成（消耗生成额度）。
+ * 以目标比例创建新 run 重新生成（消耗生成额度）。
  */
 function PlatformAdaptCard({
   runId,
-  isDeterministic,
   input,
 }: {
   runId: string;
-  isDeterministic: boolean;
   input: RunDetailPayload["input"];
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  /** 适配包下载：响应为 ZIP 流，x-adapt-missing-pages 头携带被跳过的页 */
-  async function adapt(platform: AdaptPlatformChoice) {
-    if (busy) return;
-    setBusy(platform);
-    setMessage(null);
-    try {
-      const response = await fetch(`/api/runs/${runId}/adapt`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ platform }),
-      });
-      if (!response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { error?: string; hint?: string };
-        throw new Error(body.hint ?? body.error ?? `HTTP ${response.status}`);
-      }
-      const missing = (response.headers.get("x-adapt-missing-pages") ?? "")
-        .split(",")
-        .filter(Boolean)
-        .map((s) => Number(s) + 1);
-      const disposition = response.headers.get("content-disposition") ?? "";
-      const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? `adapt-${platform}.zip`;
-      const url = URL.createObjectURL(await response.blob());
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = filename;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-      setMessage(missing.length > 0 ? `已下载；第 ${missing.join("、")} 页缺视觉层已跳过。` : "适配包已下载。");
-    } catch (caught) {
-      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  /** native 模式：读取当前 run input，改比例后创建新 run 重新生成 */
+  /** 读取当前 run input，改比例后创建新 run 重新生成 */
   async function regenerateAs(target: (typeof ADAPT_TARGETS)[number]) {
     if (busy) return;
     if (!window.confirm(`将以 ${target.aspect}（${target.label}）重新生成整套作品，将消耗生成额度。继续？`)) return;
@@ -1352,54 +1181,27 @@ function PlatformAdaptCard({
         <span className="kicker">ADAPT · 一次创作 · 多平台分发</span>
       </div>
       <div className="border border-line bg-paper-deep p-5">
-        {isDeterministic ? (
-          <>
-            <p className="font-mono text-[11px] text-ink-soft">
-              确定性模式：按目标平台比例重新排版，沿用模型视觉层，零模型费用，不改动原作资产。
-            </p>
-            <div className="mt-4 grid grid-cols-1 gap-3">
-              {ADAPT_TARGETS.map((target) => (
-                <div key={target.platform} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper-card px-4 py-3">
-                  <div>
-                    <p className="text-sm font-bold">{target.label}</p>
-                    <p className="font-mono text-[10px] text-ink-faint">{target.aspect}</p>
-                  </div>
-                  <button
-                    className="btn-ghost shrink-0 px-3 py-1.5 font-mono text-[11px] hover:!border-seal hover:!text-seal"
-                    onClick={() => void adapt(target.platform)}
-                    disabled={Boolean(busy)}
-                  >
-                    {busy === target.platform ? "排版中…" : "生成并下载"}
-                  </button>
-                </div>
-              ))}
+        <p className="font-mono text-[11px] text-ink-soft">
+          图片由 AI 原生生成并包含中文内容；切换平台比例时将重新生成整套作品并消耗图片调用额度。
+        </p>
+        <div className="mt-4 grid grid-cols-1 gap-3">
+          {ADAPT_TARGETS.map((target) => (
+            <div key={target.platform} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper-card px-4 py-3">
+              <div>
+                <p className="text-sm font-bold">{target.label}</p>
+                <p className="font-mono text-[10px] text-ink-faint">以 {target.aspect} 重新生成</p>
+              </div>
+              <button
+                className="btn-ghost shrink-0 px-3 py-1.5 font-mono text-[11px]"
+                onClick={() => void regenerateAs(target)}
+                disabled={Boolean(busy)}
+                title={`复制当前参数，以 ${target.aspect} 创建新运行`}
+              >
+                {busy === target.platform ? "创建中…" : `以 ${target.aspect} 重新生成`}
+              </button>
             </div>
-          </>
-        ) : (
-          <>
-            <p className="font-mono text-[11px] text-ink-soft">
-              原生中文模式的画面已含文字，无法免费重排；可按目标比例重新生成整套作品（消耗生成额度）。
-            </p>
-            <div className="mt-4 grid grid-cols-1 gap-3">
-              {ADAPT_TARGETS.map((target) => (
-                <div key={target.platform} className="flex items-center justify-between gap-3 rounded-lg border border-line bg-paper-card px-4 py-3">
-                  <div>
-                    <p className="text-sm font-bold">{target.label}</p>
-                    <p className="font-mono text-[10px] text-ink-faint">以 {target.aspect} 重新生成</p>
-                  </div>
-                  <button
-                    className="btn-ghost shrink-0 px-3 py-1.5 font-mono text-[11px]"
-                    onClick={() => void regenerateAs(target)}
-                    disabled={Boolean(busy)}
-                    title={`复制当前参数，以 ${target.aspect} 创建新运行`}
-                  >
-                    {busy === target.platform ? "创建中…" : `以 ${target.aspect} 重新生成`}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+          ))}
+        </div>
         {message && <p className={`mt-3 font-mono text-[11px] ${messageTone(message)}`}>{message}</p>}
       </div>
     </section>

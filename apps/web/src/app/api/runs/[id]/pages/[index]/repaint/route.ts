@@ -134,7 +134,6 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       bytes: saved.bytes,
       checksum: saved.checksum,
       metadataJson: JSON.stringify({
-        mode: input.textRenderingMode,
         repaint: { rect: parsed.data.rect, prompt: parsed.data.prompt },
         revision: version,
       }),

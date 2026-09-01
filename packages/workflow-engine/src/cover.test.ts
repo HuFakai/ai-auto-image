@@ -1,7 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import JSZip from "jszip";
-import { fontsPresent } from "@aai/render-engine";
 import type { CreateRunInput, Storyboard } from "@aai/shared-schemas";
 import { buildExportZip, templateCopy, generateCoverCandidates } from "./index";
 import {
@@ -36,102 +35,7 @@ async function coverAssetsOf(harness: Harness, runId: string) {
     });
 }
 
-/** deterministic 全流程 + 内嵌封面工序（渲染依赖字体） */
-describe.skipIf(!fontsPresent())("cover stage in deterministic pipeline (needs fonts)", () => {
-  it("produces 3 cover candidates after a successful run; second call is idempotent", async () => {
-    const harness = await makeHarness({ mock: { latencyMs: 1 } });
-    const runner = startEvalRunner(harness);
-    const { runId, jobId } = await createRunWith(harness, {
-      topic: "什么是复利",
-      textRenderingMode: "deterministic",
-      generateCoverCandidates: true,
-    });
-    await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "succeeded", 30_000);
-    await runner.stop();
-
-    const run = await harness.runRepo.require(runId);
-    expect(run.status).toBe("succeeded");
-
-    // 管线内嵌封面工序：3 个候选落库（kind=cover、pageIndex=-1、metadata 带 variant/hookTitle）
-    const covers = await coverAssetsOf(harness, runId);
-    expect(covers).toHaveLength(3);
-    covers.forEach((cover, index) => {
-      expect(cover.pageIndex).toBe(-1);
-      const meta = JSON.parse(cover.metadataJson ?? "{}") as {
-        purpose?: string;
-        variant?: number;
-        hookTitle?: string;
-        styleNote?: string;
-        mode?: string;
-      };
-      expect(meta.purpose).toBe("cover");
-      expect(meta.variant).toBe(index + 1);
-      expect(meta.hookTitle?.length).toBeGreaterThan(0);
-      expect(meta.styleNote?.length).toBeGreaterThan(0);
-      expect(meta.mode).toBe("deterministic");
-    });
-    // 封面文件真实落盘
-    for (const cover of covers) {
-      expect(fs.existsSync(harness.coverDeps.assetStore.resolve(cover.filePath))).toBe(true);
-    }
-
-    // generate-covers 节点成功
-    const nodes = await harness.runRepo.listNodeRuns(runId);
-    const coverNode = nodes.find((n) => n.nodeName === "generate-covers");
-    expect(coverNode?.status).toBe("succeeded");
-
-    // 共享函数幂等：已有 succeeded 节点时整体跳过，资产数不变
-    const input = JSON.parse(run.inputJson) as CreateRunInput;
-    const storyboardNode = nodes.find((n) => n.nodeName === "generate-storyboard" && n.status === "succeeded")!;
-    const storyboard = (JSON.parse(storyboardNode.outputRef!) as { value: Storyboard }).value;
-    const result = await generateCoverCandidates(harness.coverDeps, {
-      runId,
-      input,
-      storyboard,
-      ctx: { signal: new AbortController().signal, onProgress: () => {} },
-    });
-    expect(result.skipped).toBe(true);
-    expect(await coverAssetsOf(harness, runId)).toHaveLength(3);
-  }, 60_000);
-
-  it("keeps other candidates when one cover image fails", async () => {
-    let coverImageCalls = 0;
-    const harness = await makeHarness({
-      mock: {
-        latencyMs: 1,
-        // 第 1 个候选的封面图调用失败（封面 Prompt 含「封面主视觉」，正文页不含）
-        shouldFailImage: (request) => {
-          if (!request.prompt.includes("封面主视觉")) return false;
-          coverImageCalls += 1;
-          return coverImageCalls === 1;
-        },
-      },
-    });
-    const runner = startEvalRunner(harness);
-    const { runId, jobId } = await createRunWith(harness, {
-      topic: "时间管理方法",
-      textRenderingMode: "deterministic",
-      generateCoverCandidates: true,
-    });
-    await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "succeeded", 30_000);
-    await runner.stop();
-
-    // 封面候选 1 失败不阻塞其余：run 仍成功，产出 2 张
-    const run = await harness.runRepo.require(runId);
-    expect(run.status).toBe("succeeded");
-    const covers = await coverAssetsOf(harness, runId);
-    expect(covers).toHaveLength(2);
-
-    const nodes = await harness.runRepo.listNodeRuns(runId);
-    const coverNode = nodes.find((n) => n.nodeName === "generate-covers")!;
-    expect(coverNode.status).toBe("succeeded");
-    const output = JSON.parse(coverNode.outputRef ?? "{}") as { produced?: number; failedVariants?: number[] };
-    expect(output.produced).toBe(2);
-    expect(output.failedVariants).toEqual([1]);
-  }, 60_000);
-});
-
-describe("cover stage in native pipeline", () => {
+describe("cover stage", () => {
   it("produces 3 native cover candidates; plan failure does not fail the run", async () => {
     let planCalls = 0;
     let failedOnce = false;
@@ -186,8 +90,7 @@ describe("cover stage in native pipeline", () => {
     expect(covers).toHaveLength(3);
     for (const cover of covers) {
       expect(cover.pageIndex).toBe(-1);
-      const meta = JSON.parse(cover.metadataJson ?? "{}") as { mode?: string; hookTitle?: string };
-      expect(meta.mode).toBe("native");
+      const meta = JSON.parse(cover.metadataJson ?? "{}") as { hookTitle?: string };
       expect(meta.hookTitle?.length).toBeGreaterThan(0);
       expect(fs.existsSync(harness.coverDeps.assetStore.resolve(cover.filePath))).toBe(true);
     }

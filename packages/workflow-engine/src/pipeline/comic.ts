@@ -17,7 +17,7 @@ import {
 } from "@aai/ai-core";
 import type { AssetRepo, JobRepo, ProviderRepo, RevisionRepo, RunRepo, AssetStore } from "@aai/storage";
 import type { ImageRoute, TextRoute } from "./knowledge-cards";
-import { applyBrandOverlays, hasBrandOverlays, renderComicSlide, themeById } from "@aai/render-engine";
+import { applyBrandOverlays, hasBrandOverlays } from "@aai/render-engine";
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import { buildComicStoryboardPrompt, buildStyleHint } from "../prompts";
@@ -103,13 +103,16 @@ export function buildCharacterAnchorText(cast: CharacterAnchor[]): string {
     .join("\n");
 }
 
-/** 单页画面 Prompt：场景 + 角色锚定 + 风格 + 无文字要求 */
+/** 单页画面 Prompt：场景 + 角色锚定 + 风格 + AI 原生中文对白 */
 export function buildComicPagePrompt(input: CreateRunInput, storyboard: ComicStoryboard, pageIndex: number): string {
   const page = storyboard.pages[pageIndex]!;
   const castText = page.cast
     .map((name) => storyboard.cast.find((member) => member.name === name))
     .filter((member): member is CharacterAnchor => Boolean(member))
     .map((member) => `【${member.name}】${member.appearance}；服装：${member.outfit}`)
+    .join("\n");
+  const dialogueText = page.dialogues
+    .map((dialogue) => `${dialogue.type === "narration" ? "旁白" : dialogue.speaker}：${dialogue.text}`)
     .join("\n");
   return [
     `漫画页 ${pageIndex + 1}/${storyboard.pages.length}`,
@@ -121,7 +124,8 @@ export function buildComicPagePrompt(input: CreateRunInput, storyboard: ComicSto
     input.recipe === "strip_comic"
       ? "风格：四格漫画，单页四格、节奏起承转合，清晰勾线，适合手机阅读。"
       : "风格：单页多格科普漫画，清晰勾线，适合手机阅读。",
-    "要求：画面中绝对不要出现任何文字、对白、旁白、音效字或水印（对白由程序以气泡渲染）；保持与其他页完全相同的角色形象与画风。",
+    `对白/旁白（必须逐字绘制到合适的对白气泡或旁白框中）：\n${dialogueText || "无"}`,
+    "要求：图片直接完成画面、中文对白和旁白；中文必须清晰可读、无错字、无缺字，不要添加未提供的对白、标题、音效字、水印或 Logo；保持与其他页完全相同的角色形象与画风。",
   ].join("\n");
 }
 
@@ -130,7 +134,7 @@ export function buildComicPagePrompt(input: CreateRunInput, storyboard: ComicSto
  * parse-input → generate-brief → generate-character（角色锚点+定妆图）
  * → generate-comic-storyboard（分镜+一致性检查）
  * → generate-comic-pages（按并发；渠道支持图生图时引用角色定妆图保持一致性）
- * → render-comic-bubbles（对白气泡程序渲染）→ package-export
+ * → package-export
  *
  * 节点幂等语义与知识卡片一致：已成功节点跳过。
  */
@@ -173,7 +177,7 @@ async function executeComicRun(
     const node = await deps.runRepo.createNodeRun(runId, "parse-input");
     await deps.runRepo.startNode(node.id);
     await deps.runRepo.succeedNode(node.id, {
-      outputRef: JSON.stringify({ recipe: input.recipe, aspectRatio: input.aspectRatio, mode: input.textRenderingMode }),
+      outputRef: JSON.stringify({ recipe: input.recipe, aspectRatio: input.aspectRatio }),
     });
   }
 
@@ -182,7 +186,6 @@ async function executeComicRun(
     runId,
     JSON.stringify({
       recipe: input.recipe,
-      textRenderingMode: input.textRenderingMode,
       concurrency: {
         channels: [
           ...deps.textRoutes.map((route) => ({ id: route.config.id, type: "text", max: route.config.concurrencyMax })),
@@ -194,7 +197,6 @@ async function executeComicRun(
         kind: route.config.kind,
         model: route.model,
       })),
-      templateVersion: "comic-bubbles@1",
     }),
   );
 
@@ -367,81 +369,6 @@ async function executeComicRun(
   await Promise.all(tasks.map((task) => task()));
   await throwIfAborted(deps, runId, ctx.signal);
 
-  /* render-comic-bubbles：对白气泡程序渲染（确定性模式或统一渲染页脚）。
-   *
-   * 幂等语义（逐页级）：以「该页是否存在 kind='composite' 且未 superseded 的资产」为准。
-   * 不按「节点已 succeeded」整段跳过——某页在重试中可能重新生成了裸 generated
-   * （无气泡合成），必须为其补合成，否则该页会缺对白气泡。
-   * 快速路径：节点已 succeeded 且全部页面都有 composite 时直接跳过（不重复 createNodeRun）。
-   * succeedNode 只在本次实际执行了合成时调用；若节点已 succeeded 但某页缺 composite，
-   * 复用现有节点 id 补合成（setNodeOutput 记录），不再新建节点。 */
-  const bubblesNode = (await deps.runRepo.listNodeRuns(runId)).find(
-    (n) => n.nodeName === "render-comic-bubbles" && n.status === "succeeded",
-  );
-  const rowsByRun = await deps.assetRepo.listByRun(runId);
-  const pageHasComposite = (pageIndex: number) =>
-    rowsByRun.some((row) => row.pageIndex === pageIndex && row.kind === "composite" && row.supersededAt === null);
-  const pagesNeedingComposite = storyboard.pages.filter((page) => !pageHasComposite(page.index));
-
-  if (!(bubblesNode && pagesNeedingComposite.length === 0)) {
-    // 需要补合成：复用已 succeeded 节点（不重复创建）；否则新建节点
-    const node = bubblesNode ?? (await deps.runRepo.createNodeRun(runId, "render-comic-bubbles"));
-    const created = !bubblesNode;
-    if (created) await deps.runRepo.startNode(node.id);
-    try {
-      for (const page of pagesNeedingComposite) {
-        const generated = await deps.assetRepo.latestForPage(runId, page.index);
-        if (!generated) continue;
-        if (generated.kind === "composite") continue; // 该页已合成，幂等跳过
-        const panelBase64 = fs.readFileSync(deps.assetStore.resolve(generated.filePath)).toString("base64");
-        const buffer = await renderComicSlide({
-          theme: themeById(input.brandKit?.themeId),
-          aspectRatio: input.aspectRatio,
-          panelImageBase64: panelBase64,
-          title: storyboard.title,
-          pageIndex: page.index,
-          pageCount,
-          dialogues: page.dialogues,
-          brand: input.brandKit,
-          // 原生模式 generated 直出已叠水印/签名，composite 不再重复叠加（只对直出图叠加的规则）
-          skipBrandOverlays: input.textRenderingMode !== "deterministic",
-        });
-        const saved = await deps.assetStore.saveBuffer(
-          buffer,
-          path.join("runs", runId, "pages", `page-${page.index}-composite.png`),
-        );
-        await deps.assetRepo.supersedePage(runId, page.index);
-        await deps.assetRepo.create({
-          runId,
-          nodeRunId: node.id,
-          pageIndex: page.index,
-          kind: "composite",
-          filePath: saved.filePath,
-          mimeType: saved.mimeType,
-          bytes: saved.bytes,
-          checksum: saved.checksum,
-          metadataJson: JSON.stringify({
-            mode: "comic",
-            expectedCopy: page.dialogues.map((dialogue) => `${dialogue.speaker}：${dialogue.text}`),
-            dialogues: page.dialogues,
-          }),
-        });
-      }
-      if (created) {
-        await deps.runRepo.succeedNode(node.id, { outputRef: JSON.stringify({ templateVersion: "comic-bubbles@1" }) });
-      } else {
-        // 复用已 succeeded 节点：仅更新 output 记录本次补合成，不改状态
-        await deps.runRepo.setNodeOutput(node.id, JSON.stringify({ templateVersion: "comic-bubbles@1" }));
-      }
-    } catch (error) {
-      const aiError = toAiError(error);
-      if (created) {
-        await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
-      }
-      throw error;
-    }
-  }
-
   /* package-export */
   if (!(await deps.runRepo.listNodeRuns(runId)).some((n) => n.nodeName === "package-export" && n.status === "succeeded")) {
     const exportNode = await deps.runRepo.createNodeRun(runId, "package-export");
@@ -536,9 +463,9 @@ async function generateComicPage(
     });
 
     const image = result[0]!;
-    /* 原生直出图叠加 Brand Kit 水印/签名；deterministic 由 renderComicSlide 内部叠加，不重复 */
+    /* 原生直出图叠加 Brand Kit 水印/签名 */
     let imageToSave: GeneratedImage = image;
-    if (input.textRenderingMode !== "deterministic" && hasBrandOverlays(input.brandKit)) {
+    if (hasBrandOverlays(input.brandKit)) {
       imageToSave = await overlayGeneratedImage(image, input.brandKit);
     }
     const saved = await deps.assetStore.saveGeneratedImage(
@@ -580,7 +507,7 @@ async function generateComicPage(
 
 /**
  * 对原生直出图叠加 Brand Kit 水印/签名（「只对 generated 直出图叠加」规则；
- * composite 由渲染函数内部叠加，这里不再处理）。
+ * 作品正文由图片模型直接完成；这里仅处理品牌水印/签名。
  * 仅 base64 直出可叠加；URL 直出不下载，跳过叠加并原样返回。
  */
 async function overlayGeneratedImage(

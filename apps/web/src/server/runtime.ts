@@ -304,7 +304,6 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     },
     assetsDir,
     exportsDir,
-    templateVersion: "darkroom-knowledge@1",
     reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
     releaseImageCredits: (runId) => billing.releaseRunCredits(runId),
   });

@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { normalizeSlideIndices, resolveSlideLayout } from "@aai/shared-schemas";
+import { normalizeSlideIndices } from "@aai/shared-schemas";
 import type { ComicStoryboard, Storyboard } from "@aai/shared-schemas";
 import type { Runtime } from "./runtime";
 import type { RunDetailPayload, RunListItem } from "@/lib/types";
@@ -42,7 +42,7 @@ export async function listRunItems(
   const runs = await runtime.runRepo.listForUser(viewerUserId, limit);
   const items: RunListItem[] = [];
   for (const run of runs) {
-    const input = JSON.parse(run.inputJson) as { topic: string; textRenderingMode: string };
+    const input = JSON.parse(run.inputJson) as { topic: string };
     const nodes = (await runtime.runRepo.listNodeRuns(run.id)) as unknown as NodeRow[];
     // 知识卡片 / 科普漫画两种分镜节点
     const storyboardNode =
@@ -64,7 +64,6 @@ export async function listRunItems(
       runId: run.id,
       topic: input.topic,
       status: run.status as RunListItem["status"],
-      mode: input.textRenderingMode as RunListItem["mode"],
       reviewStatus: run.reviewStatus as RunListItem["reviewStatus"],
       createdAt: run.createdAt,
       pageCount,
@@ -88,7 +87,6 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
     ? (JSON.parse(run.snapshotJson) as {
         concurrency?: unknown;
         routes?: Array<{ id: string; kind?: string; model: string }>;
-        templateVersion?: string;
       })
     : null;
 
@@ -157,13 +155,8 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
           index: slide.index,
           role: slide.role,
           headline: slide.headline,
-          layout: resolveSlideLayout({
-            layout: (slide as { layout?: string }).layout,
-            layoutData: (slide as { layoutData?: unknown }).layoutData,
-          }).layout,
           status: "ready" as const,
           assetId: current.id,
-          mode: typeof metadata.mode === "string" ? metadata.mode : undefined,
           expectedCopy: Array.isArray(metadata.expectedCopy) ? (metadata.expectedCopy as string[]) : undefined,
           visualCheckPassed:
             typeof metadata.visualCheckPassed === "boolean" ? metadata.visualCheckPassed : undefined,
@@ -254,7 +247,6 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
     coverJobPending,
     generation: {
       recipe: input.recipe ?? "knowledge_cards",
-      textRenderingMode: input.textRenderingMode,
       aspectRatio: input.aspectRatio,
       platform: input.platform,
       brandKit: brandKitMeta,
@@ -279,7 +271,6 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
                     : "unknown"),
             })),
           }),
-      templateVersion: snapshot?.templateVersion ?? null,
       characterRefAssetId,
     },
     pages,

@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@aai/shared-schemas": "workspace:*",
-    "satori": "^0.13.0",
     "sharp": "^0.34.0"
   },
   "devDependencies": {

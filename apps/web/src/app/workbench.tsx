@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { TextRenderingModeSchema } from "@aai/shared-schemas";
 import type { Recipe } from "@aai/shared-schemas";
 import { RECIPE_LABELS } from "@/lib/types";
 import type { BrandKitView, RunListItem, RunsListPayload } from "@/lib/types";
@@ -109,7 +108,6 @@ export function Workbench({ initial, brandKits, stats }: Props) {
   const [data, setData] = useState<WorkbenchInitial>(initial);
   const [topic, setTopic] = useState("");
   const [aspectRatio, setAspectRatio] = useState("3:4");
-  const [mode, setMode] = useState<string>("native");
   const [sourceText, setSourceText] = useState("");
   const [brandKitId, setBrandKitId] = useState("");
   const [brandTheme, setBrandTheme] = useState(""); // 托盘选中的品牌主题 id（"" = 不使用）
@@ -262,7 +260,6 @@ export function Workbench({ initial, brandKits, stats }: Props) {
           recipe,
           topic: topic.trim(),
           aspectRatio,
-          textRenderingMode: TextRenderingModeSchema.parse(mode),
           ...(isComicRecipe && castDescription.trim()
             ? { castDescription: castDescription.trim().slice(0, 2000) }
             : {}),
@@ -442,7 +439,7 @@ export function Workbench({ initial, brandKits, stats }: Props) {
               onClick={() => void submit()}
               disabled={submitting || !topic.trim()}
             >
-              {submitting ? "排字中…" : "开始创作"}
+              {submitting ? "生成中…" : "开始创作"}
             </button>
           </div>
 
@@ -475,12 +472,6 @@ export function Workbench({ initial, brandKits, stats }: Props) {
           {/* row2：参数 chips */}
           <div className="flex flex-wrap items-center gap-1.5 px-3 pb-3 pt-2 max-sm:px-2.5">
             <Param label="类型" value={RECIPE_LABELS[recipe]} onClick={() => openTray("type")} active={trayGroup === "type"} />
-            <Param
-              label="文字"
-              value={mode === "native" ? "原生中文" : "确定性排版"}
-              onClick={() => setMode((current) => (current === "native" ? "deterministic" : "native"))}
-              title="单击切换文字模式"
-            />
             <Param
               label="比例"
               value={aspectRatio}
