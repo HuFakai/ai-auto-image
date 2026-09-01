@@ -1,3 +1,5 @@
+import { toBeijingIsoString } from "@aai/shared-schemas";
+
 type Level = "debug" | "info" | "warn" | "error";
 
 const LEVEL_ORDER: Record<Level, number> = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -14,7 +16,7 @@ const SENSITIVE_KEY_PATTERN =
 
 export function log(level: Level, message: string, fields: Record<string, unknown> = {}): void {
   if (LEVEL_ORDER[level] < LEVEL_ORDER[minLevel]) return;
-  const entry = { ts: new Date().toISOString(), level, msg: message, ...fields };
+  const entry = { ts: toBeijingIsoString(), level, msg: message, ...fields };
   const line = JSON.stringify(entry, (_key, value) =>
     typeof value === "string" && SENSITIVE_KEY_PATTERN.test(_key)
       ? "[REDACTED]"

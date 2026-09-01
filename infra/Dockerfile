@@ -10,6 +10,7 @@ RUN pnpm build
 
 FROM node:22-alpine AS runner
 WORKDIR /app
+RUN apk add --no-cache tzdata
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     HOSTNAME=0.0.0.0 \
@@ -17,7 +18,8 @@ ENV NODE_ENV=production \
     DATA_DIR=/data \
     ASSETS_DIR=/data/assets \
     EXPORTS_DIR=/data/exports \
-    SQLITE_MIGRATIONS_DIR=/app/drizzle
+    SQLITE_MIGRATIONS_DIR=/app/drizzle \
+    TZ=Asia/Shanghai
 
 COPY --from=build /repo/apps/web/.next/standalone ./
 COPY --from=build /repo/apps/web/public ./apps/web/public

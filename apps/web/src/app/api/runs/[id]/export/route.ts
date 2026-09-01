@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { normalizeSlideIndices } from "@aai/shared-schemas";
+import { normalizeSlideIndices, toBeijingIsoString } from "@aai/shared-schemas";
 import type { CreateRunInput, Storyboard } from "@aai/shared-schemas";
 import { StoryboardSchema } from "@aai/shared-schemas";
 import { buildExportZip, templateCopy, type ExportCoverFile, type ExportPageFile } from "@aai/workflow-engine";
@@ -152,7 +152,7 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
     cover: coverFile,
     manifest: {
       ...manifest,
-      exportedAt: new Date().toISOString(),
+      exportedAt: toBeijingIsoString(),
       copySource: copy.source,
       ...(coverFile ? { cover: { assetId: coverFile.assetId, hookTitle: coverFile.hookTitle } } : {}),
     },

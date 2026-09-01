@@ -35,6 +35,7 @@ services:
       EXPORTS_DIR: /data/exports
       SQLITE_MIGRATIONS_DIR: /app/drizzle
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      TZ: Asia/Shanghai
       # 生产镜像禁止模拟支付；即使 .env.example 未被改写也不会误开。
       PAYMENT_MOCK_ENABLED: "0"
     # 普通 Docker Compose 也生效的内存上限；deploy.resources 兼容其他编排方式。

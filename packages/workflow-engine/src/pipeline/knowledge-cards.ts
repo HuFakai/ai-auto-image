@@ -4,6 +4,7 @@ import type { z } from "zod";
 import {
   ContentBriefSchema,
   StoryboardSchema,
+  toBeijingIsoString,
   type ContentBrief,
   type CreateRunInput,
   type GeneratedImage,
@@ -258,8 +259,13 @@ async function executeKnowledgeCardRun(
     await throwIfAborted(deps, runId, ctx.signal);
     const pageCount = storyboard.slides.length;
 
-    // 先按分镜计算本次运行的最大图片需求，再启动任何图片 Provider。
-    const expectedImageCount = storyboard.slides.length + (input.generateCoverCandidates ? 3 : 0);
+    // 只为本次尚未结算的页面/封面预留额度。历史成功节点已经扣费，不能在重试时重复预留；
+    // creditsCharged 还包含文本模型费用，因此不能再用运行总扣点反推图片完成量。
+    const imageNodes = (await deps.runRepo.listNodeRuns(runId)) as unknown as NodeRowLike[];
+    const pendingPageCount = storyboard.slides.filter((slide) => !succeededPageNode(imageNodes, slide.index)).length;
+    const coverDone = imageNodes.some((row) => row.nodeName === "generate-covers" && row.status === "succeeded");
+    const pendingCoverCount = input.generateCoverCandidates && !coverDone ? 3 : 0;
+    const expectedImageCount = pendingPageCount + pendingCoverCount;
     await reserveCreditsToTarget(deps, runId, expectedImageCount * maxRouteCredits(deps.imageRoutes));
 
     /* generate-images：所有页面并行发起；模型渠道自身决定是否限流 */
@@ -529,7 +535,7 @@ async function writeExportManifest(
         pages,
         failedPages,
         usage: totals,
-        generatedAt: new Date().toISOString(),
+        generatedAt: toBeijingIsoString(),
       },
       null,
       2,

@@ -1,6 +1,7 @@
 import { requireAdmin } from "@/server/auth";
 import { redirect } from "next/navigation";
 import { getRuntime } from "@/server/runtime";
+import { beijingDateKey, beijingStartOfDay } from "@aai/shared-schemas";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export default async function AdminOverviewPage() {
   const nowMs = Date.now();
   const [allTime, today, week, daily, byChannel, statusCounts, ledgerSums, userCount] = await Promise.all([
     runtime.orderRepo.revenueByDay(0),
-    runtime.orderRepo.revenueByDay(nowMs - DAY_MS),
+    runtime.orderRepo.revenueByDay(beijingStartOfDay(nowMs)),
     runtime.orderRepo.revenueByDay(nowMs - 7 * DAY_MS),
     runtime.orderRepo.revenueByDay(nowMs - CHART_DAYS * DAY_MS),
     runtime.orderRepo.revenueByChannel(),
@@ -39,7 +40,7 @@ export default async function AdminOverviewPage() {
   const byReason = Object.fromEntries(ledgerSums.map((row) => [row.reason, row.total]));
   const dailyByDay = new Map(daily.map((row) => [row.day, row]));
   const dailyRows = Array.from({ length: CHART_DAYS }, (_, index) => {
-    const day = new Date(nowMs - (CHART_DAYS - 1 - index) * DAY_MS).toISOString().slice(0, 10);
+    const day = beijingDateKey(nowMs - (CHART_DAYS - 1 - index) * DAY_MS);
     const row = dailyByDay.get(day);
     return { day, totalCents: row?.totalCents ?? 0, count: row?.count ?? 0 };
   });

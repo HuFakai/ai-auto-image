@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Recipe } from "@aai/shared-schemas";
 import { RECIPE_LABELS } from "@/lib/types";
+import { formatBeijingDate, formatBeijingDateTime } from "@/lib/time";
 import type { RunListItem } from "@/lib/types";
 import { statusStamp } from "../workbench";
 
@@ -44,11 +45,11 @@ function relativeTime(ts: number): string {
   const days = Math.floor(hours / 24);
   if (days === 1) return "昨天";
   if (days < 30) return `${days} 天前`;
-  return new Date(ts).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
+  return formatBeijingDate(ts, { month: "2-digit", day: "2-digit" });
 }
 
 function absoluteTime(ts: number): string {
-  return new Date(ts).toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return formatBeijingDateTime(ts, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 /** 作品库:全量作品浏览(筛选 chips + 显影卡网格,无创作条) */

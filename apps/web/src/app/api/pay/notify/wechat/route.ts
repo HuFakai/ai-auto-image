@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRuntime } from "@/server/runtime";
+import { toBeijingIsoString } from "@aai/shared-schemas";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +22,7 @@ export async function POST(request: Request) {
     return fail("验签失败");
   } catch (error) {
     console.log(
-      JSON.stringify({ ts: new Date().toISOString(), level: "error", msg: "wechatpay notify error", error: String(error) }),
+      JSON.stringify({ ts: toBeijingIsoString(), level: "error", msg: "wechatpay notify error", error: String(error) }),
     );
     return fail("处理失败");
   }

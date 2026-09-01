@@ -1,4 +1,5 @@
 import type { CreateRunInput } from "@aai/shared-schemas";
+import { toBeijingIsoString } from "@aai/shared-schemas";
 import {
   generatePlatformCopy,
   routeCreditsPerCall,
@@ -43,7 +44,7 @@ export async function generateBilledPlatformCopy(args: {
     if (reserved) {
       await args.billing.releaseRunCreditsAmount(args.runId, credits).catch((releaseError) => {
         console.log(JSON.stringify({
-          ts: new Date().toISOString(),
+          ts: toBeijingIsoString(),
           level: "error",
           msg: "release platform copy credits failed",
           runId: args.runId,

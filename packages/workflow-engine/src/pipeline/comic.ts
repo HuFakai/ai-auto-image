@@ -4,6 +4,7 @@ import { z } from "zod";
 import {
   CharacterAnchorSchema,
   ComicStoryboardSchema,
+  toBeijingIsoString,
   type CharacterAnchor,
   type ComicStoryboard,
   type CreateRunInput,
@@ -264,14 +265,15 @@ async function executeComicRun(
     ).value;
     cast = anchors;
 
-    // 定妆图是漫画的第一张图片，必须在调用 Provider 前锁定额度。
-    await reserveCreditsToTarget(deps, runId, maxRouteCredits(deps.imageRoutes));
-
     /* 定妆图：独立节点（文生图，所有渠道都支持；幂等） */
     const refNodes = await deps.runRepo.listNodeRuns(runId);
     const refNodeDone = refNodes.find(
       (n) => n.nodeName === "generate-character-ref" && n.status === "succeeded",
     );
+    // 仅未结算的定妆图需要额度；失败节点若已有资产，也需要重新执行结算钩子。
+    if (!refNodeDone) {
+      await reserveCreditsToTarget(deps, runId, maxRouteCredits(deps.imageRoutes));
+    }
     if (refNodeDone?.outputRef) {
       characterRefAssetId = (JSON.parse(refNodeDone.outputRef) as { assetId?: string }).assetId ?? null;
     } else {
@@ -363,7 +365,6 @@ async function executeComicRun(
   }
 
   const pageCount = storyboard.pages.length;
-  await reserveCreditsToTarget(deps, runId, (1 + pageCount) * maxRouteCredits(deps.imageRoutes));
 
   /* generate-comic-pages：按并发；角色定妆图作为图生图参考（渠道支持时） */
   const failedPages: number[] = [];
@@ -374,6 +375,18 @@ async function executeComicRun(
   if (targetPageIndex !== undefined && pagesToProcess.length === 0) {
     throw new Error(`comic page index out of range: ${targetPageIndex}`);
   }
+  const pageNodes = await deps.runRepo.listNodeRuns(runId);
+  let pendingPageCount = 0;
+  for (const page of pagesToProcess) {
+    const existing = await deps.assetRepo.latestForPage(runId, page.index);
+    if (!existing) {
+      pendingPageCount += 1;
+      continue;
+    }
+    const linked = existing.nodeRunId ? pageNodes.find((node) => node.id === existing.nodeRunId) : undefined;
+    if (linked?.status === "failed" && linked.outputRef) pendingPageCount += 1;
+  }
+  await reserveCreditsToTarget(deps, runId, pendingPageCount * maxRouteCredits(deps.imageRoutes));
   const tasks = pagesToProcess.map((page) => async () => {
     const existing = await deps.assetRepo.latestForPage(runId, page.index);
     if (existing) {
@@ -428,7 +441,7 @@ async function executeComicRun(
   fs.mkdirSync(exportDir, { recursive: true });
   fs.writeFileSync(
     path.join(exportDir, "manifest.json"),
-    JSON.stringify({ runId, input, storyboard, checks, pages: storyboard.pages.length, failedPages, usage: totals, generatedAt: new Date().toISOString() }, null, 2),
+    JSON.stringify({ runId, input, storyboard, checks, pages: storyboard.pages.length, failedPages, usage: totals, generatedAt: toBeijingIsoString() }, null, 2),
   );
   await deps.runRepo.succeedNode(exportNode.id, { outputRef: JSON.stringify({ manifest: true }) });
 

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Recipe } from "@aai/shared-schemas";
 import type { RunDetailPage, RunDetailPayload } from "@/lib/types";
 import { RECIPE_LABELS } from "@/lib/types";
+import { formatBeijingDateTime } from "@/lib/time";
 
 /** 适配目标（小红书为原始平台不参与适配）；与 shared-schemas PLATFORM_PRESETS 对齐 */
 const ADAPT_TARGETS = [
@@ -247,7 +248,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
       <section className="rise">
         <p className="kicker">
           RUN · {detail.runId.slice(4, 12)} ·{" "}
-          {new Date(detail.createdAt).toLocaleString("zh-CN", {
+          {formatBeijingDateTime(detail.createdAt, {
             month: "2-digit",
             day: "2-digit",
             hour: "2-digit",

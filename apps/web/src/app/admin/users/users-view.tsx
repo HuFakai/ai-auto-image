@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { formatBeijingDate } from "@/lib/time";
 
 interface AdminUserItem {
   id: string;
@@ -15,7 +16,7 @@ interface AdminUserItem {
   subscription: { planName: string; expiresAt: number } | null;
 }
 
-const fmtDate = (ms: number) => new Date(ms).toLocaleDateString("zh-CN");
+const fmtDate = (ms: number) => formatBeijingDate(ms);
 
 export function UsersView() {
   const [users, setUsers] = useState<AdminUserItem[]>([]);

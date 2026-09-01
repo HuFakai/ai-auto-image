@@ -1909,7 +1909,7 @@ export class OrderRepo {
   async revenueByDay(sinceMs: number) {
     const rows = await this.client
       .select({
-        day: sql<string>`to_char(to_timestamp(${orders.paidAt} / 1000), 'YYYY-MM-DD')`,
+        day: sql<string>`to_char(timezone('Asia/Shanghai', to_timestamp(${orders.paidAt} / 1000)), 'YYYY-MM-DD')`,
         totalCents: sql<string>`coalesce(sum(${orders.amountCents}), 0)`,
         count: sql<string>`count(*)`,
       })

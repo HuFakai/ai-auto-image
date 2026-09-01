@@ -3,6 +3,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { NextResponse } from "next/server";
 import type { CreateRunInput } from "@aai/shared-schemas";
+import { toBeijingIsoString } from "@aai/shared-schemas";
 import { routeCreditsPerCall, selectWorkflowRoutes } from "@aai/workflow-engine";
 import { z } from "zod";
 import { getRuntime } from "@/server/runtime";
@@ -157,7 +158,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   } finally {
     if (reserved) {
       await runtime.billing.releaseRunCredits(id).catch((releaseError) => {
-        console.log(JSON.stringify({ ts: new Date().toISOString(), level: "error", msg: "repaint credit release failed", id, error: String(releaseError) }));
+        console.log(JSON.stringify({ ts: toBeijingIsoString(), level: "error", msg: "repaint credit release failed", id, error: String(releaseError) }));
       });
     }
   }

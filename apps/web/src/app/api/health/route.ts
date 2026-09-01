@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRuntime } from "@/server/runtime";
+import { toBeijingIsoString } from "@aai/shared-schemas";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export async function GET() {
         source: "model-channels",
         default: 0,
       },
-      time: new Date().toISOString(),
+      time: toBeijingIsoString(),
     });
   } catch (error) {
     // 失败不回显内部错误信息（防信息泄漏），细节只进服务端日志

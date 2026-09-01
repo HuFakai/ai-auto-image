@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { formatBeijingDateTime } from "@/lib/time";
 
 interface AdminOrderItem {
   id: string;
@@ -137,8 +138,8 @@ export function OrdersView() {
                 <span className="text-ink">¥{yuan(order.amountCents)}</span>
                 {order.credits > 0 && ` / ${order.credits} 点`}
                 <div className="mt-0.5 truncate" title={order.orderNo}>
-                  {order.orderNo} · 下单 {new Date(order.createdAt).toLocaleString("zh-CN")}
-                  {order.paidAt ? ` · 支付 ${new Date(order.paidAt).toLocaleString("zh-CN")}` : ""}
+                  {order.orderNo} · 下单 {formatBeijingDateTime(order.createdAt)}
+                  {order.paidAt ? ` · 支付 ${formatBeijingDateTime(order.paidAt)}` : ""}
                   {order.channelTradeNo ? ` · 流水 ${order.channelTradeNo}` : ""}
                 </div>
                 {order.failReason && <div className="mt-0.5 text-seal">⚠ {order.failReason}</div>}

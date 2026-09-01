@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getRuntime } from "@/server/runtime";
 import { buildRunDetail } from "@/server/run-views";
 import { requireApiUser } from "@/server/auth";
+import { toBeijingIsoString } from "@aai/shared-schemas";
 
 export const dynamic = "force-dynamic";
 
@@ -54,14 +55,14 @@ export async function DELETE(_request: Request, ctx: { params: Promise<{ id: str
     runtime.assetStore.deleteRunAssets(id);
   } catch (error) {
     console.error(
-      JSON.stringify({ ts: new Date().toISOString(), level: "warn", msg: "delete run assets failed", runId: id, error: String(error) }),
+      JSON.stringify({ ts: toBeijingIsoString(), level: "warn", msg: "delete run assets failed", runId: id, error: String(error) }),
     );
   }
   try {
     fs.rmSync(path.join(runtime.config.exportsDir, id), { recursive: true, force: true });
   } catch (error) {
     console.error(
-      JSON.stringify({ ts: new Date().toISOString(), level: "warn", msg: "delete run exports failed", runId: id, error: String(error) }),
+      JSON.stringify({ ts: toBeijingIsoString(), level: "warn", msg: "delete run exports failed", runId: id, error: String(error) }),
     );
   }
 

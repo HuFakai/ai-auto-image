@@ -7,10 +7,11 @@ import type {
   RunRepo,
   WalletRepo,
 } from "@aai/storage";
+import { toBeijingIsoString } from "@aai/shared-schemas";
 
 /** 与 runtime.ts 一致的结构化日志输出 */
 function logError(msg: string, extra: Record<string, unknown>) {
-  console.log(JSON.stringify({ ts: new Date().toISOString(), level: "error", msg, ...extra }));
+  console.log(JSON.stringify({ ts: toBeijingIsoString(), level: "error", msg, ...extra }));
 }
 
 /**

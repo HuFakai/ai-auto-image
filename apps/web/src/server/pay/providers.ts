@@ -1,4 +1,5 @@
 import { createDecipheriv, createSign, createVerify, randomBytes } from "node:crypto";
+import { toBeijingIsoString } from "@aai/shared-schemas";
 
 /**
  * 支付渠道客户端（扫码支付，直接返回二维码串）：
@@ -312,7 +313,7 @@ export class WechatPayClient {
   }
 
   private static rfc3339Gmt8(expireAtMs: number): string {
-    return new Date(expireAtMs).toISOString().replace(/\.\d{3}Z$/, "+08:00");
+    return toBeijingIsoString(expireAtMs).replace(/\.\d{3}\+08:00$/, "+08:00");
   }
 
   /** Native 下单：返回 code_url（微信扫码二维码内容） */

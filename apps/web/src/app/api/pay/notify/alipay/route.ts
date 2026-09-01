@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRuntime } from "@/server/runtime";
+import { toBeijingIsoString } from "@aai/shared-schemas";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,7 @@ export async function POST(request: Request) {
     return new NextResponse("fail", { status: 400, headers: { "content-type": "text/plain" } });
   } catch (error) {
     console.log(
-      JSON.stringify({ ts: new Date().toISOString(), level: "error", msg: "alipay notify error", error: String(error) }),
+      JSON.stringify({ ts: toBeijingIsoString(), level: "error", msg: "alipay notify error", error: String(error) }),
     );
     return new NextResponse("fail", { status: 500, headers: { "content-type": "text/plain" } });
   }

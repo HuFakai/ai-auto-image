@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import type { BillingSummary } from "@/server/billing";
+import { formatBeijingDate, formatBeijingDateTime } from "@/lib/time";
 
 export interface PlanItem {
   id: string;
@@ -287,7 +288,7 @@ export function PricingView({
                 <>
                   <span className="stamp text-seal">{wallet.subscription.planName}</span>
                   <div className="mt-1.5 font-mono text-[11px] text-ink-faint">
-                    每期 {wallet.subscription.creditsPerPeriod} 点 · {new Date(wallet.subscription.expiresAt).toLocaleDateString("zh-CN")} 到期
+                    每期 {wallet.subscription.creditsPerPeriod} 点 · {formatBeijingDate(wallet.subscription.expiresAt)} 到期
                   </div>
                 </>
               ) : (
@@ -403,7 +404,7 @@ export function PricingView({
                   </div>
                   <div className="truncate font-mono text-[10px] text-ink-faint">
                     {REASON_LABEL[row.reason] ?? row.reason}
-                    {row.note ? ` · ${row.note}` : ""} · {new Date(row.createdAt).toLocaleString("zh-CN")}
+                    {row.note ? ` · ${row.note}` : ""} · {formatBeijingDateTime(row.createdAt)}
                   </div>
                 </div>
                 <div className="ml-3 shrink-0 text-right font-mono text-sm">
@@ -440,7 +441,7 @@ export function PricingView({
                 <div className="min-w-0">
                   <div className="text-[13px]">{order.title}</div>
                   <div className="font-mono text-[10px] text-ink-faint">
-                    订单号 {order.orderNo} · {CHANNEL_LABEL[order.channel] ?? order.channel} · {new Date(order.createdAt).toLocaleString("zh-CN")}
+                    订单号 {order.orderNo} · {CHANNEL_LABEL[order.channel] ?? order.channel} · {formatBeijingDateTime(order.createdAt)}
                   </div>
                 </div>
                 <div className="ml-3 shrink-0 text-right">

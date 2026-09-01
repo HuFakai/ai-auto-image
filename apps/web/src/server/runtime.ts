@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { TextModel, VisualQualityModel } from "@aai/ai-core";
 import type { CreateRunInput } from "@aai/shared-schemas";
+import { toBeijingIsoString } from "@aai/shared-schemas";
 import {
   AssetRepo,
   AssetStore,
@@ -183,7 +184,7 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
   const seededKits = await brandKitRepo.seedBuiltIns();
   if (seededKits > 0) {
     console.log(
-      JSON.stringify({ ts: new Date().toISOString(), level: "info", msg: `seeded ${seededKits} built-in brand kits` }),
+      JSON.stringify({ ts: toBeijingIsoString(), level: "info", msg: `seeded ${seededKits} built-in brand kits` }),
     );
   }
   // 渠道表为空且环境变量有配置时自动导入一次（之后以设置页管理为准）
@@ -191,7 +192,7 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
   if (imported > 0) {
     console.log(
       JSON.stringify({
-        ts: new Date().toISOString(),
+        ts: toBeijingIsoString(),
         level: "info",
         msg: `imported ${imported} channel(s) from env into settings`,
       }),
@@ -218,7 +219,7 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
   const seeded = await planRepo.ensureDefaults() + (await packageRepo.ensureDefaults());
   if (seeded > 0) {
     console.log(
-      JSON.stringify({ ts: new Date().toISOString(), level: "info", msg: `seeded ${seeded} default billing plan(s)/package(s)` }),
+      JSON.stringify({ ts: toBeijingIsoString(), level: "info", msg: `seeded ${seeded} default billing plan(s)/package(s)` }),
     );
   }
   const runRepo = new RunRepo(db.db);
@@ -233,7 +234,7 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     packageRepo,
     billing,
     logError: (msg, extra = {}) => {
-      console.log(JSON.stringify({ ts: new Date().toISOString(), level: "error", msg, ...extra }));
+      console.log(JSON.stringify({ ts: toBeijingIsoString(), level: "error", msg, ...extra }));
     },
   });
 
@@ -425,7 +426,7 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
       runtime.sessionRepo.deleteExpired().catch((error) => {
         console.log(
           JSON.stringify({
-            ts: new Date().toISOString(),
+            ts: toBeijingIsoString(),
             level: "error",
             msg: "session cleanup failed",
             error: String(error),
