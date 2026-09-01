@@ -28,13 +28,13 @@ export function statusStamp(status: string): { text: string; className: string }
     case "succeeded":
       return { text: "已完成", className: "stamp text-seal" };
     case "running":
-      return { text: "制中", className: "stamp text-seal animate-pulse" };
+      return { text: "生成中", className: "stamp text-seal animate-pulse" };
     case "queued":
       return { text: "待排", className: "stamp stamp-quiet text-ink-faint" };
     case "failed":
-      return { text: "作废", className: "stamp text-ink line-through decoration-1" };
+      return { text: "失败", className: "stamp text-ink line-through decoration-1" };
     case "cancelled":
-      return { text: "已废", className: "stamp stamp-quiet text-ink-faint" };
+      return { text: "已取消", className: "stamp stamp-quiet text-ink-faint" };
     default:
       return { text: status, className: "stamp stamp-quiet text-ink-faint" };
   }

@@ -518,7 +518,7 @@ function KitForm({
             </button>
           </div>
           <p className="border-t border-line pt-3 text-[11px] leading-relaxed text-ink-faint">
-            当前主题：{swatch.label}。Brand Kit 在「创作」表单的品牌手册下拉中选择后生效。
+            当前主题：{swatch.label}。品牌手册在「创作」表单的品牌手册下拉中选择后生效。
           </p>
         </div>
       </div>

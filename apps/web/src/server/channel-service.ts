@@ -291,7 +291,7 @@ export class ChannelService {
       if (!channel || !channel.enabled || !channel.userModelSelectionEnabled) {
         throw new ModelSelectionError(
           "model_selection_not_allowed",
-          "该模型所在渠道未开启用户自定义选模，已恢复为自动选择。",
+          "该模型所在渠道未开启用户自定义选模，请重新选择可用模型。",
         );
       }
       const model = channel.models.find((item) => item.id === modelId);

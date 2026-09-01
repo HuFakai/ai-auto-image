@@ -94,8 +94,9 @@ async function retryExistingRegenOutput(
 
   let reserved = false;
   try {
-    if (deps.reserveImageCredits) {
-      await deps.reserveImageCredits(runId, maxRouteCredits(deps.imageRoutes));
+    const credits = maxRouteCredits(deps.imageRoutes);
+    if (deps.reserveImageCredits && credits > 0) {
+      await deps.reserveImageCredits(runId, credits);
       reserved = true;
     }
     await deps.runRepo.succeedNode(node.id, {
@@ -179,8 +180,9 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
 
     let reserved = false;
     try {
-      if (runDeps.reserveImageCredits) {
-        await runDeps.reserveImageCredits(ctx.runId, maxRouteCredits(runDeps.imageRoutes));
+      const credits = maxRouteCredits(runDeps.imageRoutes);
+      if (runDeps.reserveImageCredits && credits > 0) {
+        await runDeps.reserveImageCredits(ctx.runId, credits);
         reserved = true;
       }
       let usedRoute: ImageRoute | null = null;

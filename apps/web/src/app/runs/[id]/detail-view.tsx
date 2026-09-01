@@ -75,13 +75,13 @@ function runStamp(status: string): { text: string; className: string } {
     case "succeeded":
       return { text: "已完成", className: "stamp text-[#5FA36B]" };
     case "running":
-      return { text: "制中", className: "stamp text-seal animate-pulse" };
+      return { text: "生成中", className: "stamp text-seal animate-pulse" };
     case "queued":
       return { text: "待排", className: "stamp stamp-quiet text-ink-faint" };
     case "failed":
-      return { text: "作废", className: "stamp text-seal" };
+      return { text: "失败", className: "stamp text-seal" };
     case "cancelled":
-      return { text: "已废", className: "stamp stamp-quiet text-ink-faint" };
+      return { text: "已取消", className: "stamp stamp-quiet text-ink-faint" };
     default:
       return { text: status, className: "stamp stamp-quiet text-ink-faint" };
   }
@@ -292,7 +292,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
           <h2 className="font-display text-lg font-bold">页面</h2>
           <div className="flex items-center gap-3">
             <span className="kicker">
-              {readyCount} 已成{failedCount > 0 ? ` · ${failedCount} 失败` : ""}
+              {readyCount} 已完成{failedCount > 0 ? ` · ${failedCount} 失败` : ""}
               {detail.pages.some((p) => (p.revision ?? 1) > 1) ? " · 含返修版本" : ""}
             </span>
           </div>
@@ -713,7 +713,7 @@ function PageFrame({
         {String(no).padStart(2, "0")}
       </span>
       <p className="truncate px-4 text-xs text-ink-soft">{page.headline}</p>
-      <span className="font-mono text-[10px] tracking-[0.3em] text-seal/70">制中…</span>
+      <span className="font-mono text-[10px] tracking-[0.3em] text-seal/70">生成中…</span>
     </div>
   );
 }

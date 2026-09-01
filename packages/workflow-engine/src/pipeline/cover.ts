@@ -400,9 +400,10 @@ export function registerCoverPipeline(runner: JobRunner, deps: CoverDeps): void 
     const runDeps = { ...deps, ...selected };
     let reserved = false;
     try {
-      if (runDeps.reserveImageCredits) {
+      const credits = 3 * maxRouteCredits(runDeps.imageRoutes);
+      if (runDeps.reserveImageCredits && credits > 0) {
         // CoverPlanSchema 固定恰好 3 个候选；失败候选会在 finally 中释放。
-        await runDeps.reserveImageCredits(ctx.runId, 3 * maxRouteCredits(runDeps.imageRoutes));
+        await runDeps.reserveImageCredits(ctx.runId, credits);
         reserved = true;
       }
       await generateCoverCandidates(runDeps, {
