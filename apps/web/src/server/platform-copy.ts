@@ -6,7 +6,7 @@ import {
   type PlatformCopy,
   type TextRoute,
 } from "@aai/workflow-engine";
-import { BillingService } from "./billing";
+import type { BillingService } from "./billing";
 
 /**
  * 生成发布文案时复用与主工作流相同的“预留 → 成功结算 → 失败释放”计费语义。

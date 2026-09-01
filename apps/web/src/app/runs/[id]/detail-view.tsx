@@ -407,7 +407,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
 
         {/* 平台适配包：按目标平台比例重新生成原生图片 */}
         {detail.status === "succeeded" && (
-          <PlatformAdaptCard runId={detail.runId} input={detail.input} />
+          <PlatformAdaptCard input={detail.input} />
         )}
 
         <DeleteRunButton runId={detail.runId} />
@@ -1243,10 +1243,8 @@ function PublishCopyCard({ runId }: { runId: string }) {
  * 以目标比例创建新 run 重新生成（消耗生成额度）。
  */
 function PlatformAdaptCard({
-  runId,
   input,
 }: {
-  runId: string;
   input: RunDetailPayload["input"];
 }) {
   const router = useRouter();
