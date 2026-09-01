@@ -3,6 +3,8 @@ import { openDatabase, type OpenDatabase } from "./database";
 import {
   AssetRepo,
   BrandKitRepo,
+  ChannelModelRepo,
+  ChannelRepo,
   InsufficientWalletCreditsError,
   JobRepo,
   LedgerRepo,
@@ -270,6 +272,77 @@ describe("JobRepo", () => {
     expect(found?.id).toBe(second.job.id);
     expect(first.job.id).not.toBe(second.job.id);
     expect(await jobs.findByRunId("no-such-run")).toBeNull();
+  });
+});
+
+describe("ChannelModelRepo", () => {
+  let db: OpenDatabase;
+  beforeAll(async () => {
+    db = await openSharedDb();
+  });
+  afterAll(async () => {
+    await db.close();
+  });
+
+  it("discovers models without overwriting administrator settings", async () => {
+    const channels = new ChannelRepo(db.db);
+    const models = new ChannelModelRepo(db.db);
+    const channel = await channels.create({
+      name: `模型目录-${Math.random()}`,
+      type: "image",
+      baseUrl: "https://api.example.com/v1",
+      apiKeyEncrypted: "encrypted",
+      apiKeyHint: "••••key",
+      imageModel: "gpt-image-2",
+      imageEditSupport: 1,
+      priority: 9,
+      userModelSelectionEnabled: 1,
+    });
+
+    await models.ensureLegacyDefault(channel.id, "image", "gpt-image-2", {
+      textToImage: true,
+      imageEditSingle: true,
+      imageEditMulti: true,
+    });
+    const discovered = await models.discover(channel.id, "image", [
+      { providerModelId: "gpt-image-2", displayName: "GPT Image 2" },
+      { providerModelId: "grok-imagine-image-2.0", displayName: "Grok Imagine" },
+      { providerModelId: "grok-imagine-image-2.0", displayName: "Grok Imagine duplicate" },
+    ]);
+    expect(discovered).toHaveLength(2);
+    expect(discovered.find((row) => row.providerModelId === "gpt-image-2")?.isDefault).toBe(1);
+
+    const saved = await models.saveSettings(channel.id, "image", [
+      {
+        providerModelId: "gpt-image-2",
+        enabled: 1,
+        isDefault: 0,
+        priority: 2,
+        creditsPerCall: 6,
+        capabilities: { textToImage: true, imageEditSingle: true, imageEditMulti: true },
+      },
+      {
+        providerModelId: "grok-imagine-image-2.0",
+        enabled: 1,
+        isDefault: 1,
+        priority: 10,
+        creditsPerCall: 3,
+        capabilities: { textToImage: true, imageEditSingle: false },
+      },
+    ]);
+    expect(saved[0]?.providerModelId).toBe("grok-imagine-image-2.0");
+    expect(saved[0]?.isDefault).toBe(1);
+    expect(saved[0]?.creditsPerCall).toBe(3);
+
+    const refreshed = await models.discover(channel.id, "image", [
+      { providerModelId: "grok-imagine-image-2.0", displayName: "Grok Imagine (updated)" },
+    ]);
+    const grok = refreshed.find((row) => row.providerModelId === "grok-imagine-image-2.0");
+    expect(grok?.displayName).toBe("Grok Imagine (updated)");
+    expect(grok?.creditsPerCall).toBe(3);
+    expect(grok?.priority).toBe(10);
+    expect(grok?.isDefault).toBe(1);
+    expect(JSON.parse(grok!.capabilitiesJson)).toEqual({ textToImage: true, imageEditSingle: false });
   });
 });
 

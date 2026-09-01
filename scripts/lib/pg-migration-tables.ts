@@ -15,6 +15,7 @@ export const PG_MIGRATION_TABLES = [
   "provider_attempts",
   "provider_usages",
   "channels",
+  "channel_models",
   "brand_kits",
   "revisions",
   "sessions",

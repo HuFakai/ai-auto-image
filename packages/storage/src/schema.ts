@@ -240,6 +240,12 @@ export const channels = pgTable(
     resolution: text("resolution"),
     enabled: integer("enabled").notNull().default(1),
     sortOrder: bigint("sort_order", { mode: "number" }).notNull().default(0),
+    /** 渠道路由优先级；数值越大越优先，等值时按 sort_order */
+    priority: integer("priority").notNull().default(0),
+    /** 是否允许普通用户在创作条自行选择该渠道的模型 */
+    userModelSelectionEnabled: integer("user_model_selection_enabled").notNull().default(0),
+    /** 最近一次从供应商 /models 获取目录的时间 */
+    modelsFetchedAt: epochColumn("models_fetched_at"),
     maxAttempts: integer("max_attempts").notNull().default(3),
     /** 历史物理列名保留兼容；业务语义为文本/图片通用渠道并发，0 表示不限制 */
     concurrencyMax: integer("image_concurrency_max").notNull().default(0),
@@ -250,7 +256,38 @@ export const channels = pgTable(
     createdAt: createdAt(),
     updatedAt: epochColumn("updated_at").notNull(),
   },
-  (t) => [index("idx_channels_type_order").on(t.type, t.sortOrder)],
+  (t) => [index("idx_channels_type_priority_order").on(t.type, t.priority, t.sortOrder)],
+);
+
+/** 渠道模型目录：保存供应商发现的模型及后台选择、优先级、能力和单次价格 */
+export const channelModels = pgTable(
+  "channel_models",
+  {
+    id: text("id").primaryKey(),
+    channelId: text("channel_id")
+      .notNull()
+      .references(() => channels.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    providerModelId: text("provider_model_id").notNull(),
+    displayName: text("display_name").notNull(),
+    /** 0=未选用，1=已选用；新发现模型默认不启用，避免获取目录后直接改变生产路由 */
+    enabled: integer("enabled").notNull().default(0),
+    isDefault: integer("is_default").notNull().default(0),
+    /** 模型在渠道内的优先级；数值越大越优先 */
+    priority: integer("priority").notNull().default(0),
+    /** 每次调用消耗点数；文本和图片均按次计费，0 可表示管理员配置的免费模型 */
+    creditsPerCall: integer("credits_per_call").notNull().default(1),
+    /** { textToImage?, imageEditSingle?, imageEditMulti?, maskEdit? } */
+    capabilitiesJson: text("capabilities_json").notNull().default("{}"),
+    discoveredAt: epochColumn("discovered_at").notNull(),
+    lastSeenAt: epochColumn("last_seen_at").notNull(),
+    createdAt: createdAt(),
+    updatedAt: epochColumn("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_channel_models_provider").on(t.channelId, t.providerModelId),
+    index("idx_channel_models_channel_type_priority").on(t.channelId, t.type, t.priority),
+  ],
 );
 
 /** 作业事件流水，供进度展示与审计 */
@@ -507,6 +544,7 @@ export const paymentConfigs = pgTable("payment_configs", {
 });
 
 export type Channel = typeof channels.$inferSelect;
+export type ChannelModel = typeof channelModels.$inferSelect;
 export type BrandKit = typeof brandKits.$inferSelect;
 export type Revision = typeof revisions.$inferSelect;
 export type User = typeof users.$inferSelect;

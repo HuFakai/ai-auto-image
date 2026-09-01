@@ -5,6 +5,7 @@ import {
   AssetRepo,
   AssetStore,
   BrandKitRepo,
+  ChannelModelRepo,
   ChannelRepo,
   CreditPackageRepo,
   JobRepo,
@@ -99,6 +100,7 @@ export interface Runtime {
   assetRepo: AssetRepo;
   providerRepo: ProviderRepo;
   channelRepo: ChannelRepo;
+  channelModelRepo: ChannelModelRepo;
   channelService: ChannelService;
   brandKitRepo: BrandKitRepo;
   revisionRepo: RevisionRepo;
@@ -170,7 +172,9 @@ interface RuntimePaths {
 
 async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runtime> {
   const { dataDir, sqlitePath, assetsDir, exportsDir } = paths;
-  const channelService = new ChannelService(new ChannelRepo(db.db), dataDir);
+  const channelRepo = new ChannelRepo(db.db);
+  const channelModelRepo = new ChannelModelRepo(db.db);
+  const channelService = new ChannelService(channelRepo, dataDir, channelModelRepo);
   const brandKitRepo = new BrandKitRepo(db.db);
   const seededKits = await brandKitRepo.seedBuiltIns();
   if (seededKits > 0) {
@@ -238,7 +242,8 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     promptRepo: new PromptRepo(db.db),
     assetRepo: new AssetRepo(db.db),
     providerRepo: new ProviderRepo(db.db),
-    channelRepo: new ChannelRepo(db.db),
+    channelRepo,
+    channelModelRepo,
     channelService,
     brandKitRepo,
     revisionRepo: new RevisionRepo(db.db),

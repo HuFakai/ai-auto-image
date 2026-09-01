@@ -112,11 +112,16 @@ export function ChannelsView({ initial }: { initial: ChannelsPayload }) {
                     >
                       <span className="text-ink-soft">{channel.model ?? "—"}</span>
                       {" · "}
+                      优先级 {channel.priority}
+                      {" · "}
+                      模型 {channel.models.length} 个
+                      {" · "}
                       {channel.baseUrl.replace(/^https?:\/\//, "")}
                       {" · "}
                       {channel.apiKeyHint}
                       {" · "}
                       并发 {channel.concurrencyMax === 0 ? "不限制" : channel.concurrencyMax}
+                      {channel.userModelSelectionEnabled ? " · 用户可选模型" : ""}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
                       <button

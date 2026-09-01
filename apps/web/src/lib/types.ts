@@ -33,6 +33,29 @@ export interface BrandKitView {
   coverLayout: string;
 }
 
+/** 渠道模型能力（由供应商目录发现，也可由管理员修正） */
+export interface ChannelModelCapabilitiesView {
+  textToImage: boolean;
+  imageEditSingle: boolean;
+  imageEditMulti: boolean;
+  maskEdit: boolean;
+}
+
+/** 渠道模型目录项（客户端安全） */
+export interface ChannelModelView {
+  id: string;
+  type: "text" | "image";
+  providerModelId: string;
+  displayName: string;
+  enabled: boolean;
+  isDefault: boolean;
+  priority: number;
+  creditsPerCall: number;
+  capabilities: ChannelModelCapabilitiesView;
+  discoveredAt: number;
+  lastSeenAt: number;
+}
+
 /** 渠道视图（密钥已脱敏，客户端安全） */
 export interface ChannelView {
   id: string;
@@ -49,6 +72,12 @@ export interface ChannelView {
   /** 模型调用并发上限；0 表示不限制 */
   concurrencyMax: number;
   imageEditSupport: boolean;
+  /** 渠道路由优先级；数值越大越优先 */
+  priority: number;
+  /** 是否允许用户在创作条自行选择该渠道模型 */
+  userModelSelectionEnabled: boolean;
+  modelsFetchedAt: number | null;
+  models: ChannelModelView[];
   lastTestOk: boolean | null;
   lastTestAt: number | null;
   lastTestDetail: string | null;

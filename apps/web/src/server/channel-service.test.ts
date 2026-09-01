@@ -18,6 +18,22 @@ describe("channel concurrency config", () => {
     expect(ChannelInputSchema.parse({ ...base, concurrencyMax: 32 }).concurrencyMax).toBe(32);
   });
 
+  it("defaults channel priority and user model selection to safe values", () => {
+    const parsed = ChannelInputSchema.parse(base);
+    expect(parsed.priority).toBe(0);
+    expect(parsed.userModelSelectionEnabled).toBe(false);
+  });
+
+  it("accepts explicit priority and user model selection", () => {
+    const parsed = ChannelInputSchema.parse({
+      ...base,
+      priority: 80,
+      userModelSelectionEnabled: true,
+    });
+    expect(parsed.priority).toBe(80);
+    expect(parsed.userModelSelectionEnabled).toBe(true);
+  });
+
   it("does not reset concurrency when patching another field", () => {
     expect(ChannelPatchSchema.parse({ enabled: false })).toEqual({ enabled: false });
   });

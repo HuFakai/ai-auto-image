@@ -12,6 +12,7 @@ import {
   newAttemptId,
   newBrandKitId,
   newChannelId,
+  newChannelModelId,
   newJobEventId,
   newJobId,
   newNodeRunId,
@@ -34,6 +35,7 @@ import {
   assets,
   brandKits,
   channels,
+  channelModels,
   creditLedger,
   creditPackages,
   jobEvents,
@@ -949,6 +951,8 @@ export interface CreateChannelRow {
   maxAttempts?: number;
   concurrencyMax?: number;
   imageEditSupport?: number;
+  priority?: number;
+  userModelSelectionEnabled?: number;
 }
 
 export interface UpdateChannelRow {
@@ -965,6 +969,9 @@ export interface UpdateChannelRow {
   maxAttempts?: number;
   concurrencyMax?: number;
   imageEditSupport?: number;
+  priority?: number;
+  userModelSelectionEnabled?: number;
+  modelsFetchedAt?: number | null;
   lastTestOk?: number | null;
   lastTestAt?: number | null;
   lastTestDetail?: string | null;
@@ -995,6 +1002,9 @@ export class ChannelRepo {
         resolution: input.resolution ?? null,
         enabled: 1,
         sortOrder: ts,
+        priority: input.priority ?? 0,
+        userModelSelectionEnabled: input.userModelSelectionEnabled ?? 0,
+        modelsFetchedAt: null,
         maxAttempts: input.maxAttempts ?? 3,
         concurrencyMax: input.concurrencyMax ?? 0,
         imageEditSupport: input.imageEditSupport ?? 0,
@@ -1011,7 +1021,10 @@ export class ChannelRepo {
   }
 
   async list() {
-    return this.client.select().from(channels).orderBy(sql`${channels.sortOrder} ASC`);
+    return this.client
+      .select()
+      .from(channels)
+      .orderBy(sql`${channels.priority} DESC, ${channels.sortOrder} ASC`);
   }
 
   async count(): Promise<number> {
@@ -1044,6 +1057,184 @@ export class ChannelRepo {
         .where(eq(channels.id, id));
       index += 1;
     }
+  }
+}
+
+export interface ChannelModelCapabilities {
+  textToImage?: boolean;
+  imageEditSingle?: boolean;
+  imageEditMulti?: boolean;
+  maskEdit?: boolean;
+}
+
+export interface ChannelModelDiscoveryInput {
+  providerModelId: string;
+  displayName?: string;
+  capabilities?: ChannelModelCapabilities;
+}
+
+export interface ChannelModelSettingsInput {
+  providerModelId: string;
+  enabled: number;
+  isDefault: number;
+  priority: number;
+  creditsPerCall: number;
+  capabilities: ChannelModelCapabilities;
+}
+
+function normalizeChannelModelCapabilities(value: ChannelModelCapabilities | undefined): ChannelModelCapabilities {
+  if (!value) return {};
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => typeof item === "boolean"),
+  ) as ChannelModelCapabilities;
+}
+
+/** 渠道模型目录仓储：发现与后台设置分离，重新获取模型不会覆盖管理员配置。 */
+export class ChannelModelRepo {
+  private readonly client: DbClient;
+  constructor(db: Db) {
+    this.client = db as DbClient;
+  }
+
+  async listByChannel(channelId: string) {
+    return this.client
+      .select()
+      .from(channelModels)
+      .where(eq(channelModels.channelId, channelId))
+      .orderBy(
+        sql`${channelModels.priority} DESC, ${channelModels.createdAt} ASC, ${channelModels.id} ASC`,
+      );
+  }
+
+  async listByChannels(channelIds: string[]) {
+    if (channelIds.length === 0) return [];
+    return this.client
+      .select()
+      .from(channelModels)
+      .where(inArray(channelModels.channelId, channelIds))
+      .orderBy(
+        sql`${channelModels.priority} DESC, ${channelModels.createdAt} ASC, ${channelModels.id} ASC`,
+      );
+  }
+
+  /** 将供应商模型写入目录。已存在模型只刷新名称和最近发现时间，不覆盖后台选择/价格/能力。 */
+  async discover(channelId: string, type: string, inputs: ChannelModelDiscoveryInput[]) {
+    const ts = now();
+    for (const input of inputs) {
+      await this.client
+        .insert(channelModels)
+        .values({
+          id: newChannelModelId(),
+          channelId,
+          type,
+          providerModelId: input.providerModelId,
+          displayName: input.displayName?.trim() || input.providerModelId,
+          enabled: 0,
+          isDefault: 0,
+          priority: 0,
+          creditsPerCall: 1,
+          capabilitiesJson: JSON.stringify(normalizeChannelModelCapabilities(input.capabilities)),
+          discoveredAt: ts,
+          lastSeenAt: ts,
+          createdAt: ts,
+          updatedAt: ts,
+        })
+        .onConflictDoUpdate({
+          target: [channelModels.channelId, channelModels.providerModelId],
+          set: {
+            displayName: input.displayName?.trim() || input.providerModelId,
+            lastSeenAt: ts,
+            updatedAt: ts,
+          },
+        });
+    }
+    return this.listByChannel(channelId);
+  }
+
+  /** 新建/兼容旧字段时确保至少有一个可运行的默认模型。 */
+  async ensureLegacyDefault(
+    channelId: string,
+    type: string,
+    providerModelId: string | null | undefined,
+    capabilities?: ChannelModelCapabilities,
+  ) {
+    if (!providerModelId?.trim()) return this.listByChannel(channelId);
+    const modelId = providerModelId.trim();
+    const ts = now();
+    await this.client
+      .update(channelModels)
+      .set({ isDefault: 0, updatedAt: ts })
+      .where(and(eq(channelModels.channelId, channelId), eq(channelModels.type, type)));
+    await this.client
+      .insert(channelModels)
+      .values({
+        id: newChannelModelId(),
+        channelId,
+        type,
+        providerModelId: modelId,
+        displayName: modelId,
+        enabled: 1,
+        isDefault: 1,
+        priority: 0,
+        creditsPerCall: 1,
+        capabilitiesJson: JSON.stringify(normalizeChannelModelCapabilities(capabilities)),
+        discoveredAt: ts,
+        lastSeenAt: ts,
+        createdAt: ts,
+        updatedAt: ts,
+      })
+      .onConflictDoUpdate({
+        target: [channelModels.channelId, channelModels.providerModelId],
+        set: {
+          type,
+          enabled: 1,
+          isDefault: 1,
+          lastSeenAt: ts,
+          updatedAt: ts,
+        },
+      });
+    return this.listByChannel(channelId);
+  }
+
+  /** 保存目录开关、默认模型、优先级、单次价格及能力；默认模型最多一个。 */
+  async saveSettings(channelId: string, type: string, inputs: ChannelModelSettingsInput[]) {
+    const existing = await this.listByChannel(channelId);
+    const byProviderId = new Map(existing.filter((row) => row.type === type).map((row) => [row.providerModelId, row]));
+    for (const input of inputs) {
+      if (!byProviderId.has(input.providerModelId)) {
+        throw new Error(`channel model not found: ${input.providerModelId}`);
+      }
+    }
+    const enabled = inputs.filter((input) => input.enabled === 1);
+    const requestedDefault = enabled.find((input) => input.isDefault === 1)?.providerModelId;
+    const defaultProviderId = requestedDefault ?? enabled[0]?.providerModelId ?? null;
+    const ts = now();
+    await this.client.transaction(async (tx) => {
+      await tx
+        .update(channelModels)
+        .set({ isDefault: 0, updatedAt: ts })
+        .where(and(eq(channelModels.channelId, channelId), eq(channelModels.type, type)));
+      for (const input of inputs) {
+        await tx
+          .update(channelModels)
+          .set({
+            enabled: input.enabled === 1 ? 1 : 0,
+            isDefault: input.providerModelId === defaultProviderId ? 1 : 0,
+            priority: input.priority,
+            creditsPerCall: input.creditsPerCall,
+            capabilitiesJson: JSON.stringify(normalizeChannelModelCapabilities(input.capabilities)),
+            updatedAt: ts,
+          })
+          .where(
+            and(
+              eq(channelModels.channelId, channelId),
+              eq(channelModels.type, type),
+              eq(channelModels.providerModelId, input.providerModelId),
+            ),
+          );
+      }
+    });
+    return this.listByChannel(channelId);
   }
 }
 

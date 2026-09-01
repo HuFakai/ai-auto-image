@@ -9,7 +9,13 @@ import {
   type VisualQualityModel,
 } from "@aai/ai-core";
 import type { ProviderRouteConfig } from "@aai/shared-schemas";
-import type { Channel, ChannelRepo } from "@aai/storage";
+import type {
+  Channel,
+  ChannelModel,
+  ChannelModelCapabilities,
+  ChannelModelRepo,
+  ChannelRepo,
+} from "@aai/storage";
 import {
   compatibleRoute,
   createOpenAICompatProvider,
@@ -19,7 +25,7 @@ import {
 import { createMockProvider } from "@aai/provider-mock";
 import { apiKeyHint, decryptApiKey, encryptApiKey, getEncryptionKey } from "./channel-crypto";
 import type { TextRoute, ImageRoute } from "@aai/workflow-engine";
-import type { ChannelView } from "@/lib/types";
+import type { ChannelModelCapabilitiesView, ChannelModelView, ChannelView } from "@/lib/types";
 
 export type { ChannelView };
 
@@ -40,6 +46,10 @@ export const ChannelInputSchema = z.object({
   concurrencyMax: z.number().int().min(0).default(0),
   /** 该渠道支持图片编辑（图生图）：gpt-image 等 */
   imageEditSupport: z.boolean().default(false),
+  /** 渠道路由优先级；数值越大越优先 */
+  priority: z.number().int().min(-100_000).max(100_000).default(0),
+  /** 是否允许用户在创作条自行选择该渠道的模型 */
+  userModelSelectionEnabled: z.boolean().default(false),
 });
 export type ChannelInput = z.infer<typeof ChannelInputSchema>;
 
@@ -50,19 +60,122 @@ export const ChannelPatchSchema = ChannelInputSchema.partial().extend({
   maxAttempts: z.number().int().min(1).max(5).optional(),
   concurrencyMax: z.number().int().min(0).optional(),
   imageEditSupport: z.boolean().optional(),
+  priority: z.number().int().min(-100_000).max(100_000).optional(),
+  userModelSelectionEnabled: z.boolean().optional(),
   enabled: z.boolean().optional(),
 });
 export type ChannelPatch = z.infer<typeof ChannelPatchSchema>;
 
+export const ChannelModelSettingsSchema = z.object({
+  providerModelId: z.string().trim().min(1).max(200),
+  enabled: z.boolean(),
+  isDefault: z.boolean(),
+  priority: z.number().int().min(-100_000).max(100_000),
+  creditsPerCall: z.number().int().min(0).max(100_000),
+  capabilities: z.object({
+    textToImage: z.boolean().optional(),
+    imageEditSingle: z.boolean().optional(),
+    imageEditMulti: z.boolean().optional(),
+    maskEdit: z.boolean().optional(),
+  }).default({}),
+});
+export type ChannelModelSettings = z.infer<typeof ChannelModelSettingsSchema>;
+
+const MODEL_CATALOG_MAX_BYTES = 2_000_000;
+
+interface DiscoveredModel {
+  providerModelId: string;
+  displayName: string;
+  capabilities: ChannelModelCapabilities;
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? value as Record<string, unknown> : {};
+}
+
+function booleanField(record: Record<string, unknown>, names: string[]): boolean | undefined {
+  for (const name of names) {
+    if (typeof record[name] === "boolean") return record[name];
+  }
+  return undefined;
+}
+
+function discoveredModel(entry: unknown, type: "text" | "image"): DiscoveredModel | null {
+  const record = recordValue(entry);
+  const providerModelId = typeof entry === "string"
+    ? entry.trim()
+    : [record.id, record.name, record.model].find((value): value is string => typeof value === "string")?.trim() ?? "";
+  if (!providerModelId || providerModelId.length > 200) return null;
+  const displayName = typeof record.display_name === "string"
+    ? record.display_name.trim().slice(0, 200)
+    : typeof record.displayName === "string"
+      ? record.displayName.trim().slice(0, 200)
+      : providerModelId;
+  const nested = recordValue(record.capabilities);
+  const imageEditHint = /gpt-image|image-edit|image_edit|kontext|qwen-image-edit|seedream.*edit|nano-banana.*edit/i.test(providerModelId);
+  const explicitTextToImage = booleanField(record, ["textToImage", "text_to_image", "supports_text_to_image"])
+    ?? booleanField(nested, ["textToImage", "text_to_image", "supports_text_to_image"]);
+  const explicitSingle = booleanField(record, ["imageEditSingle", "image_edit_single", "supports_image_edit"])
+    ?? booleanField(nested, ["imageEditSingle", "image_edit_single", "supports_image_edit"]);
+  const explicitMulti = booleanField(record, ["imageEditMulti", "image_edit_multi", "supports_multi_image"])
+    ?? booleanField(nested, ["imageEditMulti", "image_edit_multi", "supports_multi_image"]);
+  const explicitMask = booleanField(record, ["maskEdit", "mask_edit", "supports_mask"])
+    ?? booleanField(nested, ["maskEdit", "mask_edit", "supports_mask"]);
+  return {
+    providerModelId,
+    displayName: displayName || providerModelId,
+    capabilities: {
+      textToImage: type === "image" && (explicitTextToImage ?? true),
+      imageEditSingle: type === "image" && (explicitSingle ?? imageEditHint),
+      imageEditMulti: type === "image" && (explicitMulti ?? imageEditHint),
+      maskEdit: type === "image" && (explicitMask ?? false),
+    },
+  };
+}
+
+function capabilitiesView(value: string): ChannelModelCapabilitiesView {
+  let parsed: ChannelModelCapabilities = {};
+  try {
+    const candidate: unknown = JSON.parse(value);
+    if (candidate && typeof candidate === "object") parsed = candidate as ChannelModelCapabilities;
+  } catch {
+    // 历史/第三方目录数据损坏时按无特殊能力处理，不能阻塞后台打开渠道页。
+  }
+  return {
+    textToImage: parsed.textToImage === true,
+    imageEditSingle: parsed.imageEditSingle === true,
+    imageEditMulti: parsed.imageEditMulti === true,
+    maskEdit: parsed.maskEdit === true,
+  };
+}
+
 /* ── 视图（密钥脱敏，ChannelView 定义见 lib/types）────────────── */
 
-function toView(row: Channel): ChannelView {
+function toModelView(row: ChannelModel): ChannelModelView {
+  return {
+    id: row.id,
+    type: row.type as "text" | "image",
+    providerModelId: row.providerModelId,
+    displayName: row.displayName,
+    enabled: row.enabled === 1,
+    isDefault: row.isDefault === 1,
+    priority: row.priority,
+    creditsPerCall: row.creditsPerCall,
+    capabilities: capabilitiesView(row.capabilitiesJson),
+    discoveredAt: row.discoveredAt,
+    lastSeenAt: row.lastSeenAt,
+  };
+}
+
+function toView(row: Channel, modelRows: ChannelModel[] = []): ChannelView {
+  const models = modelRows.map(toModelView);
+  const selected = models.find((model) => model.enabled && model.isDefault);
   return {
     id: row.id,
     name: row.name,
     type: row.type as "text" | "image",
     baseUrl: row.baseUrl,
-    model: row.type === "text" ? row.textModel : row.imageModel,
+    model: selected?.providerModelId ?? (row.type === "text" ? row.textModel : row.imageModel),
     apiKeyHint: row.apiKeyHint,
     aspectRatioParam: row.aspectRatioParam,
     responseFormat: row.responseFormat,
@@ -71,6 +184,10 @@ function toView(row: Channel): ChannelView {
     maxAttempts: row.maxAttempts,
     concurrencyMax: row.concurrencyMax ?? 0,
     imageEditSupport: row.imageEditSupport === 1,
+    priority: row.priority ?? 0,
+    userModelSelectionEnabled: row.userModelSelectionEnabled === 1,
+    modelsFetchedAt: row.modelsFetchedAt,
+    models,
     lastTestOk: row.lastTestOk === null ? null : row.lastTestOk === 1,
     lastTestAt: row.lastTestAt,
     lastTestDetail: row.lastTestDetail,
@@ -89,16 +206,26 @@ export class ChannelService {
   constructor(
     private readonly repo: ChannelRepo,
     dataDir: string,
+    private readonly modelRepo: ChannelModelRepo,
   ) {
     this.encryptionKey = getEncryptionKey(dataDir);
   }
 
   async list(): Promise<ChannelView[]> {
-    return (await this.repo.list()).map(toView);
+    const rows = await this.repo.list();
+    const modelRows = await this.modelRepo.listByChannels(rows.map((row) => row.id));
+    const grouped = new Map<string, ChannelModel[]>();
+    for (const model of modelRows) {
+      const list = grouped.get(model.channelId) ?? [];
+      list.push(model);
+      grouped.set(model.channelId, list);
+    }
+    return rows.map((row) => toView(row, grouped.get(row.id) ?? []));
   }
 
   async get(id: string): Promise<ChannelView> {
-    return toView(await this.repo.require(id));
+    const row = await this.repo.require(id);
+    return toView(row, await this.modelRepo.listByChannel(id));
   }
 
   async create(input: ChannelInput): Promise<ChannelView> {
@@ -116,8 +243,16 @@ export class ChannelService {
       maxAttempts: input.maxAttempts,
       concurrencyMax: input.concurrencyMax,
       imageEditSupport: input.type === "image" && input.imageEditSupport ? 1 : 0,
+      priority: input.priority,
+      userModelSelectionEnabled: input.userModelSelectionEnabled ? 1 : 0,
     });
-    return toView(row);
+    await this.modelRepo.ensureLegacyDefault(
+      row.id,
+      row.type,
+      row.type === "text" ? row.textModel : row.imageModel,
+      row.type === "image" ? { textToImage: true, imageEditSingle: row.imageEditSupport === 1, imageEditMulti: row.imageEditSupport === 1 } : undefined,
+    );
+    return this.get(row.id);
   }
 
   async update(id: string, patch: ChannelPatch): Promise<ChannelView> {
@@ -137,7 +272,20 @@ export class ChannelService {
     if (patch.maxAttempts !== undefined) row.maxAttempts = patch.maxAttempts;
     if (patch.concurrencyMax !== undefined) row.concurrencyMax = patch.concurrencyMax;
     if (patch.imageEditSupport !== undefined) row.imageEditSupport = patch.imageEditSupport ? 1 : 0;
-    return toView(await this.repo.update(id, row));
+    if (patch.priority !== undefined) row.priority = patch.priority;
+    if (patch.userModelSelectionEnabled !== undefined) {
+      row.userModelSelectionEnabled = patch.userModelSelectionEnabled ? 1 : 0;
+    }
+    const updated = await this.repo.update(id, row);
+    if (patch.textModel !== undefined || patch.imageModel !== undefined) {
+      await this.modelRepo.ensureLegacyDefault(
+        id,
+        updated.type,
+        updated.type === "text" ? updated.textModel : updated.imageModel,
+        updated.type === "image" ? { textToImage: true, imageEditSingle: updated.imageEditSupport === 1, imageEditMulti: updated.imageEditSupport === 1 } : undefined,
+      );
+    }
+    return this.get(id);
   }
 
   async delete(id: string): Promise<void> {
@@ -149,35 +297,104 @@ export class ChannelService {
     await this.repo.reorder(orderedIds);
   }
 
+  /** 读取渠道模型目录并写入数据库；新模型默认未启用，管理员确认后才进入路由。 */
+  async discoverModels(id: string): Promise<{ channel: ChannelView; discovered: number }> {
+    const row = await this.repo.require(id);
+    const models = await this.fetchModelCatalog(row);
+    await this.modelRepo.discover(
+      id,
+      row.type,
+      models.map((model) => ({
+        providerModelId: model.providerModelId,
+        displayName: model.displayName,
+        capabilities: model.capabilities,
+      })),
+    );
+    await this.repo.update(id, { modelsFetchedAt: Date.now() });
+    return { channel: await this.get(id), discovered: models.length };
+  }
+
+  /** 保存后台选择的目录项，并同步当前兼容字段供现有路由即时生效。 */
+  async saveModels(id: string, inputs: ChannelModelSettings[]): Promise<ChannelView> {
+    const row = await this.repo.require(id);
+    const models = await this.modelRepo.saveSettings(
+      id,
+      row.type,
+      inputs.map((input) => ({
+        providerModelId: input.providerModelId,
+        enabled: input.enabled ? 1 : 0,
+        isDefault: input.isDefault ? 1 : 0,
+        priority: input.priority,
+        creditsPerCall: input.creditsPerCall,
+        capabilities: input.capabilities,
+      })),
+    );
+    const selected = models.find((model) => model.enabled === 1 && model.isDefault === 1);
+    if (selected) {
+      const capabilities = capabilitiesView(selected.capabilitiesJson);
+      await this.repo.update(id, row.type === "text"
+        ? { textModel: selected.providerModelId }
+        : {
+            imageModel: selected.providerModelId,
+            imageEditSupport: capabilities.imageEditSingle ? 1 : 0,
+          });
+    }
+    return this.get(id);
+  }
+
   /** 连通性测试：只读 GET /models（无模型调用费用） */
   async test(id: string): Promise<{ ok: boolean; detail: string; modelCount: number }> {
     const row = await this.repo.require(id);
-    const apiKey = decryptApiKey(this.encryptionKey, row.apiKeyEncrypted);
     let ok = false;
     let detail = "";
     let modelCount = 0;
     try {
-      const response = await fetch(`${row.baseUrl.replace(/\/+$/, "")}/models`, {
-        headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "ai-auto-image/0.1" },
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (response.ok) {
-        const body = (await response.json().catch(() => ({}))) as { data?: unknown[] };
-        modelCount = Array.isArray(body.data) ? body.data.length : 0;
-        ok = true;
-        detail = `连接成功${modelCount > 0 ? `，可用模型 ${modelCount} 个` : ""}`;
-      } else {
-        detail = `HTTP ${response.status}`;
-      }
+      const models = await this.fetchModelCatalog(row);
+      modelCount = models.length;
+      ok = true;
+      detail = `连接成功${modelCount > 0 ? `，可用模型 ${modelCount} 个` : ""}`;
     } catch (error) {
       detail = error instanceof Error ? error.message.slice(0, 200) : String(error);
     }
-    this.repo.update(id, {
+    await this.repo.update(id, {
       lastTestOk: ok ? 1 : 0,
       lastTestAt: Date.now(),
       lastTestDetail: detail.slice(0, 300),
     });
     return { ok, detail, modelCount };
+  }
+
+  private async fetchModelCatalog(row: Channel): Promise<DiscoveredModel[]> {
+    const apiKey = decryptApiKey(this.encryptionKey, row.apiKeyEncrypted);
+    const response = await fetch(`${row.baseUrl.replace(/\/+$/, "")}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "ai-auto-image/0.1" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const bodyText = await response.text();
+    if (new TextEncoder().encode(bodyText).byteLength > MODEL_CATALOG_MAX_BYTES) {
+      throw new Error("模型目录响应过大");
+    }
+    let body: unknown;
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      throw new Error("模型目录不是有效 JSON");
+    }
+    const entries = Array.isArray(body)
+      ? body
+      : body && typeof body === "object" && Array.isArray((body as { data?: unknown }).data)
+        ? (body as { data: unknown[] }).data
+        : [];
+    const seen = new Set<string>();
+    const models: DiscoveredModel[] = [];
+    for (const entry of entries) {
+      const model = discoveredModel(entry, row.type as "text" | "image");
+      if (!model || seen.has(model.providerModelId)) continue;
+      seen.add(model.providerModelId);
+      models.push(model);
+    }
+    return models;
   }
 
   /* ── 路由装配：启用渠道 → Wire Provider；缺省侧由调用方兜底 Mock ── */
@@ -189,7 +406,9 @@ export class ChannelService {
     mode: "mock" | "partial" | "real";
     label: string;
   }> {
-    const rows = (await this.repo.list()).filter((row) => row.enabled === 1);
+    const rows = (await this.repo.list())
+      .filter((row) => row.enabled === 1)
+      .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0) || left.sortOrder - right.sortOrder);
     const textRoutes: TextRoute[] = [];
     const imageRoutes: ImageRoute[] = [];
     let visualQuality: VisualQualityModel | null = null;
@@ -306,6 +525,8 @@ export async function autoImportFromEnv(service: ChannelService): Promise<number
       maxAttempts: 3,
       concurrencyMax: 0,
       imageEditSupport: false,
+      priority: 0,
+      userModelSelectionEnabled: false,
     });
     imported += 1;
   }
@@ -322,6 +543,8 @@ export async function autoImportFromEnv(service: ChannelService): Promise<number
       maxAttempts: 3,
       concurrencyMax: 0,
       imageEditSupport: false,
+      priority: 0,
+      userModelSelectionEnabled: false,
     });
     imported += 1;
   }

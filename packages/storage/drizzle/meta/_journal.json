@@ -64,6 +64,13 @@
       "when": 1788242398639,
       "tag": "0008_brainy_scorpion",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788244150371,
+      "tag": "0009_channel_model_catalog",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ChannelView } from "@/lib/types";
+import type { ChannelModelView, ChannelView } from "@/lib/types";
 
 export const TYPE_LABEL: Record<string, string> = { text: "文本渠道", image: "图片渠道" };
 
@@ -34,8 +34,69 @@ export function ChannelForm({
   const [concurrencyMax, setConcurrencyMax] = useState<string>(
     isNew ? "0" : String((editing as ChannelView).concurrencyMax),
   );
+  const [priority, setPriority] = useState<string>(
+    isNew ? "0" : String((editing as ChannelView).priority),
+  );
+  const [userModelSelectionEnabled, setUserModelSelectionEnabled] = useState(
+    isNew ? false : (editing as ChannelView).userModelSelectionEnabled,
+  );
+  const [models, setModels] = useState<ChannelModelView[]>(
+    isNew ? [] : (editing as ChannelView).models,
+  );
+  const [fetchingModels, setFetchingModels] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  function updateModel(providerModelId: string, patch: Partial<ChannelModelView>) {
+    setModels((current) => {
+      let next = current.map((item) =>
+        item.providerModelId === providerModelId ? { ...item, ...patch } : item,
+      );
+      if (patch.isDefault === true) {
+        next = next.map((item) => ({
+          ...item,
+          isDefault: item.providerModelId === providerModelId,
+        }));
+      }
+      if (patch.enabled === false) {
+        next = next.map((item) =>
+          item.providerModelId === providerModelId ? { ...item, isDefault: false } : item,
+        );
+      }
+      if (!next.some((item) => item.enabled && item.isDefault)) {
+        const firstEnabled = next.find((item) => item.enabled);
+        if (firstEnabled) {
+          next = next.map((item) => ({
+            ...item,
+            isDefault: item.providerModelId === firstEnabled.providerModelId,
+          }));
+        }
+      }
+      return next;
+    });
+  }
+
+  async function discoverModels() {
+    if (isNew || fetchingModels) return;
+    setFetchingModels(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/channels/${(editing as ChannelView).id}/models`, {
+        method: "POST",
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        channel?: ChannelView;
+        error?: string;
+      };
+      if (!response.ok || !body.channel) throw new Error(body.error ?? `HTTP ${response.status}`);
+      setModels(body.channel.models);
+      setModel(body.channel.model ?? model);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setFetchingModels(false);
+    }
+  }
 
   async function save() {
     if (saving) return;
@@ -49,6 +110,8 @@ export function ChannelForm({
         ...(apiKey ? { apiKey } : {}),
         ...(type === "text" ? { textModel: model } : { imageModel: model }),
         concurrencyMax: Math.max(0, Number.parseInt(concurrencyMax, 10) || 0),
+        priority: Number.parseInt(priority, 10) || 0,
+        userModelSelectionEnabled,
       };
       if (type === "image") {
         payload.aspectRatioParam = aspectRatioParam;
@@ -73,6 +136,28 @@ export function ChannelForm({
           issues?: Array<{ message: string }>;
         };
         throw new Error(body.issues?.[0]?.message ?? body.error ?? `HTTP ${response.status}`);
+      }
+      const saved = (await response.json().catch(() => ({}))) as { channel?: ChannelView };
+      const channelId = saved.channel?.id ?? (!isNew ? (editing as ChannelView).id : undefined);
+      if (channelId && models.length > 0) {
+        const modelsResponse = await fetch(`/api/channels/${channelId}/models`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            models: models.map((item) => ({
+              providerModelId: item.providerModelId,
+              enabled: item.enabled,
+              isDefault: item.isDefault,
+              priority: item.priority,
+              creditsPerCall: item.creditsPerCall,
+              capabilities: item.capabilities,
+            })),
+          }),
+        });
+        if (!modelsResponse.ok) {
+          const body = (await modelsResponse.json().catch(() => ({}))) as { error?: string };
+          throw new Error(body.error ?? `模型配置保存失败（HTTP ${modelsResponse.status}）`);
+        }
       }
       await onSaved();
     } catch (caught) {
@@ -141,30 +226,167 @@ export function ChannelForm({
           </div>
 
           <div>
-            <span className="field-label">{type === "text" ? "文本模型" : "图片模型"}</span>
+            <span className="field-label">
+              {type === "text" ? "文本模型" : "图片模型"}
+              <span className="ml-2 normal-case tracking-normal text-ink-faint">默认兼容字段</span>
+            </span>
             <input
               className="field-input mt-1 font-mono !text-[13px]"
               placeholder={type === "text" ? "deepseek-v4-flash" : "grok-imagine-image-2.0"}
               value={model}
               onChange={(event) => setModel(event.target.value)}
             />
-          </div>
-
-          <div>
-            <span className="field-label">模型调用并发上限（0 = 不限制）</span>
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={concurrencyMax}
-              onChange={(event) => setConcurrencyMax(event.target.value)}
-              placeholder="0"
-              className="field-input mt-1 w-40"
-            />
             <p className="mt-1 font-mono text-[10px] text-ink-faint">
-              仅限制此渠道的同时调用数；默认 0，不限制文本或图片模型并发。
+              已获取模型目录后，实际默认模型以目录中的“默认”配置为准。
             </p>
           </div>
+
+          <div className="grid grid-cols-2 gap-5">
+            <div>
+              <span className="field-label">渠道优先级（越大越优先）</span>
+              <input
+                type="number"
+                min={-100000}
+                max={100000}
+                step={1}
+                value={priority}
+                onChange={(event) => setPriority(event.target.value)}
+                placeholder="0"
+                className="field-input mt-1"
+              />
+            </div>
+            <div>
+              <span className="field-label">模型调用并发上限（0 = 不限制）</span>
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={concurrencyMax}
+                onChange={(event) => setConcurrencyMax(event.target.value)}
+                placeholder="0"
+                className="field-input mt-1"
+              />
+            </div>
+          </div>
+          <p className="-mt-3 font-mono text-[10px] text-ink-faint">
+            并发只受此渠道设置影响；默认 0，不限制文本或图片模型并发。
+          </p>
+
+          <label className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={userModelSelectionEnabled}
+              onChange={(event) => setUserModelSelectionEnabled(event.target.checked)}
+              className="accent-[#ff2442]"
+            />
+            允许用户在创作条自定义选择模型
+          </label>
+          <p className="-mt-3 font-mono text-[10px] text-ink-faint">
+            阶段 F 接入创作条后生效；关闭时用户只能使用渠道默认模型。
+          </p>
+
+          {!isNew && (
+            <section className="space-y-3 rounded-xl border border-line bg-paper-card/50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h4 className="font-display text-base font-bold">模型目录</h4>
+                  <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+                    获取渠道 /models 返回的全部模型；勾选后才会纳入可用模型，点数按每次调用计算。
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn-ghost shrink-0 px-3 py-1.5 font-mono text-[11px]"
+                  onClick={() => void discoverModels()}
+                  disabled={fetchingModels}
+                >
+                  {fetchingModels ? "获取中…" : "获取模型"}
+                </button>
+              </div>
+              {models.length === 0 ? (
+                <p className="border-t border-line pt-3 text-xs text-ink-faint">
+                  尚未获取模型目录。保存渠道后点击“获取模型”。
+                </p>
+              ) : (
+                <div className="space-y-2 border-t border-line pt-3">
+                  {models.map((item) => (
+                    <div key={item.providerModelId} className="rounded-lg border border-line-dark p-3">
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={item.enabled}
+                            onChange={(event) => updateModel(item.providerModelId, { enabled: event.target.checked })}
+                            className="accent-[#ff2442]"
+                          />
+                          <span className="min-w-0 truncate font-medium">{item.displayName}</span>
+                        </label>
+                        <span className="max-w-full truncate font-mono text-[10px] text-ink-faint">
+                          {item.providerModelId}
+                        </span>
+                        <label className="flex items-center gap-1 text-[11px] text-ink-soft">
+                          <input
+                            type="radio"
+                            name="default-channel-model"
+                            checked={item.isDefault}
+                            disabled={!item.enabled}
+                            onChange={() => updateModel(item.providerModelId, { isDefault: true })}
+                            className="accent-[#ff2442]"
+                          />
+                          默认
+                        </label>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <label className="text-[10px] text-ink-faint">
+                          渠道内优先级
+                          <input
+                            type="number"
+                            min={-100000}
+                            max={100000}
+                            value={item.priority}
+                            onChange={(event) => updateModel(item.providerModelId, {
+                              priority: Number.parseInt(event.target.value, 10) || 0,
+                            })}
+                            className="field-input mt-1 !py-1.5 font-mono text-xs"
+                          />
+                        </label>
+                        <label className="text-[10px] text-ink-faint">
+                          消耗点数 / 次
+                          <input
+                            type="number"
+                            min={0}
+                            max={100000}
+                            value={item.creditsPerCall}
+                            onChange={(event) => updateModel(item.providerModelId, {
+                              creditsPerCall: Math.max(0, Number.parseInt(event.target.value, 10) || 0),
+                            })}
+                            className="field-input mt-1 !py-1.5 font-mono text-xs"
+                          />
+                        </label>
+                        {type === "image" && (
+                          <label className="col-span-2 flex cursor-pointer items-center gap-2 self-end pb-2 text-[11px] text-ink-soft">
+                            <input
+                              type="checkbox"
+                              checked={item.capabilities.imageEditSingle}
+                              onChange={(event) => updateModel(item.providerModelId, {
+                                capabilities: {
+                                  ...item.capabilities,
+                                  imageEditSingle: event.target.checked,
+                                  imageEditMulti: event.target.checked,
+                                },
+                              })}
+                              className="accent-[#ff2442]"
+                            />
+                            支持图生图（单图/多图）
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {type === "image" && (
             <>
