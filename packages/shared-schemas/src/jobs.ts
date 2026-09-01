@@ -56,7 +56,6 @@ export const NODE_NAMES = [
   "generate-brief",
   "generate-storyboard",
   "generate-images",
-  "render-slides",
   "package-export",
 ] as const;
 export type NodeName = (typeof NODE_NAMES)[number];

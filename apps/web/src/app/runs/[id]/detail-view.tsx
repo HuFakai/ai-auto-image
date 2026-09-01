@@ -194,7 +194,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
               onClick={() => void cancel()}
               disabled={cancelling}
             >
-              {cancelling ? "作废中…" : "作废本次运行"}
+              {cancelling ? "取消中…" : "取消本次运行"}
             </button>
           ) : detail.status === "awaiting_approval" ? (
             <button
