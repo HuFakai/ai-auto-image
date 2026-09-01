@@ -25,6 +25,12 @@ import { releaseReservedCredits, reserveCreditsToTarget } from "./credit-reserva
 
 export const COMIC_RUN_KIND = "comic_story_run";
 
+interface ComicJobPayload {
+  mode?: "checkpoint" | "restart" | "page";
+  sourceRunId?: string;
+  targetPageIndex?: number;
+}
+
 export interface ComicPipelineDeps {
   runRepo: RunRepo;
   jobRepo: JobRepo;
@@ -143,10 +149,22 @@ export function registerComicPipeline(runner: JobRunner, deps: ComicPipelineDeps
     if (!ctx.runId) throw new Error("comic_story_run requires runId");
     const run = await deps.runRepo.require(ctx.runId);
     const input = JSON.parse(run.inputJson) as CreateRunInput;
+    const job = await deps.jobRepo.require(ctx.jobId);
+    let targetPageIndex: number | undefined;
+    if (job.payloadJson) {
+      try {
+        const payload = JSON.parse(job.payloadJson) as ComicJobPayload;
+        if (Number.isInteger(payload.targetPageIndex) && (payload.targetPageIndex ?? -1) >= 0) {
+          targetPageIndex = payload.targetPageIndex;
+        }
+      } catch {
+        /* 无法解析的附加 payload 不影响普通 checkpoint 重试 */
+      }
+    }
     await deps.runRepo.updateStatus(run.id, "running");
 
     try {
-      await executeComicRun(deps, ctx, run.id, input);
+      await executeComicRun(deps, ctx, run.id, input, targetPageIndex);
     } catch (error) {
       if (ctx.signal.aborted) await deps.runRepo.updateStatus(run.id, "cancelled");
       else {
@@ -168,6 +186,7 @@ async function executeComicRun(
   ctx: { signal: AbortSignal; onProgress: () => void },
   runId: string,
   input: CreateRunInput,
+  targetPageIndex?: number,
 ): Promise<void> {
   /* parse-input */
   const parseDone = (await deps.runRepo.listNodeRuns(runId)).some(
@@ -336,7 +355,13 @@ async function executeComicRun(
   /* generate-comic-pages：按并发；角色定妆图作为图生图参考（渠道支持时） */
   const failedPages: number[] = [];
   const editCapableRoutes = deps.imageRoutes.filter((route) => route.image.capabilities().imageEditSingle);
-  const tasks = storyboard.pages.map((page) => async () => {
+  const pagesToProcess = targetPageIndex === undefined
+    ? storyboard.pages
+    : storyboard.pages.filter((page) => page.index === targetPageIndex);
+  if (targetPageIndex !== undefined && pagesToProcess.length === 0) {
+    throw new Error(`comic page index out of range: ${targetPageIndex}`);
+  }
+  const tasks = pagesToProcess.map((page) => async () => {
     const existing = await deps.assetRepo.latestForPage(runId, page.index);
     if (existing) {
       const nodes = await deps.runRepo.listNodeRuns(runId);
@@ -369,19 +394,26 @@ async function executeComicRun(
   await Promise.all(tasks.map((task) => task()));
   await throwIfAborted(deps, runId, ctx.signal);
 
-  /* package-export */
-  if (!(await deps.runRepo.listNodeRuns(runId)).some((n) => n.nodeName === "package-export" && n.status === "succeeded")) {
-    const exportNode = await deps.runRepo.createNodeRun(runId, "package-export");
-    await deps.runRepo.startNode(exportNode.id);
-    const totals = await deps.runRepo.runTotals(runId);
-    const exportDir = path.join(deps.exportsDir, runId);
-    fs.mkdirSync(exportDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(exportDir, "manifest.json"),
-      JSON.stringify({ runId, input, storyboard, checks, pages: storyboard.pages.length, failedPages, usage: totals, generatedAt: new Date().toISOString() }, null, 2),
-    );
-    await deps.runRepo.succeedNode(exportNode.id, { outputRef: JSON.stringify({ manifest: true }) });
+  // 单页重试只执行目标页，但仍需保留其它缺失页的失败状态，避免误报整单成功。
+  const incompletePages: number[] = [];
+  for (const page of storyboard.pages) {
+    if (!(await deps.assetRepo.latestForPage(runId, page.index))) incompletePages.push(page.index);
   }
+  for (const pageIndex of incompletePages) {
+    if (!failedPages.includes(pageIndex)) failedPages.push(pageIndex);
+  }
+
+  /* package-export：每次恢复都刷新 manifest，避免保留上一次失败页面清单 */
+  const exportNode = await deps.runRepo.createNodeRun(runId, "package-export");
+  await deps.runRepo.startNode(exportNode.id);
+  const totals = await deps.runRepo.runTotals(runId);
+  const exportDir = path.join(deps.exportsDir, runId);
+  fs.mkdirSync(exportDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(exportDir, "manifest.json"),
+    JSON.stringify({ runId, input, storyboard, checks, pages: storyboard.pages.length, failedPages, usage: totals, generatedAt: new Date().toISOString() }, null, 2),
+  );
+  await deps.runRepo.succeedNode(exportNode.id, { outputRef: JSON.stringify({ manifest: true }) });
 
   if (failedPages.length > 0) {
     const summary = `pages failed: ${failedPages.join(", ")}`;
@@ -497,7 +529,9 @@ async function generateComicPage(
     });
   } catch (error) {
     const aiError = toAiError(error);
-    await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
+    await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400), {
+      outputRef: JSON.stringify({ pageIndex }),
+    });
     args.failedPages.push(pageIndex);
     logger.error("comic page failed", { runId, page: pageIndex, error: aiError.message.slice(0, 200) });
   }

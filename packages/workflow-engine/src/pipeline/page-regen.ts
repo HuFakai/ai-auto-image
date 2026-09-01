@@ -110,6 +110,25 @@ async function retryExistingRegenOutput(
   }
 }
 
+/** 失败作品补齐最后一页后恢复顶层状态；普通成功作品保持原有成功状态。 */
+async function restoreRunStatusIfComplete(
+  deps: PageRegenDeps,
+  runId: string,
+  input: CreateRunInput,
+  storyboard: Storyboard,
+): Promise<void> {
+  const run = await deps.runRepo.require(runId);
+  if (run.status !== "running" && run.status !== "failed") return;
+  for (const slide of storyboard.slides) {
+    if (!(await deps.assetRepo.latestForPage(runId, slide.index))) return;
+  }
+  await deps.runRepo.updateStatus(
+    runId,
+    input.requireApproval ? "awaiting_approval" : "succeeded",
+    { errorSummary: null },
+  );
+}
+
 /**
  * 单页返修：只重生成目标页，模型直接输出包含中文内容的完整图片，
  * 旧版本资产保留（superseded），写入 Revision 版本链，其余页面零调用。
@@ -124,13 +143,17 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
     const storyboard = await loadStoryboard(deps, ctx.runId);
     const original = storyboard.slides[payload.pageIndex];
     if (!original) throw new Error(`page index out of range: ${payload.pageIndex}`);
+    await deps.runRepo.updateStatus(ctx.runId, "running");
 
     const slide: StoryboardSlide = {
       ...original,
       headline: payload.headline?.trim() || original.headline,
       body: payload.body ?? original.body,
     };
-    if (await retryExistingRegenOutput(deps, ctx.runId, payload.pageIndex)) return;
+    if (await retryExistingRegenOutput(deps, ctx.runId, payload.pageIndex)) {
+      await restoreRunStatusIfComplete(deps, ctx.runId, input, storyboard);
+      return;
+    }
     const plan = payload.imagePromptOverride
       ? { imagePrompt: payload.imagePromptOverride, expectedCopy: [slide.headline, ...slide.body] }
       : buildSlidePrompt(slide, storyboard, input);
@@ -217,10 +240,16 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
         images: 1,
       });
       await deps.runRepo.setReview(ctx.runId, "pending");
+      await restoreRunStatusIfComplete(deps, ctx.runId, input, storyboard);
       logger.info("page regenerated", { runId: ctx.runId, page: payload.pageIndex, version });
     } catch (error) {
       const aiError = toAiError(error);
-      await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
+      await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400), {
+        outputRef: JSON.stringify({ pageIndex: payload.pageIndex }),
+      });
+      await deps.runRepo.updateStatus(ctx.runId, "failed", {
+        errorSummary: aiError.message.slice(0, 400),
+      });
       throw error;
     } finally {
       if (reserved) {

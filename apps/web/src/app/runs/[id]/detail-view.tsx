@@ -277,6 +277,10 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         </p>
       )}
 
+      {detail.status === "failed" && (
+        <RetryActions runId={detail.runId} onDone={refresh} />
+      )}
+
       {/* 封面候选：挑选一张作为作品封面（导出 ZIP 时携带）；漫画以首页为封面 */}
       {detail.status === "succeeded" && (
         <CoverCandidatesCard detail={detail} onDone={refresh} />
@@ -401,7 +405,7 @@ export function RunDetailView({ initial }: { initial: RunDetailPayload }) {
         {/* 发布文案：加载已保存的生成结果，不因进入详情页重复调用模型 */}
         {detail.status === "succeeded" && <PublishCopyCard runId={detail.runId} />}
 
-        {/* 平台适配包：确定性模式零模型费用一键重排其他平台 */}
+        {/* 平台适配包：按目标平台比例重新生成原生图片 */}
         {detail.status === "succeeded" && (
           <PlatformAdaptCard runId={detail.runId} input={detail.input} />
         )}
@@ -530,6 +534,71 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+/** 失败作品恢复：检查点复用已完成内容，从头开始创建一条新的作品。 */
+function RetryActions({ runId, onDone }: { runId: string; onDone: () => Promise<void> }) {
+  const [busy, setBusy] = useState<"checkpoint" | "restart" | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function retry(mode: "checkpoint" | "restart") {
+    if (busy) return;
+    setBusy(mode);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/runs/${runId}/retry`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        runId?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+      if (mode === "restart" && body.runId && body.runId !== runId) {
+        window.location.assign(`/runs/${body.runId}`);
+        return;
+      }
+      setMessage("检查点重试已入队，将复用已完成的节点和图片。页面会自动刷新。");
+      await onDone();
+    } catch (caught) {
+      setMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="border border-seal/50 bg-seal/5 p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-display text-lg font-bold text-seal">生成失败，可选择重试方式</h2>
+        <span className="kicker">RECOVERY · 按实际图片调用扣点</span>
+      </div>
+      <p className="mt-2 text-xs leading-relaxed text-ink-soft">
+        检查点重试会复用已完成的文案、分镜和图片，只补失败内容；从头开始会新建一条作品，完整重新执行生成流程。
+      </p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="btn-ink px-4 py-2 font-mono text-xs"
+          onClick={() => void retry("checkpoint")}
+          disabled={busy !== null}
+        >
+          {busy === "checkpoint" ? "提交中…" : "从检查点重试"}
+        </button>
+        <button
+          type="button"
+          className="btn-ghost px-4 py-2 font-mono text-xs hover:!border-seal hover:!text-seal"
+          onClick={() => void retry("restart")}
+          disabled={busy !== null}
+        >
+          {busy === "restart" ? "创建中…" : "从头开始（新作品）"}
+        </button>
+      </div>
+      {message && <p className={`mt-3 font-mono text-[11px] ${messageTone(message)}`}>{message}</p>}
+    </section>
+  );
+}
+
 function PageFrame({
   page,
   no,
@@ -549,6 +618,8 @@ function PageFrame({
 }) {
   // 框选状态放在 PageFrame 层：切换/取消时一并复位
   const [selecting, setSelecting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [retryMessage, setRetryMessage] = useState<string | null>(null);
   function closeSelecting() {
     setSelecting(false);
   }
@@ -594,13 +665,45 @@ function PageFrame({
     );
   }
   if (page.status === "failed") {
+    async function retryPage() {
+      if (retrying) return;
+      setRetrying(true);
+      setRetryMessage(null);
+      try {
+        const response = await fetch(`/api/runs/${runId}/pages/${page.index}/regenerate`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+        });
+        const body = (await response.json().catch(() => ({}))) as { error?: string };
+        if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`);
+        setRetryMessage("本页重试已入队，完成后会自动刷新。");
+        await onDone();
+      } catch (caught) {
+        setRetryMessage(`⚠ ${caught instanceof Error ? caught.message : caught}`);
+      } finally {
+        setRetrying(false);
+      }
+    }
+
     return (
       <div className="photo-frame flex aspect-[3/4] flex-col items-center justify-center gap-3 p-6 text-center">
-        <span className="stamp text-seal line-through">作废</span>
+        <span className="stamp text-seal">失败</span>
         <p className="font-mono text-xs text-ink-soft">第 {no} 页生成失败</p>
-        <p className="text-[11px] leading-relaxed text-ink-faint">
-          任务会自动重试该页；其余页面不受影响。
-        </p>
+        {page.errorSummary && (
+          <p className="line-clamp-3 text-[10px] leading-relaxed text-seal/80" title={page.errorSummary}>
+            {page.errorSummary}
+          </p>
+        )}
+        <p className="text-[11px] leading-relaxed text-ink-faint">可只重试这一页，不影响已经生成的其它页面。</p>
+        <button
+          type="button"
+          className="btn-ink px-3 py-1.5 font-mono text-[11px]"
+          onClick={() => void retryPage()}
+          disabled={retrying}
+        >
+          {retrying ? "提交中…" : "重新生成本页（1 点）"}
+        </button>
+        {retryMessage && <p className={`font-mono text-[10px] ${messageTone(retryMessage)}`}>{retryMessage}</p>}
       </div>
     );
   }

@@ -168,16 +168,20 @@ export class RunRepo {
    * 终态保护下沉到 UPDATE 条件（原子）：终态行 returning 为空，不产生任何写入。
    * 返回是否实际写入了状态（终态保护 no-op 时为 false）。
    */
-  async updateStatus(id: string, status: string, extra: { errorSummary?: string } = {}): Promise<boolean> {
+  async updateStatus(id: string, status: string, extra: { errorSummary?: string | null } = {}): Promise<boolean> {
     const patch: Record<string, unknown> = { status, updatedAt: now() };
     if (status === "running") {
       const existing = await this.require(id);
       if (!existing.startedAt) patch.startedAt = now();
     }
+    if (status === "queued") {
+      patch.startedAt = null;
+      patch.finishedAt = null;
+    }
     if (status === "succeeded" || status === "failed" || status === "cancelled") {
       patch.finishedAt = now();
     }
-    if (extra.errorSummary) patch.errorSummary = extra.errorSummary;
+    if (extra.errorSummary !== undefined) patch.errorSummary = extra.errorSummary;
     const updated = await this.client
       .update(workflowRuns)
       .set(patch)
@@ -364,10 +368,21 @@ export class RunRepo {
     return this.require(id);
   }
 
-  async failNode(id: string, category: ProviderErrorCategory | "internal", summary: string) {
+  async failNode(
+    id: string,
+    category: ProviderErrorCategory | "internal",
+    summary: string,
+    extra: { outputRef?: string | null } = {},
+  ) {
     await this.client
       .update(nodeRuns)
-      .set({ status: "failed", finishedAt: now(), errorCategory: category, errorSummary: summary })
+      .set({
+        status: "failed",
+        finishedAt: now(),
+        errorCategory: category,
+        errorSummary: summary,
+        ...(extra.outputRef !== undefined ? { outputRef: extra.outputRef } : {}),
+      })
       .where(eq(nodeRuns.id, id));
   }
 

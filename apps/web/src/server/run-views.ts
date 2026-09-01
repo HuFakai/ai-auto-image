@@ -115,7 +115,9 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
   }
 
   // 页面状态以「每页当前资产」为准（返修后取最新版本，旧版本计入 Revision 链）
-  const pageNodes = nodes.filter((n) => n.nodeName === "generate-images");
+  const pageNodes = nodes.filter(
+    (n) => n.nodeName === "generate-images" || n.nodeName === "generate-comic-pages",
+  );
   const comicSlides = comicStoryboard?.pages ?? [];
   // 该 Run 全量资产提前取一次（回调内内存查找，避免每页重复 listByRun）
   const allAssets = await runtime.assetRepo.listByRun(runId);
@@ -165,7 +167,7 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
         };
       }
       // 尚无当前资产：看是否有失败的页面节点（可重试）
-      const failedNode = pageNodes.find((n) => {
+      const failedNode = [...pageNodes].reverse().find((n) => {
         try {
           return (
             n.status === "failed" &&
@@ -180,6 +182,7 @@ export async function buildRunDetail(runtime: Runtime, runId: string): Promise<R
         role: slide.role,
         headline: slide.headline,
         status: failedNode ? ("failed" as const) : ("pending" as const),
+        errorSummary: failedNode?.errorSummary ?? undefined,
       };
     }),
   );

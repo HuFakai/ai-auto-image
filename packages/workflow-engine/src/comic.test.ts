@@ -109,4 +109,40 @@ describe("comic pipeline (mock, edit-capable route)", () => {
     expect(JSON.parse(generated!.metadataJson ?? "{}")).toMatchObject({ usedEdit: true });
   });
 
+  it("can recover one failed comic page through a targeted checkpoint job", async () => {
+    let recover = false;
+    const harness = await makeHarness({
+      mock: {
+        latencyMs: 1,
+        shouldFailImage: (request) => !recover && request.prompt.includes("漫画页 2/4"),
+      },
+    });
+    const runner = startEvalRunner(harness);
+    const { runId, jobId } = await createRunWith(harness, {
+      recipe: "comic_story",
+      topic: "漫画检查点恢复",
+    });
+
+    await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "failed", 20_000);
+    const failed = (await harness.runRepo.listNodeRuns(runId)).find(
+      (node) => node.nodeName === "generate-comic-pages" && node.status === "failed",
+    );
+    expect(JSON.parse(failed?.outputRef ?? "{}")).toMatchObject({ pageIndex: 1 });
+
+    recover = true;
+    await harness.runRepo.updateStatus(runId, "queued", { errorSummary: null });
+    const retry = await harness.jobRepo.createOrReuse({
+      kind: "comic_story_run",
+      runId,
+      idempotencyKey: `manual-comic-page:${runId}:1`,
+      payloadJson: JSON.stringify({ mode: "page", targetPageIndex: 1, sourceRunId: runId }),
+      maxAttempts: 3,
+    });
+    await waitUntil(async () => (await harness.runRepo.require(runId)).status === "succeeded", 20_000);
+    await runner.stop();
+
+    expect((await harness.jobRepo.require(retry.job.id)).status).toBe("succeeded");
+    expect((await harness.assetRepo.listByRun(runId)).filter((asset) => asset.kind === "generated")).toHaveLength(4);
+  });
+
 });

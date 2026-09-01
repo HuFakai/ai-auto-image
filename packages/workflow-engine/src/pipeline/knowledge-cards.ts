@@ -404,7 +404,9 @@ async function generatePage(
     void startedAt;
   } catch (error) {
     const aiError = toAiError(error);
-    await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400));
+    await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400), {
+      outputRef: JSON.stringify({ pageIndex: slide.index }),
+    });
     failedPages.push(slide.index);
     logger.error("page generation failed", {
       runId,

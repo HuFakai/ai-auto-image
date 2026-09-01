@@ -83,6 +83,46 @@ describe("knowledge card pipeline (mock)", () => {
     expect(imageRuns.filter((n) => n.status === "failed")).toHaveLength(1);
   });
 
+  it("supports a manual checkpoint retry after the automatic attempts are exhausted", async () => {
+    let recover = false;
+    const harness = await makeHarness({
+      mock: {
+        latencyMs: 1,
+        shouldFailImage: (request) => !recover && request.prompt.includes("页码：2/4"),
+      },
+    });
+    const runner = startEvalRunner(harness);
+    const { runId, jobId } = await createRunWith(harness, { topic: "检查点恢复" });
+
+    await waitUntil(async () => (await harness.jobRepo.require(jobId)).status === "failed", 20_000);
+    expect((await harness.runRepo.require(runId)).status).toBe("failed");
+    const failedPageNode = (await harness.runRepo.listNodeRuns(runId)).find(
+      (node) => node.nodeName === "generate-images" && node.status === "failed",
+    );
+    expect(JSON.parse(failedPageNode?.outputRef ?? "{}")).toMatchObject({ pageIndex: 1 });
+
+    recover = true;
+    await harness.runRepo.updateStatus(runId, "queued", { errorSummary: null });
+    const retry = await harness.jobRepo.createOrReuse({
+      kind: "knowledge_card_run",
+      runId,
+      idempotencyKey: `manual-checkpoint:${runId}`,
+      payloadJson: JSON.stringify({ mode: "checkpoint", sourceRunId: runId }),
+      maxAttempts: 3,
+    });
+    await harness.jobRepo.appendEvent(retry.job.id, "created", "retry=checkpoint");
+    await waitUntil(async () => (await harness.runRepo.require(runId)).status === "succeeded", 20_000);
+    await runner.stop();
+
+    expect((await harness.jobRepo.require(retry.job.id)).status).toBe("succeeded");
+    const nodeRuns = await harness.runRepo.listNodeRuns(runId);
+    expect(nodeRuns.filter((node) => node.nodeName === "generate-brief")).toHaveLength(1);
+    expect(nodeRuns.filter((node) => node.nodeName === "generate-storyboard")).toHaveLength(1);
+    expect(nodeRuns.filter((node) => node.nodeName === "generate-images" && node.status === "succeeded")).toHaveLength(4);
+    // 初次执行的 4 页 + 自动重试 2 次失败页 + 手动检查点补 1 页
+    expect(harness.mock.controls.calls.image).toBe(7);
+  });
+
   it("reuses an idempotency key instead of creating a duplicate job", async () => {
     const harness = await makeHarness();
     const { runId } = await createRunWith(harness, { topic: "幂等键测试" });

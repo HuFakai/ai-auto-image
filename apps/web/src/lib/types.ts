@@ -69,6 +69,7 @@ export interface RunDetailPage {
   role: string;
   headline: string;
   status: "pending" | "ready" | "failed";
+  errorSummary?: string | undefined;
   assetId?: string | undefined;
   expectedCopy?: string[] | undefined;
   visualCheckPassed?: boolean | undefined;
