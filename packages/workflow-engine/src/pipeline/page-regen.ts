@@ -8,6 +8,7 @@ import { buildSlidePrompt } from "../prompts";
 import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import { releaseReservedCredits } from "./credit-reservation";
+import { maxRouteCredits, routeCreditsPerCall, selectWorkflowRoutes } from "../route-selection";
 
 export const PAGE_REGEN_KIND = "page_regen";
 
@@ -94,10 +95,14 @@ async function retryExistingRegenOutput(
   let reserved = false;
   try {
     if (deps.reserveImageCredits) {
-      await deps.reserveImageCredits(runId, 1);
+      await deps.reserveImageCredits(runId, maxRouteCredits(deps.imageRoutes));
       reserved = true;
     }
-    await deps.runRepo.succeedNode(node.id, { outputRef: node.outputRef, images: 1 });
+    await deps.runRepo.succeedNode(node.id, {
+      outputRef: node.outputRef,
+      images: 1,
+      credits: assetCredits(current.metadataJson),
+    });
     await deps.runRepo.setReview(runId, "pending");
     logger.info("page regen billing retry reused asset", { runId, page: pageIndex, assetId: current.id });
     return true;
@@ -143,6 +148,14 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
     const storyboard = await loadStoryboard(deps, ctx.runId);
     const original = storyboard.slides[payload.pageIndex];
     if (!original) throw new Error(`page index out of range: ${payload.pageIndex}`);
+    let runDeps: PageRegenDeps;
+    try {
+      const selected = selectWorkflowRoutes(input, [], deps.imageRoutes);
+      runDeps = { ...deps, imageRoutes: selected.imageRoutes };
+    } catch (error) {
+      await deps.runRepo.updateStatus(ctx.runId, "failed", { errorSummary: String(error).slice(0, 400) });
+      throw error;
+    }
     await deps.runRepo.updateStatus(ctx.runId, "running");
 
     const slide: StoryboardSlide = {
@@ -150,31 +163,32 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       headline: payload.headline?.trim() || original.headline,
       body: payload.body ?? original.body,
     };
-    if (await retryExistingRegenOutput(deps, ctx.runId, payload.pageIndex)) {
-      await restoreRunStatusIfComplete(deps, ctx.runId, input, storyboard);
+    if (await retryExistingRegenOutput(runDeps, ctx.runId, payload.pageIndex)) {
+      await restoreRunStatusIfComplete(runDeps, ctx.runId, input, storyboard);
       return;
     }
     const plan = payload.imagePromptOverride
       ? { imagePrompt: payload.imagePromptOverride, expectedCopy: [slide.headline, ...slide.body] }
       : buildSlidePrompt(slide, storyboard, input);
 
-    const node = await deps.runRepo.createNodeRun(ctx.runId, "generate-images");
-    await deps.runRepo.startNode(node.id, {
-      routeId: deps.imageRoutes[0]?.config.id,
-      model: deps.imageRoutes[0]?.model,
+    const node = await runDeps.runRepo.createNodeRun(ctx.runId, "generate-images");
+    await runDeps.runRepo.startNode(node.id, {
+      routeId: runDeps.imageRoutes[0]?.config.id,
+      model: runDeps.imageRoutes[0]?.model,
     });
 
     let reserved = false;
     try {
-      if (deps.reserveImageCredits) {
-        await deps.reserveImageCredits(ctx.runId, 1);
+      if (runDeps.reserveImageCredits) {
+        await runDeps.reserveImageCredits(ctx.runId, maxRouteCredits(runDeps.imageRoutes));
         reserved = true;
       }
+      let usedRoute: ImageRoute | null = null;
       const result = await withModelFallbacks({
-        routes: deps.imageRoutes.map((route) => ({ config: route.config, model: route.model })),
+        routes: runDeps.imageRoutes.map((route) => ({ config: route.config, model: route.model })),
         signal: ctx.signal,
         run: async (fallbackRoute) => {
-          const route = deps.imageRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
+          const route = runDeps.imageRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
           ctx.onProgress();
           const images = await route.image.generate({
             prompt: plan.imagePrompt,
@@ -182,10 +196,11 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
             n: 1,
             signal: ctx.signal,
           });
+          usedRoute = route;
           return images;
         },
         onAttempt: async (record) => {
-          await deps.providerRepo.recordAttempt({
+          await runDeps.providerRepo.recordAttempt({
             runId: ctx.runId!,
             nodeRunId: node.id,
             routeId: record.routeId,
@@ -203,18 +218,18 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
       });
 
       const image = result[0]!;
-      const version = (await deps.assetRepo.pageVersionCount(ctx.runId, payload.pageIndex)) + 1;
+      const version = (await runDeps.assetRepo.pageVersionCount(ctx.runId, payload.pageIndex)) + 1;
 
       /* 模型出完整图，直接作为新版本 */
-      await syncStoryboardSlide(deps, ctx.runId, payload.pageIndex, slide);
+      await syncStoryboardSlide(runDeps, ctx.runId, payload.pageIndex, slide);
       const relPath = path.join("runs", ctx.runId, "pages", `page-${payload.pageIndex}-v${version}.png`);
       let imageToSave: GeneratedImage = image;
       if (hasBrandOverlays(input.brandKit)) {
         imageToSave = await overlayGeneratedImage(image, input.brandKit);
       }
-      const saved = await deps.assetStore.saveGeneratedImage(imageToSave, relPath);
-      await deps.assetRepo.supersedePage(ctx.runId, payload.pageIndex);
-      const asset = await deps.assetRepo.create({
+      const saved = await runDeps.assetStore.saveGeneratedImage(imageToSave, relPath);
+      await runDeps.assetRepo.supersedePage(ctx.runId, payload.pageIndex);
+      const asset = await runDeps.assetRepo.create({
         runId: ctx.runId,
         nodeRunId: node.id,
         pageIndex: payload.pageIndex,
@@ -226,34 +241,36 @@ export function registerPageRegenPipeline(runner: JobRunner, deps: PageRegenDeps
         metadataJson: JSON.stringify({
           expectedCopy: plan.expectedCopy,
           revision: version,
+          creditsPerCall: routeCreditsPerCall(usedRoute ?? runDeps.imageRoutes[0] ?? {}),
         }),
       });
-      await deps.revisionRepo.create({
+      await runDeps.revisionRepo.create({
         runId: ctx.runId,
         pageIndex: payload.pageIndex,
         kind: "page-regen",
         payloadJson: JSON.stringify(payload),
         assetId: asset.id,
       });
-      await deps.runRepo.succeedNode(node.id, {
+      await runDeps.runRepo.succeedNode(node.id, {
         outputRef: JSON.stringify({ pageIndex: payload.pageIndex, assetId: asset.id, revision: version }),
         images: 1,
+        credits: routeCreditsPerCall(usedRoute ?? runDeps.imageRoutes[0] ?? {}),
       });
-      await deps.runRepo.setReview(ctx.runId, "pending");
-      await restoreRunStatusIfComplete(deps, ctx.runId, input, storyboard);
+      await runDeps.runRepo.setReview(ctx.runId, "pending");
+      await restoreRunStatusIfComplete(runDeps, ctx.runId, input, storyboard);
       logger.info("page regenerated", { runId: ctx.runId, page: payload.pageIndex, version });
     } catch (error) {
       const aiError = toAiError(error);
-      await deps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400), {
+      await runDeps.runRepo.failNode(node.id, aiError.category, aiError.message.slice(0, 400), {
         outputRef: JSON.stringify({ pageIndex: payload.pageIndex }),
       });
-      await deps.runRepo.updateStatus(ctx.runId, "failed", {
+      await runDeps.runRepo.updateStatus(ctx.runId, "failed", {
         errorSummary: aiError.message.slice(0, 400),
       });
       throw error;
     } finally {
       if (reserved) {
-        await releaseReservedCredits(deps, ctx.runId, (releaseError) =>
+        await releaseReservedCredits(runDeps, ctx.runId, (releaseError) =>
           logger.error("release page regen credits failed", { runId: ctx.runId, error: String(releaseError) }),
         );
       }
@@ -277,5 +294,14 @@ async function overlayGeneratedImage(
     return { ...image, base64: overlaid.toString("base64") };
   } catch {
     return image;
+  }
+}
+
+function assetCredits(metadataJson: string | null): number | undefined {
+  try {
+    const value = (JSON.parse(metadataJson ?? "{}") as { creditsPerCall?: unknown }).creditsPerCall;
+    return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+  } catch {
+    return undefined;
   }
 }

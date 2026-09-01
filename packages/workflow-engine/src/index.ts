@@ -5,5 +5,6 @@ export * from "./pipeline/knowledge-cards";
 export * from "./pipeline/page-regen";
 export * from "./pipeline/comic";
 export * from "./pipeline/cover";
+export * from "./route-selection";
 export * from "./export";
 export * from "./testkit";

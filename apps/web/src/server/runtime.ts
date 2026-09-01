@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { TextModel, VisualQualityModel } from "@aai/ai-core";
+import type { CreateRunInput } from "@aai/shared-schemas";
 import {
   AssetRepo,
   AssetStore,
@@ -31,6 +32,7 @@ import {
   registerCoverPipeline,
   registerKnowledgeCardPipeline,
   registerPageRegenPipeline,
+  selectTextRoutes,
   type ImageRoute,
   type TextRoute,
 } from "@aai/workflow-engine";
@@ -119,6 +121,8 @@ export interface Runtime {
   runner: JobRunner;
   /** 重新从数据库装配渠道路由（渠道增删改、启停、排序后调用） */
   refreshChannels(): Promise<void>;
+  /** 按作品快照选择附加能力使用的首选文本路由（未配置/不可用时 null） */
+  preferredTextRoute(input?: CreateRunInput): TextRoute | null;
   /** 导出文案等附加能力使用的首选文本模型（未配置时 null） */
   preferredTextModel(): TextModel | null;
 }
@@ -260,6 +264,15 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     pay,
     assetStore: new AssetStore(assetsDir),
     runner: new JobRunner(new JobRepo(db.db)),
+    preferredTextRoute(input?: CreateRunInput): TextRoute | null {
+      try {
+        const routes = input ? selectTextRoutes(input, pipelineDeps.textRoutes) : pipelineDeps.textRoutes;
+        return routes[0] ?? null;
+      } catch {
+        // 作品绑定的文本模型已经被管理员停用时，不静默切换到其它文本模型。
+        return null;
+      }
+    },
     preferredTextModel(): TextModel | null {
       return pipelineDeps.textRoutes[0]?.text ?? null;
     },
@@ -311,6 +324,10 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     exportsDir,
     reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
     releaseImageCredits: (runId) => billing.releaseRunCredits(runId),
+    reserveModelCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
+    captureModelCredits: (runId, nodeRunId, amount, model) =>
+      billing.captureModelCreditsForRun(runId, nodeRunId, amount, model),
+    releaseModelCredits: (runId, amount) => billing.releaseRunCreditsAmount(runId, amount),
   });
 
   registerComicPipeline(runtime.runner, {
@@ -343,6 +360,10 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     exportsDir,
     reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
     releaseImageCredits: (runId) => billing.releaseRunCredits(runId),
+    reserveModelCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
+    captureModelCredits: (runId, nodeRunId, amount, model) =>
+      billing.captureModelCreditsForRun(runId, nodeRunId, amount, model),
+    releaseModelCredits: (runId, amount) => billing.releaseRunCreditsAmount(runId, amount),
   });
 
   registerPageRegenPipeline(runtime.runner, {
@@ -390,6 +411,10 @@ async function buildRuntime(db: OpenDatabase, paths: RuntimePaths): Promise<Runt
     assetsDir,
     reserveImageCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
     releaseImageCredits: (runId) => billing.releaseRunCredits(runId),
+    reserveModelCredits: (runId, amount) => billing.reserveRunCreditsForRun(runId, amount),
+    captureModelCredits: (runId, nodeRunId, amount, model) =>
+      billing.captureModelCreditsForRun(runId, nodeRunId, amount, model),
+    releaseModelCredits: (runId, amount) => billing.releaseRunCreditsAmount(runId, amount),
   });
 
   await runtime.refreshChannels();

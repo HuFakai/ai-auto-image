@@ -4,17 +4,18 @@ import { NextResponse } from "next/server";
 import { normalizeSlideIndices } from "@aai/shared-schemas";
 import type { CreateRunInput, Storyboard } from "@aai/shared-schemas";
 import { StoryboardSchema } from "@aai/shared-schemas";
-import { generatePlatformCopy, PlatformCopySchema, templateCopy, type PlatformCopy } from "@aai/workflow-engine";
+import { PlatformCopySchema, templateCopy, type PlatformCopy } from "@aai/workflow-engine";
 import type { ExportPageFile } from "@aai/workflow-engine";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser } from "@/server/auth";
+import { generateBilledPlatformCopy } from "@/server/platform-copy";
 
 export const dynamic = "force-dynamic";
 
 /**
  * 发布文案（详情页展示用）：
  * - 默认（无参）：优先读取 /data/exports/{runId}/copy.json，首次访问才生成并保存模板文案；
- * - ?mode=llm：preferredTextModel 存在时 generatePlatformCopy（20s 超时保护），
+ * - ?mode=llm：首选文本路由存在时生成一次 LLM 文案（20s 超时保护），
  *   成功后更新缓存；失败 / 无模型 / 超时优先返回已有缓存，否则降级并保存模板文案。
  * 与导出 ZIP 共用 copy.json，避免进入详情页时重复组装文案。
  */
@@ -92,12 +93,24 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
   const cachedCopy = readCopyCache(copyPath);
   const wantsLlm = new URL(request.url).searchParams.get("mode") === "llm";
   if (wantsLlm) {
-    const textModel = runtime.preferredTextModel();
-    if (textModel) {
+    // 已有 LLM 文案直接复用，避免详情页/导出重复调用并重复扣点。
+    if (cachedCopy?.source === "llm") return NextResponse.json(cachedCopy);
+    const textRoute = runtime.preferredTextRoute(input);
+    if (textRoute) {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
+        const timeoutSignal = AbortSignal.timeout(20_000);
+        const signal = request.signal ? AbortSignal.any([request.signal, timeoutSignal]) : timeoutSignal;
         const copy = await Promise.race([
-          generatePlatformCopy(textModel, input, pages),
+          generateBilledPlatformCopy({
+            billing: runtime.billing,
+            userId: user.id,
+            runId: id,
+            route: textRoute,
+            input,
+            pages,
+            signal,
+          }),
           new Promise<never>((_, reject) => {
             timer = setTimeout(() => reject(new Error("platform copy timeout")), 20_000);
           }),

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Recipe } from "@aai/shared-schemas";
 import { RECIPE_LABELS } from "@/lib/types";
-import type { BrandKitView, RunListItem, RunsListPayload } from "@/lib/types";
+import type { BrandKitView, RunListItem, RunsListPayload, SelectableModelView } from "@/lib/types";
 
 const MIN_CREATION_CREDITS = 6;
 
@@ -132,6 +132,9 @@ export function Workbench({ initial, brandKits, stats }: Props) {
   const [typeFilter, setTypeFilter] = useState<Recipe | "all">("all");
   const [balance, setBalance] = useState<number | null>(null);
   const [insufficient, setInsufficient] = useState(false);
+  const [availableModels, setAvailableModels] = useState<SelectableModelView[]>([]);
+  const [selectedTextModelId, setSelectedTextModelId] = useState("");
+  const [selectedImageModelId, setSelectedImageModelId] = useState("");
 
   /* 托盘与 lightbox */
   const [trayGroup, setTrayGroup] = useState<"type" | "brand" | null>(null);
@@ -146,6 +149,10 @@ export function Workbench({ initial, brandKits, stats }: Props) {
 
   const isComicRecipe = recipe === "comic_story" || recipe === "strip_comic";
   const brandName = BRAND_PREVIEWS.find((item) => item.id === brandTheme)?.name ?? "不使用";
+  const selectableTextModels = availableModels.filter((model) => model.type === "text");
+  const selectableImageModels = availableModels.filter(
+    (model) => model.type === "image" && (!isComicRecipe || model.capabilities.imageEditSingle),
+  );
 
   /* 点数余额：随轮询轻量刷新（充值/扣点后下一轮即更新） */
   useEffect(() => {
@@ -167,6 +174,31 @@ export function Workbench({ initial, brandKits, stats }: Props) {
       clearInterval(timer);
     };
   }, []);
+
+  /* 只有后台打开用户选模时才展示目录；模型目录不包含任何密钥或渠道地址。 */
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/models", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as { models?: SelectableModelView[] };
+      })
+      .then((payload) => {
+        if (!cancelled && payload?.models) setAvailableModels(payload.models);
+      })
+      .catch(() => {
+        /* 自动路由仍可正常创作；下一次刷新再读取目录 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (selectedImageModelId && !selectableImageModels.some((model) => model.id === selectedImageModelId)) {
+      setSelectedImageModelId("");
+    }
+  }, [selectableImageModels, selectedImageModelId]);
 
   /* Esc 关闭大图 / 托盘；卸载时清理计时器 */
   useEffect(() => {
@@ -274,6 +306,14 @@ export function Workbench({ initial, brandKits, stats }: Props) {
           ...(brandKitId ? { brandKitId } : {}),
           requireApproval,
           generateCoverCandidates: generateCovers,
+          ...((selectedTextModelId || selectedImageModelId)
+            ? {
+                modelSelection: {
+                  ...(selectedTextModelId ? { textModelId: selectedTextModelId } : {}),
+                  ...(selectedImageModelId ? { imageModelId: selectedImageModelId } : {}),
+                },
+              }
+            : {}),
         }),
       });
       if (!response.ok) {
@@ -484,6 +524,22 @@ export function Workbench({ initial, brandKits, stats }: Props) {
               title="单击切换比例"
             />
             <Param label="品牌" value={brandName} onClick={() => openTray("brand")} active={trayGroup === "brand"} />
+            {selectableTextModels.length > 0 && (
+              <ModelChoice
+                label="文本模型"
+                value={selectedTextModelId}
+                models={selectableTextModels}
+                onChange={setSelectedTextModelId}
+              />
+            )}
+            {selectableImageModels.length > 0 && (
+              <ModelChoice
+                label="图片模型"
+                value={selectedImageModelId}
+                models={selectableImageModels}
+                onChange={setSelectedImageModelId}
+              />
+            )}
             {!isComicRecipe && (
               <ToggleParam
                 label="封面候选"
@@ -723,6 +779,37 @@ function ToggleParam({
       </span>
       {label}
     </button>
+  );
+}
+
+function ModelChoice({
+  label,
+  value,
+  models,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  models: SelectableModelView[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="inline-flex items-center gap-1.5 rounded-[7px] border border-line px-2 py-1 font-mono text-[11px] text-ink-soft">
+      <span>{label}</span>
+      <select
+        className="max-w-[150px] bg-transparent font-semibold text-ink outline-none"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        title="自动选择时按渠道与模型优先级路由"
+      >
+        <option value="">自动选择</option>
+        {models.map((model) => (
+          <option key={model.id} value={model.id}>
+            {model.displayName} · {model.creditsPerCall}点/次
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 

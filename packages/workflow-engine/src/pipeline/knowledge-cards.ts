@@ -33,6 +33,7 @@ import type { JobRunner } from "../job-runner";
 import { buildBriefPrompt, buildSlidePrompt, buildStoryboardPrompt } from "../prompts";
 import { runCoverStage } from "./cover";
 import { releaseReservedCredits, reserveCreditsToTarget } from "./credit-reservation";
+import { maxRouteCredits, routeCreditsPerCall, selectWorkflowRoutes } from "../route-selection";
 
 export const KNOWLEDGE_CARD_KIND = "knowledge_card_run";
 
@@ -41,6 +42,10 @@ export interface TextRoute {
   config: ProviderRouteConfig;
   model: string;
   text: TextModel;
+  channelId?: string;
+  channelModelId?: string;
+  providerModelId?: string;
+  creditsPerCall?: number;
 }
 
 /** 已绑定图片模型的路由 */
@@ -48,6 +53,10 @@ export interface ImageRoute {
   config: ProviderRouteConfig;
   model: string;
   image: ImageModel;
+  channelId?: string;
+  channelModelId?: string;
+  providerModelId?: string;
+  creditsPerCall?: number;
 }
 
 export interface WorkflowDeps {
@@ -67,6 +76,12 @@ export interface WorkflowDeps {
   reserveImageCredits?: (runId: string, amount: number) => Promise<void>;
   /** 可选计费回调：运行结束、失败或取消时释放未结算额度 */
   releaseImageCredits?: (runId: string) => Promise<void>;
+  /** 文本模型调用前预留单次额度 */
+  reserveModelCredits?: (runId: string, amount: number) => Promise<void>;
+  /** 文本模型成功后结算单次额度 */
+  captureModelCredits?: (runId: string, nodeRunId: string, amount: number, model?: string) => Promise<void>;
+  /** 文本模型失败后释放本次额度 */
+  releaseModelCredits?: (runId: string, amount: number) => Promise<void>;
 }
 
 interface NodeRowLike {
@@ -118,7 +133,14 @@ async function retryExistingImageNode(
   if (!assetId) return false;
   const asset = await deps.assetRepo.require(assetId).catch(() => null);
   if (!asset || asset.runId !== runId || asset.pageIndex !== pageIndex || asset.supersededAt !== null) return false;
-  await deps.runRepo.succeedNode(node.id, { outputRef: node.outputRef, images: 1 });
+  let credits: number | undefined;
+  try {
+    const metadata = JSON.parse(asset.metadataJson ?? "{}") as { creditsPerCall?: unknown };
+    if (typeof metadata.creditsPerCall === "number") credits = metadata.creditsPerCall;
+  } catch {
+    /* 历史资产没有价格快照时使用默认 1 点 */
+  }
+  await deps.runRepo.succeedNode(node.id, { outputRef: node.outputRef, images: 1, credits });
   return true;
 }
 
@@ -138,7 +160,8 @@ export function registerKnowledgeCardPipeline(runner: JobRunner, deps: WorkflowD
     await deps.runRepo.updateStatus(run.id, "running");
 
     try {
-      await executeKnowledgeCardRun(deps, ctx, run.id, input);
+      const selected = selectWorkflowRoutes(input, deps.textRoutes, deps.imageRoutes);
+      await executeKnowledgeCardRun({ ...deps, ...selected }, ctx, run.id, input);
     } catch (error) {
       // 中途取消发生在节点内部时，保证 Run 不停留在 running
       if (ctx.signal.aborted) {
@@ -200,6 +223,8 @@ async function executeKnowledgeCardRun(
           id: route.config.id,
           kind: route.config.kind,
           model: route.model,
+          channelModelId: route.channelModelId,
+          creditsPerCall: routeCreditsPerCall(route),
         })),
       }),
     );
@@ -235,7 +260,7 @@ async function executeKnowledgeCardRun(
 
     // 先按分镜计算本次运行的最大图片需求，再启动任何图片 Provider。
     const expectedImageCount = storyboard.slides.length + (input.generateCoverCandidates ? 3 : 0);
-    await reserveCreditsToTarget(deps, runId, expectedImageCount);
+    await reserveCreditsToTarget(deps, runId, expectedImageCount * maxRouteCredits(deps.imageRoutes));
 
     /* generate-images：所有页面并行发起；模型渠道自身决定是否限流 */
     const failedPages: number[] = [];
@@ -302,6 +327,7 @@ async function generatePage(
     const startedAt = Date.now();
     let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
     let usedModel: string | null = null;
+    let usedRoute: ImageRoute | null = null;
 
     const result = await withModelFallbacks({
       routes: deps.imageRoutes.map((route) => ({ config: route.config, model: route.model })),
@@ -316,6 +342,7 @@ async function generatePage(
           signal: ctx.signal,
         });
         usedModel = route.model;
+        usedRoute = route;
         usageAcc = mergeUsageInto(usageAcc, images[0]?.usage);
         return images;
       },
@@ -383,7 +410,11 @@ async function generatePage(
       mimeType: saved.mimeType,
       bytes: saved.bytes,
       checksum: saved.checksum,
-      metadataJson: JSON.stringify({ ...metadata, model: usedModel }),
+        metadataJson: JSON.stringify({
+          ...metadata,
+          model: usedModel,
+          creditsPerCall: routeCreditsPerCall(usedRoute ?? deps.imageRoutes[0] ?? {}),
+        }),
     });
 
     await deps.runRepo.succeedNode(node.id, {
@@ -396,7 +427,8 @@ async function generatePage(
         visualIntent: slide.visualIntent,
       }),
       images: 1,
-        model: usedModel ?? undefined,
+      model: usedModel ?? undefined,
+      credits: routeCreditsPerCall(usedRoute ?? deps.imageRoutes[0] ?? {}),
       promptTokens: usageAcc.promptTokens,
       completionTokens: usageAcc.completionTokens,
       costUsd: usageAcc.costUsd,
@@ -548,22 +580,45 @@ async function runStructuredNode<T>(
 
   try {
     let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
+    let usedRoute: TextRoute | null = null;
     const value = await withModelFallbacks({
       routes: deps.textRoutes.map((route) => ({ config: route.config, model: route.model })),
       signal: ctx.signal,
       run: async (fallbackRoute) => {
         const route = deps.textRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
         ctx.onProgress();
-        const result = await route.text.generateObject({
-          prompt: spec.buildPrompt(),
-          schemaName: spec.schemaName,
-          schema: spec.schema,
-          signal: ctx.signal,
-          onUsage: (usage) => {
-            usageAcc = mergeUsageInto(usageAcc, usage);
-          },
-        });
-        return result;
+        const credits = routeCreditsPerCall(route);
+        let reserved = false;
+        try {
+          if (deps.reserveModelCredits && credits > 0) {
+            await deps.reserveModelCredits(runId, credits);
+            reserved = true;
+          }
+          const result = await route.text.generateObject({
+            prompt: spec.buildPrompt(),
+            schemaName: spec.schemaName,
+            schema: spec.schema,
+            signal: ctx.signal,
+            onUsage: (usage) => {
+              usageAcc = mergeUsageInto(usageAcc, usage);
+            },
+          });
+          usedRoute = route;
+          if (reserved) {
+            await deps.captureModelCredits?.(runId, node.id, credits, route.model);
+            reserved = false;
+          }
+          return result;
+        } catch (error) {
+          if (reserved) {
+            if (deps.releaseModelCredits) {
+              await deps.releaseModelCredits(runId, credits).catch((releaseError) =>
+                logger.error("release text model credits failed", { runId, nodeRunId: node.id, error: String(releaseError) }),
+              );
+            }
+          }
+          throw error;
+        }
       },
       onAttempt: async (record) => {
         await deps.providerRepo.recordAttempt({
@@ -583,11 +638,12 @@ async function runStructuredNode<T>(
       },
     });
 
+    const actualTextRoute = usedRoute as TextRoute | null;
     await deps.providerRepo.recordUsage({
       runId,
       nodeRunId: node.id,
-      routeId: deps.textRoutes[0]?.config.id ?? "unknown",
-      model: deps.textRoutes[0]?.model,
+      routeId: actualTextRoute?.config.id ?? deps.textRoutes[0]?.config.id ?? "unknown",
+      model: actualTextRoute?.model ?? deps.textRoutes[0]?.model,
       promptTokens: usageAcc.promptTokens,
       completionTokens: usageAcc.completionTokens,
       totalTokens: usageAcc.totalTokens,

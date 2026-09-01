@@ -22,6 +22,7 @@ import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import { buildComicStoryboardPrompt, buildStyleHint } from "../prompts";
 import { releaseReservedCredits, reserveCreditsToTarget } from "./credit-reservation";
+import { maxRouteCredits, routeCreditsPerCall, selectWorkflowRoutes } from "../route-selection";
 
 export const COMIC_RUN_KIND = "comic_story_run";
 
@@ -47,6 +48,9 @@ export interface ComicPipelineDeps {
   reserveImageCredits?: (runId: string, amount: number) => Promise<void>;
   /** 可选计费回调：运行结束、失败或取消时释放未结算额度 */
   releaseImageCredits?: (runId: string) => Promise<void>;
+  reserveModelCredits?: (runId: string, amount: number) => Promise<void>;
+  captureModelCredits?: (runId: string, nodeRunId: string, amount: number, model?: string) => Promise<void>;
+  releaseModelCredits?: (runId: string, amount: number) => Promise<void>;
 }
 
 /** 一致性规则检查项（与 QualityCheck 形状一致） */
@@ -164,7 +168,8 @@ export function registerComicPipeline(runner: JobRunner, deps: ComicPipelineDeps
     await deps.runRepo.updateStatus(run.id, "running");
 
     try {
-      await executeComicRun(deps, ctx, run.id, input, targetPageIndex);
+      const selected = selectWorkflowRoutes(input, deps.textRoutes, deps.imageRoutes);
+      await executeComicRun({ ...deps, ...selected }, ctx, run.id, input, targetPageIndex);
     } catch (error) {
       if (ctx.signal.aborted) await deps.runRepo.updateStatus(run.id, "cancelled");
       else {
@@ -211,11 +216,13 @@ async function executeComicRun(
           ...deps.imageRoutes.map((route) => ({ id: route.config.id, type: "image", max: route.config.concurrencyMax })),
         ],
       },
-      routes: [...deps.textRoutes, ...deps.imageRoutes].map((route) => ({
-        id: route.config.id,
-        kind: route.config.kind,
-        model: route.model,
-      })),
+        routes: [...deps.textRoutes, ...deps.imageRoutes].map((route) => ({
+          id: route.config.id,
+          kind: route.config.kind,
+          model: route.model,
+          channelModelId: route.channelModelId,
+          creditsPerCall: routeCreditsPerCall(route),
+        })),
     }),
   );
 
@@ -258,7 +265,7 @@ async function executeComicRun(
     cast = anchors;
 
     // 定妆图是漫画的第一张图片，必须在调用 Provider 前锁定额度。
-    await reserveCreditsToTarget(deps, runId, 1);
+    await reserveCreditsToTarget(deps, runId, maxRouteCredits(deps.imageRoutes));
 
     /* 定妆图：独立节点（文生图，所有渠道都支持；幂等） */
     const refNodes = await deps.runRepo.listNodeRuns(runId);
@@ -282,7 +289,11 @@ async function executeComicRun(
       }
       const failedRefAsset = failedRefAssetId ? await deps.assetRepo.require(failedRefAssetId).catch(() => null) : null;
       if (failedRefNode && failedRefAsset && failedRefAsset.runId === runId && failedRefAsset.kind === "reference") {
-        await deps.runRepo.succeedNode(failedRefNode.id, { outputRef: failedRefNode.outputRef ?? undefined, images: 1 });
+        await deps.runRepo.succeedNode(failedRefNode.id, {
+          outputRef: failedRefNode.outputRef ?? undefined,
+          images: 1,
+          credits: assetCredits(failedRefAsset.metadataJson),
+        });
         characterRefAssetId = failedRefAsset.id;
       } else {
         const refNode = await deps.runRepo.createNodeRun(runId, "generate-character-ref");
@@ -295,7 +306,8 @@ async function executeComicRun(
           ...anchors.map((member) => `${member.name}：${member.appearance}；服装：${member.outfit}`),
           "要求：正面全身立绘、纯浅色背景、清晰勾线科普漫画风格；画面中不要出现任何文字。",
         ].join("\n");
-        const image = await generateImageWithFallbacks(deps, ctx, runId, refNode.id, refPrompt, null);
+        const generated = await generateImageWithFallbacks(deps, ctx, runId, refNode.id, refPrompt, null);
+        const image = generated.image;
         const saved = await deps.assetStore.saveGeneratedImage(image, path.join("runs", runId, "character-ref.png"));
         const asset = await deps.assetRepo.create({
           runId,
@@ -305,12 +317,13 @@ async function executeComicRun(
           mimeType: saved.mimeType,
           bytes: saved.bytes,
           checksum: saved.checksum,
-          metadataJson: JSON.stringify({ purpose: "character-ref" }),
+          metadataJson: JSON.stringify({ purpose: "character-ref", creditsPerCall: routeCreditsPerCall(generated.route) }),
         });
         characterRefAssetId = asset.id;
         await deps.runRepo.succeedNode(refNode.id, {
           outputRef: JSON.stringify({ assetId: asset.id }),
           images: 1,
+          credits: routeCreditsPerCall(generated.route),
           promptTokens: image.usage?.promptTokens ?? 0,
           completionTokens: image.usage?.completionTokens ?? 0,
         });
@@ -350,7 +363,7 @@ async function executeComicRun(
   }
 
   const pageCount = storyboard.pages.length;
-  await reserveCreditsToTarget(deps, runId, 1 + pageCount);
+  await reserveCreditsToTarget(deps, runId, (1 + pageCount) * maxRouteCredits(deps.imageRoutes));
 
   /* generate-comic-pages：按并发；角色定妆图作为图生图参考（渠道支持时） */
   const failedPages: number[] = [];
@@ -374,7 +387,11 @@ async function executeComicRun(
           outputAssetId = undefined;
         }
         if (outputAssetId === existing.id) {
-          await deps.runRepo.succeedNode(linked.id, { outputRef: linked.outputRef, images: 1 });
+          await deps.runRepo.succeedNode(linked.id, {
+            outputRef: linked.outputRef,
+            images: 1,
+            credits: assetCredits(existing.metadataJson),
+          });
           return;
         }
       }
@@ -451,6 +468,7 @@ async function generateComicPage(
   try {
     let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
     let usedModel: string | null = null;
+    let usedRoute: ImageRoute | null = null;
     const result = await withModelFallbacks({
       routes: args.editCapableRoutes.length > 0 ? args.editCapableRoutes : deps.imageRoutes,
       signal: ctx.signal,
@@ -469,9 +487,11 @@ async function generateComicPage(
             signal: ctx.signal,
           });
           usedModel = route.model;
+          usedRoute = route;
         } else {
           images = await route.image.generate({ prompt, aspectRatio: input.aspectRatio, n: 1, signal: ctx.signal });
           usedModel = route.model;
+          usedRoute = route;
         }
         usageAcc = mergeUsageLocal(usageAcc, images[0]?.usage);
         return images;
@@ -517,11 +537,13 @@ async function generateComicPage(
         mode: "comic",
         usedEdit: Boolean(args.characterRefBase64 && deps.imageRoutes.some((r) => r.image.capabilities().imageEditSingle)),
         model: usedModel,
+        creditsPerCall: routeCreditsPerCall(usedRoute ?? deps.imageRoutes[0] ?? {}),
       }),
     });
     await deps.runRepo.succeedNode(node.id, {
       outputRef: JSON.stringify({ pageIndex, assetId: asset.id }),
       images: 1,
+      credits: routeCreditsPerCall(usedRoute ?? deps.imageRoutes[0] ?? {}),
       model: usedModel ?? undefined,
       promptTokens: usageAcc.promptTokens,
       completionTokens: usageAcc.completionTokens,
@@ -567,6 +589,15 @@ async function throwIfAborted(deps: ComicPipelineDeps, runId: string, signal: Ab
   }
 }
 
+function assetCredits(metadataJson: string | null): number | undefined {
+  try {
+    const value = (JSON.parse(metadataJson ?? "{}") as { creditsPerCall?: unknown }).creditsPerCall;
+    return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function mergeUsageLocal(acc: ModelUsage, incoming: ModelUsage | undefined): ModelUsage {
   if (!incoming) return acc;
   return {
@@ -594,6 +625,7 @@ async function generateImageWithFallbacks(
   const editCapable = deps.imageRoutes.filter((route) => route.image.capabilities().imageEditSingle);
   const routes = editCapable.length > 0 ? editCapable : deps.imageRoutes;
   let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
+  let usedRoute: ImageRoute | null = null;
   const result = await withModelFallbacks({
     routes,
     signal: ctx.signal,
@@ -601,6 +633,7 @@ async function generateImageWithFallbacks(
       const route = deps.imageRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
       ctx.onProgress();
       const images = await route.image.generate({ prompt, aspectRatio: "1:1", n: 1, signal: ctx.signal });
+      usedRoute = route;
       usageAcc = mergeUsageLocal(usageAcc, images[0]?.usage);
       return images;
     },
@@ -622,7 +655,7 @@ async function generateImageWithFallbacks(
     },
   });
   const image = result[0]!;
-  return { ...image, usage: usageAcc };
+  return { image: { ...image, usage: usageAcc }, route: usedRoute ?? routes[0]! };
 }
 
 async function runStructured<T>(
@@ -651,22 +684,43 @@ async function runStructured<T>(
   });
   try {
     let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
+    let usedRoute: TextRoute | null = null;
     const value = await withModelFallbacks({
       routes: deps.textRoutes.map((route) => ({ config: route.config, model: route.model })),
       signal: ctx.signal,
       run: async (fallbackRoute) => {
         const route = deps.textRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
         ctx.onProgress();
-        const result = await route.text.generateObject({
-          prompt,
-          schemaName,
-          schema: schemaFor(schemaName),
-          signal: ctx.signal,
-          onUsage: (usage: ModelUsage) => {
-            usageAcc = mergeUsageLocal(usageAcc, usage);
-          },
-        });
-        return result as T;
+        const credits = routeCreditsPerCall(route);
+        let reserved = false;
+        try {
+          if (deps.reserveModelCredits && credits > 0) {
+            await deps.reserveModelCredits(runId, credits);
+            reserved = true;
+          }
+          const result = await route.text.generateObject({
+            prompt,
+            schemaName,
+            schema: schemaFor(schemaName),
+            signal: ctx.signal,
+            onUsage: (usage: ModelUsage) => {
+              usageAcc = mergeUsageLocal(usageAcc, usage);
+            },
+          });
+          usedRoute = route;
+          if (reserved) {
+            await deps.captureModelCredits?.(runId, node.id, credits, route.model);
+            reserved = false;
+          }
+          return result as T;
+        } catch (error) {
+          if (reserved && deps.releaseModelCredits) {
+            await deps.releaseModelCredits(runId, credits).catch((releaseError) =>
+              logger.error("release text model credits failed", { runId, nodeRunId: node.id, error: String(releaseError) }),
+            );
+          }
+          throw error;
+        }
       },
       onAttempt: async (record) => {
         await deps.providerRepo.recordAttempt({
@@ -685,11 +739,12 @@ async function runStructured<T>(
         });
       },
     });
+    const actualTextRoute = usedRoute as TextRoute | null;
     await deps.providerRepo.recordUsage({
       runId,
       nodeRunId: node.id,
-      routeId: deps.textRoutes[0]?.config.id ?? "unknown",
-      model: deps.textRoutes[0]?.model,
+      routeId: actualTextRoute?.config.id ?? deps.textRoutes[0]?.config.id ?? "unknown",
+      model: actualTextRoute?.model ?? deps.textRoutes[0]?.model,
       promptTokens: usageAcc.promptTokens,
       completionTokens: usageAcc.completionTokens,
       totalTokens: usageAcc.totalTokens,

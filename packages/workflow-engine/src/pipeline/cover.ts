@@ -16,6 +16,7 @@ import { logger } from "../logger";
 import type { JobRunner } from "../job-runner";
 import type { ImageRoute, TextRoute } from "./knowledge-cards";
 import { releaseReservedCredits } from "./credit-reservation";
+import { maxRouteCredits, routeCreditsPerCall, selectWorkflowRoutes } from "../route-selection";
 
 /**
  * 封面工序（增强能力）：
@@ -41,6 +42,9 @@ export interface CoverDeps {
   reserveImageCredits?: (runId: string, amount: number) => Promise<void>;
   /** 手动封面作业结束后释放未成功产出的额度 */
   releaseImageCredits?: (runId: string) => Promise<void>;
+  reserveModelCredits?: (runId: string, amount: number) => Promise<void>;
+  captureModelCredits?: (runId: string, nodeRunId: string, amount: number, model?: string) => Promise<void>;
+  releaseModelCredits?: (runId: string, amount: number) => Promise<void>;
 }
 
 interface CoverStageCtx {
@@ -90,21 +94,43 @@ async function generateCoverPlan(
   coreMessage: string | undefined,
 ): Promise<CoverPlan> {
   let usageAcc: ModelUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, images: 0 };
+  let usedRoute: TextRoute | null = null;
   const value = await withModelFallbacks({
     routes: deps.textRoutes.map((route) => ({ config: route.config, model: route.model })),
     signal: ctx.signal,
     run: async (fallbackRoute) => {
       const route = deps.textRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
       ctx.onProgress();
-      return route.text.generateObject({
-        prompt: buildCoverPlanPrompt(input, storyboard, coreMessage),
-        schemaName: "CoverPlan",
-        schema: CoverPlanSchema,
-        signal: ctx.signal,
-        onUsage: (usage) => {
-          usageAcc = usage;
-        },
-      });
+      const credits = routeCreditsPerCall(route);
+      let reserved = false;
+      try {
+        if (deps.reserveModelCredits && credits > 0) {
+          await deps.reserveModelCredits(runId, credits);
+          reserved = true;
+        }
+        const result = await route.text.generateObject({
+          prompt: buildCoverPlanPrompt(input, storyboard, coreMessage),
+          schemaName: "CoverPlan",
+          schema: CoverPlanSchema,
+          signal: ctx.signal,
+          onUsage: (usage) => {
+            usageAcc = usage;
+          },
+        });
+        usedRoute = route;
+        if (reserved) {
+          await deps.captureModelCredits?.(runId, nodeRunId, credits, route.model);
+          reserved = false;
+        }
+        return result;
+      } catch (error) {
+        if (reserved && deps.releaseModelCredits) {
+          await deps.releaseModelCredits(runId, credits).catch((releaseError) =>
+            logger.error("release cover plan credits failed", { runId, nodeRunId, error: String(releaseError) }),
+          );
+        }
+        throw error;
+      }
     },
     onAttempt: async (record) => {
       await deps.providerRepo.recordAttempt({
@@ -123,11 +149,12 @@ async function generateCoverPlan(
       });
     },
   });
+  const actualTextRoute = usedRoute as TextRoute | null;
   await deps.providerRepo.recordUsage({
     runId,
     nodeRunId,
-    routeId: deps.textRoutes[0]?.config.id ?? "unknown",
-    model: deps.textRoutes[0]?.model,
+    routeId: actualTextRoute?.config.id ?? deps.textRoutes[0]?.config.id ?? "unknown",
+    model: actualTextRoute?.model ?? deps.textRoutes[0]?.model,
     promptTokens: usageAcc.promptTokens,
     completionTokens: usageAcc.completionTokens,
     totalTokens: usageAcc.totalTokens,
@@ -208,7 +235,11 @@ export async function generateCoverCandidates(
   );
   if (failedCoverNode?.outputRef) {
     try {
-      const output = JSON.parse(failedCoverNode.outputRef) as { produced?: number; failedVariants?: number[] };
+      const output = JSON.parse(failedCoverNode.outputRef) as {
+        produced?: number;
+        credits?: number;
+        failedVariants?: number[];
+      };
       const coverAssets = (await deps.assetRepo.listByRun(runId)).filter(
         (asset) => asset.kind === "cover" && asset.nodeRunId === failedCoverNode.id,
       );
@@ -217,6 +248,7 @@ export async function generateCoverCandidates(
         await deps.runRepo.succeedNode(failedCoverNode.id, {
           outputRef: failedCoverNode.outputRef,
           images: produced,
+          credits: output.credits ?? produced,
         });
         return {
           skipped: false,
@@ -241,23 +273,27 @@ export async function generateCoverCandidates(
 
     const failedVariants: number[] = [];
     let produced = 0;
+    let producedCredits = 0;
 
     await Promise.all(plan.candidates.map(async (candidate, i) => {
       const variant = i + 1;
       try {
         const imagePrompt = buildCoverImagePrompt(input, candidate);
+        let usedRoute: ImageRoute | null = null;
         const result = await withModelFallbacks({
           routes: deps.imageRoutes.map((route) => ({ config: route.config, model: route.model })),
           signal: ctx.signal,
           run: async (fallbackRoute) => {
             const route = deps.imageRoutes.find((r) => r.config.id === fallbackRoute.config.id)!;
             ctx.onProgress();
-            return route.image.generate({
+            const images = await route.image.generate({
               prompt: imagePrompt,
               aspectRatio: input.aspectRatio,
               n: 1,
               signal: ctx.signal,
             });
+            usedRoute = route;
+            return images;
           },
           onAttempt: async (record) => {
             await deps.providerRepo.recordAttempt({
@@ -299,9 +335,11 @@ export async function generateCoverCandidates(
             variant,
             hookTitle: candidate.hookTitle,
             styleNote: candidate.styleNote,
+            creditsPerCall: routeCreditsPerCall(usedRoute ?? deps.imageRoutes[0] ?? {}),
           }),
         });
         produced += 1;
+        producedCredits += routeCreditsPerCall(usedRoute ?? deps.imageRoutes[0] ?? {});
       } catch (error) {
         if (ctx.signal.aborted) throw error;
         const aiError = toAiError(error);
@@ -316,8 +354,9 @@ export async function generateCoverCandidates(
     }));
 
     await deps.runRepo.succeedNode(node.id, {
-      outputRef: JSON.stringify({ produced, failedVariants, variants: plan.candidates.length }),
+      outputRef: JSON.stringify({ produced, credits: producedCredits, failedVariants, variants: plan.candidates.length }),
       images: produced,
+      credits: producedCredits,
     });
     logger.info("cover candidates generated", { runId, produced, failedVariants });
     return { skipped: false, produced, failedVariants };
@@ -357,14 +396,16 @@ export function registerCoverPipeline(runner: JobRunner, deps: CoverDeps): void 
     const run = await deps.runRepo.require(ctx.runId);
     const input = JSON.parse(run.inputJson) as CreateRunInput;
     const storyboard = await loadStoryboard(deps, ctx.runId);
+    const selected = selectWorkflowRoutes(input, deps.textRoutes, deps.imageRoutes);
+    const runDeps = { ...deps, ...selected };
     let reserved = false;
     try {
-      if (deps.reserveImageCredits) {
+      if (runDeps.reserveImageCredits) {
         // CoverPlanSchema 固定恰好 3 个候选；失败候选会在 finally 中释放。
-        await deps.reserveImageCredits(ctx.runId, 3);
+        await runDeps.reserveImageCredits(ctx.runId, 3 * maxRouteCredits(runDeps.imageRoutes));
         reserved = true;
       }
-      await generateCoverCandidates(deps, {
+      await generateCoverCandidates(runDeps, {
         runId: ctx.runId,
         input,
         storyboard,
@@ -372,7 +413,7 @@ export function registerCoverPipeline(runner: JobRunner, deps: CoverDeps): void 
       });
     } finally {
       if (reserved) {
-        await releaseReservedCredits(deps, ctx.runId, (releaseError) =>
+        await releaseReservedCredits(runDeps, ctx.runId, (releaseError) =>
           logger.error("release cover credits failed", { runId: ctx.runId, error: String(releaseError) }),
         );
       }

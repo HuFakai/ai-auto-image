@@ -44,6 +44,7 @@ export interface ChannelModelCapabilitiesView {
 /** 渠道模型目录项（客户端安全） */
 export interface ChannelModelView {
   id: string;
+  channelId: string;
   type: "text" | "image";
   providerModelId: string;
   displayName: string;
@@ -81,6 +82,11 @@ export interface ChannelView {
   lastTestOk: boolean | null;
   lastTestAt: number | null;
   lastTestDetail: string | null;
+}
+
+/** 创作端可见的模型项：只包含选择与计费展示所需字段，不包含渠道地址或密钥 */
+export interface SelectableModelView extends ChannelModelView {
+  channelName: string;
 }
 
 export interface RunListItem {

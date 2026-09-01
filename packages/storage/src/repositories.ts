@@ -147,10 +147,10 @@ export interface CreateRunInputRow {
 export class RunRepo {
   private readonly client: DbClient;
   /** 节点成功且产生图片时触发（计费扣点等）；关键钩子异常必须阻断当前节点 */
-  private readonly nodeSucceededHooks: Array<(event: { runId: string; nodeRunId: string; images: number }) => Promise<void>> = [];
+  private readonly nodeSucceededHooks: Array<(event: { runId: string; nodeRunId: string; images: number; credits: number }) => Promise<void>> = [];
 
   /** 注册「节点成功产出图片」回调（进程内单次注册，如计费服务） */
-  onNodeSucceeded(hook: (event: { runId: string; nodeRunId: string; images: number }) => Promise<void>): void {
+  onNodeSucceeded(hook: (event: { runId: string; nodeRunId: string; images: number; credits: number }) => Promise<void>): void {
     this.nodeSucceededHooks.push(hook);
   }
 
@@ -352,6 +352,8 @@ export class RunRepo {
       costUsd?: number;
       /** 实际使用的模型（多路由回退后与 startNode 记录的首选可能不同） */
       model?: string;
+      /** 本节点成功产出的模型额度；缺省按图片数兼容历史调用方 */
+      credits?: number;
     } = {},
   ) {
     const images = extra.images ?? 0;
@@ -374,7 +376,12 @@ export class RunRepo {
     if (images > 0 && this.nodeSucceededHooks.length > 0) {
       try {
         for (const hook of this.nodeSucceededHooks) {
-          await hook({ runId: updated[0]!.runId, nodeRunId: id, images });
+          await hook({
+            runId: updated[0]!.runId,
+            nodeRunId: id,
+            images,
+            credits: extra.credits ?? images,
+          });
         }
       } catch (error) {
         // 节点已经有可复用产物，但关键结算钩子失败时不能保留 succeeded；

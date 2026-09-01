@@ -6,6 +6,7 @@ import { getRuntime } from "@/server/runtime";
 import { listRunItems } from "@/server/run-views";
 import { requireApiUser, userActionLimit } from "@/server/auth";
 import { MIN_CREATION_CREDITS, requireCredits } from "@/server/billing";
+import { ModelSelectionError } from "@/server/channel-service";
 import type { RunListItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -34,19 +35,26 @@ export async function POST(request: Request) {
   const billingGuard = await requireCredits(user.id, MIN_CREATION_CREDITS);
   if (billingGuard) return billingGuard;
 
+  const runtime = await getRuntime();
+
   // Brand Kit：按 id 解析配置快照（创建时冻结进 run input，含水印/签名/色板/布局等新字段）
   const brandKitId = typeof body.brandKitId === "string" ? body.brandKitId : undefined;
   let brandKit: BrandKitConfig | undefined;
   if (brandKitId) {
     try {
-      const kit = await (await getRuntime()).brandKitRepo.require(brandKitId);
+      const kit = await runtime.brandKitRepo.require(brandKitId);
       brandKit = brandKitConfigFromRow(kit);
     } catch {
       return NextResponse.json({ error: "brand kit not found" }, { status: 400 });
     }
   }
 
-  const parsed = CreateRunInputSchema.safeParse({ ...body, ...(brandKit ? { brandKit } : {}) });
+  // 模型价格快照只能由服务端生成，忽略客户端伪造的 snapshot。
+  const parsed = CreateRunInputSchema.safeParse({
+    ...body,
+    modelSelectionSnapshot: undefined,
+    ...(brandKit ? { brandKit } : {}),
+  });
   if (!parsed.success) {
     return NextResponse.json(
       { error: "invalid input", issues: parsed.error.issues.slice(0, 6) },
@@ -63,16 +71,29 @@ export async function POST(request: Request) {
     );
   }
 
-  const runtime = await getRuntime();
-  const project = await runtime.projectRepo.create({ title: input.topic.slice(0, 60), userId: user.id });
+  let modelSelectionSnapshot;
+  try {
+    modelSelectionSnapshot = await runtime.channelService.resolveModelSelection(input.modelSelection, input.recipe);
+  } catch (error) {
+    if (error instanceof ModelSelectionError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 400 });
+    }
+    throw error;
+  }
+  const finalInput = CreateRunInputSchema.parse({
+    ...input,
+    modelSelectionSnapshot: Object.keys(modelSelectionSnapshot).length > 0 ? modelSelectionSnapshot : undefined,
+  });
+
+  const project = await runtime.projectRepo.create({ title: finalInput.topic.slice(0, 60), userId: user.id });
   const run = await runtime.runRepo.create({
     projectId: project.id,
-    inputJson: JSON.stringify(input),
+    inputJson: JSON.stringify(finalInput),
     userId: user.id,
   });
   // 四格漫画与科普漫画共用 comic 管线；其余内容类型走知识卡片管线
   const jobKind =
-    input.recipe === "comic_story" || input.recipe === "strip_comic"
+    finalInput.recipe === "comic_story" || finalInput.recipe === "strip_comic"
       ? "comic_story_run"
       : "knowledge_card_run";
   const { job } = await runtime.jobRepo.createOrReuse({

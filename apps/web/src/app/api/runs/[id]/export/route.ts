@@ -4,9 +4,10 @@ import { NextResponse } from "next/server";
 import { normalizeSlideIndices } from "@aai/shared-schemas";
 import type { CreateRunInput, Storyboard } from "@aai/shared-schemas";
 import { StoryboardSchema } from "@aai/shared-schemas";
-import { buildExportZip, generatePlatformCopy, templateCopy, type ExportCoverFile, type ExportPageFile } from "@aai/workflow-engine";
+import { buildExportZip, templateCopy, type ExportCoverFile, type ExportPageFile } from "@aai/workflow-engine";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser } from "@/server/auth";
+import { generateBilledPlatformCopy } from "@/server/platform-copy";
 
 export const dynamic = "force-dynamic";
 
@@ -110,10 +111,18 @@ export async function GET(_request: Request, ctx: { params: Promise<{ id: string
   if (fs.existsSync(copyPath)) {
     copy = JSON.parse(fs.readFileSync(copyPath, "utf8"));
   } else {
-    const textModel = runtime.preferredTextModel();
+    const textRoute = runtime.preferredTextRoute(input);
     try {
-      if (!textModel) throw new Error("no text model");
-      copy = await generatePlatformCopy(textModel, input, pageFiles);
+      if (!textRoute) throw new Error("no text model");
+      copy = await generateBilledPlatformCopy({
+        billing: runtime.billing,
+        userId: user.id,
+        runId: id,
+        route: textRoute,
+        input,
+        pages: pageFiles,
+        signal: _request.signal,
+      });
     } catch {
       const briefNode = (await runtime.runRepo.listNodeRuns(id)).find((n) => n.nodeName === "generate-brief");
       const coreMessage = briefNode?.outputRef

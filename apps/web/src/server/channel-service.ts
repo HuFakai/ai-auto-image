@@ -25,7 +25,12 @@ import {
 import { createMockProvider } from "@aai/provider-mock";
 import { apiKeyHint, decryptApiKey, encryptApiKey, getEncryptionKey } from "./channel-crypto";
 import type { TextRoute, ImageRoute } from "@aai/workflow-engine";
-import type { ChannelModelCapabilitiesView, ChannelModelView, ChannelView } from "@/lib/types";
+import type {
+  ChannelModelCapabilitiesView,
+  ChannelModelView,
+  ChannelView,
+  SelectableModelView,
+} from "@/lib/types";
 
 export type { ChannelView };
 
@@ -154,6 +159,7 @@ function capabilitiesView(value: string): ChannelModelCapabilitiesView {
 function toModelView(row: ChannelModel): ChannelModelView {
   return {
     id: row.id,
+    channelId: row.channelId,
     type: row.type as "text" | "image",
     providerModelId: row.providerModelId,
     displayName: row.displayName,
@@ -164,6 +170,33 @@ function toModelView(row: ChannelModel): ChannelModelView {
     capabilities: capabilitiesView(row.capabilitiesJson),
     discoveredAt: row.discoveredAt,
     lastSeenAt: row.lastSeenAt,
+  };
+}
+
+export class ModelSelectionError extends Error {
+  constructor(
+    public readonly code: "model_selection_not_allowed" | "model_not_found" | "model_capability_not_supported",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ModelSelectionError";
+  }
+}
+
+export interface ResolvedModelSelection {
+  text?: {
+    modelId: string;
+    channelId: string;
+    providerModelId: string;
+    creditsPerCall: number;
+    capabilities: ChannelModelCapabilitiesView;
+  };
+  image?: {
+    modelId: string;
+    channelId: string;
+    providerModelId: string;
+    creditsPerCall: number;
+    capabilities: ChannelModelCapabilitiesView;
   };
 }
 
@@ -226,6 +259,63 @@ export class ChannelService {
   async get(id: string): Promise<ChannelView> {
     const row = await this.repo.require(id);
     return toView(row, await this.modelRepo.listByChannel(id));
+  }
+
+  /**
+   * 创作端模型目录：只返回已启用渠道且明确打开“用户自定义选模”的模型。
+   * 模型 id 是数据库内部标识，客户端拿它提交选择；渠道密钥与地址不会出现在这里。
+   */
+  async listSelectableModels(): Promise<SelectableModelView[]> {
+    const channels = await this.list();
+    return channels.flatMap((channel) =>
+      channel.enabled && channel.userModelSelectionEnabled
+        ? channel.models
+            .filter((model) => model.enabled)
+            .map((model) => ({ ...model, channelName: channel.name }))
+        : [],
+    );
+  }
+
+  /** 校验创作端提交的模型选择，并生成写入 Run 的服务端快照。 */
+  async resolveModelSelection(
+    selection: { textModelId?: string; imageModelId?: string } | undefined,
+    recipe: string,
+  ): Promise<ResolvedModelSelection> {
+    if (!selection?.textModelId && !selection?.imageModelId) return {};
+    const channels = await this.list();
+    const requiresImageEdit = recipe === "comic_story" || recipe === "strip_comic";
+    const result: ResolvedModelSelection = {};
+
+    const resolve = (modelId: string, type: "text" | "image") => {
+      const channel = channels.find((item) => item.models.some((model) => model.id === modelId));
+      if (!channel || !channel.enabled || !channel.userModelSelectionEnabled) {
+        throw new ModelSelectionError(
+          "model_selection_not_allowed",
+          "该模型所在渠道未开启用户自定义选模，已恢复为自动选择。",
+        );
+      }
+      const model = channel.models.find((item) => item.id === modelId);
+      if (!model || !model.enabled || model.type !== type) {
+        throw new ModelSelectionError("model_not_found", "所选模型不存在、已停用或类型不匹配。" );
+      }
+      if (type === "image" && requiresImageEdit && !model.capabilities.imageEditSingle) {
+        throw new ModelSelectionError(
+          "model_capability_not_supported",
+          "当前内容类型需要图生图能力，请选择支持图生图的图片模型。",
+        );
+      }
+      return {
+        modelId: model.id,
+        channelId: model.channelId,
+        providerModelId: model.providerModelId,
+        creditsPerCall: model.creditsPerCall,
+        capabilities: model.capabilities,
+      };
+    };
+
+    if (selection.textModelId) result.text = resolve(selection.textModelId, "text");
+    if (selection.imageModelId) result.image = resolve(selection.imageModelId, "image");
+    return result;
   }
 
   async create(input: ChannelInput): Promise<ChannelView> {
@@ -415,6 +505,7 @@ export class ChannelService {
 
     for (const row of rows) {
       const apiKey = decryptApiKey(this.encryptionKey, row.apiKeyEncrypted);
+      const discoveredModels = await this.modelRepo.listByChannel(row.id);
       const concurrencyMax = row.concurrencyMax ?? 0;
       // 同一渠道的文本、视觉检查或图片能力共享一个门；0 时不创建信号量，完全放行。
       const cachedGate = this.concurrencyGates.get(row.id);
@@ -424,71 +515,107 @@ export class ChannelService {
       if (!cachedGate || cachedGate.limit !== concurrencyMax) {
         this.concurrencyGates.set(row.id, { limit: concurrencyMax, gate: concurrencyGate });
       }
-      if (row.type === "text" && row.textModel) {
-        const config: ProviderRouteConfig = compatibleRoute({
-          baseUrl: row.baseUrl,
-          id: row.id,
-          apiKeyRef: `channel:${row.id}`,
-          textModel: row.textModel,
-          maxAttempts: row.maxAttempts,
-          concurrencyMax,
-          // 推理类模型生成长 JSON（如漫画分镜）可能超过 2 分钟，文本路由放宽超时
-          timeoutMs: 300_000,
-        });
-        const bundle = createOpenAICompatProvider({
-          config,
-          apiKey,
-          client: createWireClient(config, apiKey),
-          capabilities: {
-            text: { structuredOutput: true, imageInput: false },
-            ...(shouldDisableReasoning(row.textModel ?? "")
-              ? { textRequest: { disableReasoning: true } }
-              : {}),
-          },
-        });
-        textRoutes.push({
-          config,
-          model: bundle.text!.model,
-          text: limitTextModel(bundle.text!, concurrencyGate),
-        });
-        if (!visualQuality && bundle.visualQuality) {
-          visualQuality = limitVisualQualityModel(bundle.visualQuality, concurrencyGate);
+      const modelRows = discoveredModels.filter((model) => model.type === row.type && model.enabled === 1);
+
+      if (row.type === "text") {
+        // 迁移前没有目录项时兼容旧的 channels.text_model；有目录但全部停用时保持停用语义。
+        const candidates = modelRows.length > 0
+          ? modelRows
+          : discoveredModels.length === 0 && row.textModel ? [null] : [];
+        for (const modelRow of candidates) {
+          const providerModelId = modelRow?.providerModelId ?? row.textModel;
+          if (!providerModelId) continue;
+          const routeId = modelRow?.id ?? row.id;
+          const config: ProviderRouteConfig = compatibleRoute({
+            baseUrl: row.baseUrl,
+            id: routeId,
+            apiKeyRef: `channel:${row.id}`,
+            textModel: providerModelId,
+            maxAttempts: row.maxAttempts,
+            concurrencyMax,
+            // 推理类模型生成长 JSON（如漫画分镜）可能超过 2 分钟，文本路由放宽超时
+            timeoutMs: 300_000,
+          });
+          const bundle = createOpenAICompatProvider({
+            config,
+            apiKey,
+            client: createWireClient(config, apiKey),
+            capabilities: {
+              text: { structuredOutput: true, imageInput: false },
+              ...(shouldDisableReasoning(providerModelId)
+                ? { textRequest: { disableReasoning: true } }
+                : {}),
+            },
+          });
+          textRoutes.push({
+            config,
+            model: bundle.text!.model,
+            text: limitTextModel(bundle.text!, concurrencyGate),
+            channelId: row.id,
+            channelModelId: modelRow?.id,
+            providerModelId,
+            creditsPerCall: modelRow?.creditsPerCall ?? 1,
+          });
+          if (!visualQuality && bundle.visualQuality) {
+            visualQuality = limitVisualQualityModel(bundle.visualQuality, concurrencyGate);
+          }
         }
       }
-      if (row.type === "image" && row.imageModel) {
-        const config: ProviderRouteConfig = compatibleRoute({
-          baseUrl: row.baseUrl,
-          id: row.id,
-          apiKeyRef: `channel:${row.id}`,
-          imageModel: row.imageModel,
-          maxAttempts: row.maxAttempts,
-          concurrencyMax,
-        });
-        const bundle = createOpenAICompatProvider({
-          config,
-          apiKey,
-          client: createWireClient(config, apiKey),
-          capabilities: {
-            imageRequest: {
-              aspectRatioParam: row.aspectRatioParam === "size" ? "size" : "aspect_ratio",
-              responseFormat: row.responseFormat === "url" ? "url" : "b64_json",
-              ...(row.resolution ? { extraParams: { resolution: row.resolution } } : {}),
+
+      if (row.type === "image") {
+        const candidates = modelRows.length > 0
+          ? modelRows
+          : discoveredModels.length === 0 && row.imageModel ? [null] : [];
+        for (const modelRow of candidates) {
+          const providerModelId = modelRow?.providerModelId ?? row.imageModel;
+          if (!providerModelId) continue;
+          const capabilities = modelRow
+            ? capabilitiesView(modelRow.capabilitiesJson)
+            : {
+                textToImage: true,
+                imageEditSingle: row.imageEditSupport === 1,
+                imageEditMulti: row.imageEditSupport === 1,
+                maskEdit: false,
+              };
+          const routeId = modelRow?.id ?? row.id;
+          const config: ProviderRouteConfig = compatibleRoute({
+            baseUrl: row.baseUrl,
+            id: routeId,
+            apiKeyRef: `channel:${row.id}`,
+            imageModel: providerModelId,
+            maxAttempts: row.maxAttempts,
+            concurrencyMax,
+          });
+          const bundle = createOpenAICompatProvider({
+            config,
+            apiKey,
+            client: createWireClient(config, apiKey),
+            capabilities: {
+              imageRequest: {
+                aspectRatioParam: row.aspectRatioParam === "size" ? "size" : "aspect_ratio",
+                responseFormat: row.responseFormat === "url" ? "url" : "b64_json",
+                ...(row.resolution ? { extraParams: { resolution: row.resolution } } : {}),
+              },
+              image: {
+                textToImage: capabilities.textToImage,
+                imageEditSingle: capabilities.imageEditSingle,
+                imageEditMulti: capabilities.imageEditMulti,
+                maskEdit: capabilities.maskEdit,
+                returns: ["url", "base64"],
+              },
+              text: { imageInput: false, structuredOutput: false },
             },
-            image: {
-              textToImage: true,
-              imageEditSingle: row.imageEditSupport === 1,
-              imageEditMulti: row.imageEditSupport === 1,
-              maskEdit: false,
-              returns: ["url", "base64"],
-            },
-            text: { imageInput: false, structuredOutput: false },
-          },
-        });
-        imageRoutes.push({
-          config,
-          model: bundle.image!.model,
-          image: limitImageModel(bundle.image!, concurrencyGate),
-        });
+          });
+          imageRoutes.push({
+            config,
+            model: bundle.image!.model,
+            image: limitImageModel(bundle.image!, concurrencyGate),
+            channelId: row.id,
+            channelModelId: modelRow?.id,
+            providerModelId,
+            creditsPerCall: modelRow?.creditsPerCall ?? 1,
+          });
+        }
       }
     }
 

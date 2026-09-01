@@ -15,7 +15,7 @@ function logError(msg: string, extra: Record<string, unknown>) {
 
 /**
  * 计费服务：点数（1 点 = 0.1 元）为唯一消费通货。
- * - 生成一张图片扣 1 点：先在钱包中原子预留，节点成功后结算，失败/取消释放；
+ * - 文本/图片模型按渠道模型配置的 creditsPerCall 扣点：先在钱包中原子预留，成功后结算，失败/取消释放；
  * - 充值/订阅到账立即入账并记流水；
  * - 订阅按周期发点：购买/续费立即发放一期，后续周期在读余额等场景惰性补发。
  */
@@ -95,7 +95,7 @@ export class BillingService {
   }
 
   /**
-   * 为运行追加图片额度预留。amount 是本次要新增的预留数量，
+   * 为运行追加模型额度预留。amount 是本次要新增的预留数量，
    * 钱包 UPDATE 带可用余额条件，多个并发运行不会共同透支同一批点数。
    */
   async reserveRunCredits(userId: string, runId: string, amount: number): Promise<void> {
@@ -139,6 +139,16 @@ export class BillingService {
     if (!run.userId || run.creditsReserved <= 0) return;
     await this.walletRepo.releaseReservedCredits(run.userId, run.creditsReserved);
     await this.runRepo.releaseCredits(runId, run.creditsReserved);
+  }
+
+  /** 只释放本次模型调用的预留，不影响同一运行中其它图片额度。 */
+  async releaseRunCreditsAmount(runId: string, amount: number): Promise<void> {
+    if (!Number.isInteger(amount) || amount <= 0) return;
+    const run = await this.runRepo.require(runId);
+    if (!run.userId || run.creditsReserved <= 0) return;
+    const actual = Math.min(amount, run.creditsReserved);
+    await this.walletRepo.releaseReservedCredits(run.userId, actual);
+    await this.runRepo.releaseCredits(runId, actual);
   }
 
   /** 订阅惰性续期：过期置 expired；已付费周期内补发点数 */
@@ -205,33 +215,31 @@ export class BillingService {
     };
   }
 
-  /**
-   * 结算已经预留的图片额度。仅允许全额结算；没有足额预留时抛错，
-   * 不再使用“余额不足扣到 0”的兜底语义。
-   */
-  async consumeForImages(
+  /** 结算一批已预留的模型额度；没有足额预留时抛错，不静默少扣。 */
+  private async consumeCredits(
     userId: string,
     runId: string,
-    images: number,
+    credits: number,
     refType = "workflow_node",
     refId = runId,
+    note = `模型调用 ${credits} 点`,
   ): Promise<void> {
-    if (images <= 0) return;
+    if (credits <= 0) return;
     await this.ensureWallet(userId);
-    const runState = await this.runRepo.captureReservedCredits(runId, images);
+    const runState = await this.runRepo.captureReservedCredits(runId, credits);
     if (!runState) {
       const wallet = await this.walletRepo.findByUser(userId);
       throw new InsufficientCreditsError(
         wallet ? wallet.balance - wallet.reservedCredits : 0,
-        images,
+        credits,
       );
     }
-    const walletState = await this.walletRepo.captureReservedCredits(userId, images);
+    const walletState = await this.walletRepo.captureReservedCredits(userId, credits);
     if (!walletState) {
-      await this.runRepo.restoreCapturedCredits(runId, images).catch((restoreError) => {
+      await this.runRepo.restoreCapturedCredits(runId, credits).catch((restoreError) => {
         logError("run credit capture compensation failed", {
           runId,
-          images,
+          credits,
           error: String(restoreError),
         });
       });
@@ -241,30 +249,63 @@ export class BillingService {
       const displayTitle = await this.runRepo.projectTitle(runId).catch(() => null);
       await this.ledgerRepo.append({
         userId,
-        delta: -images,
+        delta: -credits,
         balanceAfter: walletState.available,
         reason: "consume",
         runId,
         refType,
         refId,
         displayTitle,
-        note: `生图 ${images} 点`,
+        note,
       });
     } catch (error) {
       // 钱包已经成功扣减时不能回滚成“免费图片”；记录错误供对账修复。
-      logError("credit ledger append failed after capture", { runId, images, error: String(error) });
+      logError("credit ledger append failed after capture", { runId, credits, error: String(error) });
     }
   }
 
+  /** 结算已经预留的图片额度，images 仅用于流水说明；实际扣点由 credits 决定。 */
+  async consumeForImages(
+    userId: string,
+    runId: string,
+    images: number,
+    refType = "workflow_node",
+    refId = runId,
+    credits = images,
+  ): Promise<void> {
+    if (images <= 0) return;
+    await this.consumeCredits(userId, runId, credits, refType, refId, `生图 ${images} 张 · ${credits} 点`);
+  }
+
+  /** 文本模型按实际成功路由的冻结价格结算一次。 */
+  async captureModelCreditsForRun(
+    runId: string,
+    nodeRunId: string,
+    credits: number,
+    model?: string,
+  ): Promise<void> {
+    if (credits <= 0) return;
+    const run = await this.runRepo.require(runId);
+    if (!run.userId) throw new Error(`run ${runId} has no billing owner`);
+    await this.consumeCredits(
+      run.userId,
+      runId,
+      credits,
+      "workflow_text_model",
+      nodeRunId,
+      `文本模型调用 ${credits} 点${model ? ` · ${model}` : ""}`,
+    );
+  }
+
   /** 注册到 RunRepo 的「节点产出图片」钩子 */
-  nodeImageHook(): (event: { runId: string; nodeRunId: string; images: number }) => Promise<void> {
-    return async ({ runId, nodeRunId, images }) => {
+  nodeImageHook(): (event: { runId: string; nodeRunId: string; images: number; credits?: number }) => Promise<void> {
+    return async ({ runId, nodeRunId, images, credits = images }) => {
       try {
         const run = await this.runRepo.require(runId);
         if (!run.userId) return;
-        await this.consumeForImages(run.userId, runId, images, "workflow_node", nodeRunId);
+        await this.consumeForImages(run.userId, runId, images, "workflow_node", nodeRunId, credits);
       } catch (error) {
-        logError("billing image charge failed", { runId, images, error: String(error) });
+        logError("billing image charge failed", { runId, images, credits, error: String(error) });
         await this.runRepo
           .updateStatus(runId, "failed", { errorSummary: `billing image charge failed: ${String(error).slice(0, 180)}` })
           .catch((statusError) => logError("billing failure status update failed", { runId, error: String(statusError) }));

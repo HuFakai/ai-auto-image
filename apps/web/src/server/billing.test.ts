@@ -100,4 +100,25 @@ describe("billing reservation lifecycle", () => {
     const ledger = await fixture.ledgerRepo.listByUser(fixture.user.id, 10);
     expect(ledger.some((row) => row.runId === fixture.run.id && row.displayTitle === "billing")).toBe(true);
   });
+
+  it("settles a text model call at its configured per-call price and releases failed reservations exactly", async () => {
+    const fixture = await createFixture();
+    const node = await fixture.runRepo.createNodeRun(fixture.run.id, "generate-brief");
+
+    await fixture.billing.reserveRunCredits(fixture.user.id, fixture.run.id, 5);
+    await fixture.billing.captureModelCreditsForRun(fixture.run.id, node.id, 5, "text-model");
+
+    await fixture.billing.reserveRunCredits(fixture.user.id, fixture.run.id, 3);
+    await fixture.billing.releaseRunCreditsAmount(fixture.run.id, 3);
+
+    const wallet = await fixture.walletRepo.findByUser(fixture.user.id);
+    const run = await fixture.runRepo.require(fixture.run.id);
+    expect(wallet?.balance).toBe(5);
+    expect(wallet?.reservedCredits).toBe(0);
+    expect(wallet?.totalConsumed).toBe(5);
+    expect(run.creditsCharged).toBe(5);
+    expect(run.creditsReserved).toBe(0);
+    const ledger = await fixture.ledgerRepo.listByUser(fixture.user.id, 10);
+    expect(ledger.some((row) => row.refType === "workflow_text_model" && row.note?.includes("5 点"))).toBe(true);
+  });
 });

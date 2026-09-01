@@ -3,6 +3,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { NextResponse } from "next/server";
 import type { CreateRunInput } from "@aai/shared-schemas";
+import { routeCreditsPerCall, selectWorkflowRoutes } from "@aai/workflow-engine";
 import { z } from "zod";
 import { getRuntime } from "@/server/runtime";
 import { requireApiUser } from "@/server/auth";
@@ -58,15 +59,6 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   const current = await runtime.assetRepo.latestForPage(id, pageIndex);
   if (!current) return NextResponse.json({ error: "page asset missing" }, { status: 409 });
 
-  // 找支持图生图的渠道路由（运行时快照里的路由）
-  const editRoute = (await runtime.channelService.list()).some((c) => c.type === "image" && c.enabled && c.imageEditSupport);
-  if (!editRoute) {
-    return NextResponse.json(
-      { error: "没有支持图生图的启用渠道；请在设置页为渠道勾选「支持图片编辑」，或使用整页重绘" },
-      { status: 409 },
-    );
-  }
-
   // 构建 Mask：目标区域透明（=重绘），其余不透明
   const sourceBuffer = fs.readFileSync(runtime.assetStore.resolve(current.filePath));
   const meta = await sharp(sourceBuffer).metadata();
@@ -96,7 +88,13 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   // 读取 Mask 编辑路由并执行（运行时管线内的 imageRoutes 由 runner 快照持有；
   // 这里直接通过渠道服务装配一条编辑路由）
   const assembled = await runtime.channelService.assembleRoutes();
-  const route = assembled.imageRoutes.find((r) => r.image.capabilities().imageEditSingle);
+  let imageRoutes: typeof assembled.imageRoutes;
+  try {
+    imageRoutes = selectWorkflowRoutes(input, [], assembled.imageRoutes).imageRoutes;
+  } catch {
+    return NextResponse.json({ error: "作品绑定的图片模型当前不可用，请检查模型渠道后重试" }, { status: 409 });
+  }
+  const route = imageRoutes.find((r) => r.image.capabilities().imageEditSingle);
   if (!route) {
     return NextResponse.json({ error: "没有可用图生图路由" }, { status: 409 });
   }
@@ -104,7 +102,8 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
   let reserved = false;
   try {
     // 与异步管线一致：先原子预留，再调用 Provider；失败/取消会释放预留。
-    await runtime.billing.reserveRunCredits(user.id, id, 1);
+    const credits = routeCreditsPerCall(route);
+    await runtime.billing.reserveRunCredits(user.id, id, credits);
     reserved = true;
 
     // 渠道模型实例已统一绑定渠道级并发门；这里仅组合超时与客户端取消信号。
@@ -136,10 +135,12 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
       metadataJson: JSON.stringify({
         repaint: { rect: parsed.data.rect, prompt: parsed.data.prompt },
         revision: version,
+        model: route.model,
+        creditsPerCall: credits,
       }),
     });
     // 资产已经落库后结算本次真实成功图片；finally 释放未结算预留。
-    await runtime.billing.consumeForImages(user.id, id, 1, "workflow_repaint", `${id}:${pageIndex}:v${version}`);
+    await runtime.billing.consumeForImages(user.id, id, 1, "workflow_repaint", `${id}:${pageIndex}:v${version}`, credits);
     await runtime.revisionRepo.create({
       runId: id,
       pageIndex,

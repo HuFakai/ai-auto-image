@@ -31,6 +31,7 @@ export async function generatePlatformCopy(
   textModel: TextModel,
   input: CreateRunInput,
   pages: ExportPageFile[],
+  signal?: AbortSignal,
 ): Promise<PlatformCopy> {
   const outline = pages
     .map((page) => `第${page.index + 1}页（${page.role}）：${page.headline}${page.body.length ? ` — ${page.body.join("；")}` : ""}`)
@@ -47,6 +48,7 @@ export async function generatePlatformCopy(
       outline,
     ].join("\n"),
     temperature: 0.6,
+    signal,
   });
   return { ...result, source: "llm" };
 }
