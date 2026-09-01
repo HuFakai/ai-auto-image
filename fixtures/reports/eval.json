@@ -1,151 +1,138 @@
 {
-  "at": "2026-08-30T05:17:14.225Z",
+  "at": "2026-09-01T08:52:31.844Z",
   "provider": "mock",
-  "fontsAvailable": true,
   "cases": [
     {
       "topic": "三分钟看懂量子纠缠",
       "category": "中文知识主题",
-      "mode": "native",
       "recipe": "knowledge_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 628
+      "durationMs": 157
     },
     {
       "topic": "《置身事内》：为什么地方政府像公司",
       "category": "图书推荐",
-      "mode": "deterministic",
       "recipe": "knowledge_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 1145
+      "durationMs": 142
     },
     {
       "topic": "保温杯怎么选：四个关键参数",
       "category": "商品（缺价格，禁止编造）",
-      "mode": "native",
       "recipe": "knowledge_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 562
+      "durationMs": 142
     },
     {
       "topic": "什么是复利",
       "category": "概念解释",
-      "mode": "native",
       "recipe": "knowledge_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 453
+      "durationMs": 143
     },
     {
       "topic": "睡眠的三个常见误区",
       "category": "生活科普",
-      "mode": "deterministic",
       "recipe": "knowledge_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 723
+      "durationMs": 145
     },
     {
       "topic": "咖啡因是如何起作用的",
       "category": "机制科普",
-      "mode": "native",
       "recipe": "knowledge_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 503
+      "durationMs": 146
     },
     {
       "topic": "保持专注的三句话",
       "category": "金句卡",
-      "mode": "native",
       "recipe": "quote_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 398
+      "durationMs": 148
     },
     {
       "topic": "搬家必做的五件事",
       "category": "清单卡",
-      "mode": "deterministic",
       "recipe": "checklist_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 836
+      "durationMs": 142
     },
     {
       "topic": "骑自行车还是坐地铁通勤",
       "category": "对比卡",
-      "mode": "deterministic",
       "recipe": "comparison_cards",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 747
+      "durationMs": 174
     },
     {
       "topic": "这款便携咖啡机值得买吗",
       "category": "产品种草",
-      "mode": "native",
       "recipe": "product_showcase",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 454
+      "durationMs": 143
     },
     {
       "topic": "《置身事内》为什么值得读",
       "category": "图书推荐",
-      "mode": "deterministic",
       "recipe": "book_recommendations",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 751
+      "durationMs": 142
     },
     {
       "topic": "复利思维入门",
       "category": "长文拆解",
-      "mode": "native",
       "recipe": "article_digest",
       "runStatus": "succeeded",
       "briefOk": true,
       "storyboardOk": true,
       "pagesExpected": 4,
       "pagesSucceeded": 4,
-      "durationMs": 535
+      "durationMs": 144
     }
   ],
   "metrics": {
@@ -154,7 +141,7 @@
     "runCompletionRate": 1,
     "totalRuns": 12,
     "totalPages": 48,
-    "avgRunDurationMs": 645
+    "avgRunDurationMs": 147
   },
   "thresholds": {
     "structuredParseSuccessRate": 0.99,
