@@ -5,7 +5,7 @@ import { brandKitConfigFromRow } from "@/server/brand-kit-views";
 import { getRuntime } from "@/server/runtime";
 import { listRunItems } from "@/server/run-views";
 import { requireApiUser, userActionLimit } from "@/server/auth";
-import { requireCredits } from "@/server/billing";
+import { MIN_CREATION_CREDITS, requireCredits } from "@/server/billing";
 import type { RunListItem } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -29,8 +29,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
 
-  // 计费预检：生成一张图片消耗 1 点，余额不足直接拒绝（402）
-  const billingGuard = await requireCredits(user.id, 1);
+  // 创建准入预检：最低 6 点，防止低余额用户先创建出必然失败的空作品。
+  // 真实消耗仍由工作流按实际模型调用逐次预留/结算。
+  const billingGuard = await requireCredits(user.id, MIN_CREATION_CREDITS);
   if (billingGuard) return billingGuard;
 
   // Brand Kit：按 id 解析配置快照（创建时冻结进 run input，含水印/签名/色板/布局等新字段）

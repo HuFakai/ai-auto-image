@@ -10,7 +10,7 @@ import {
   openDatabase,
   type OpenDatabase,
 } from "@aai/storage";
-import { BillingService, InsufficientCreditsError } from "./billing";
+import { BillingService, InsufficientCreditsError, MIN_CREATION_CREDITS } from "./billing";
 
 const databases: OpenDatabase[] = [];
 
@@ -44,6 +44,17 @@ afterEach(async () => {
 });
 
 describe("billing reservation lifecycle", () => {
+  it("uses six credits as the creation admission floor", async () => {
+    const fixture = await createFixture();
+    await fixture.walletRepo.debit(fixture.user.id, 5);
+
+    await expect(fixture.billing.precheck(fixture.user.id, MIN_CREATION_CREDITS)).rejects.toMatchObject({
+      name: "InsufficientCreditsError",
+      balance: 5,
+      needed: MIN_CREATION_CREDITS,
+    } satisfies Partial<InsufficientCreditsError>);
+  });
+
   it("prevents concurrent runs from reserving the same credits", async () => {
     const fixture = await createFixture();
     const project = await new ProjectRepo(fixture.db.db).create({ title: "billing-2", userId: fixture.user.id });

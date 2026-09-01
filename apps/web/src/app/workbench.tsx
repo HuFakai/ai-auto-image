@@ -7,6 +7,8 @@ import type { Recipe } from "@aai/shared-schemas";
 import { RECIPE_LABELS } from "@/lib/types";
 import type { BrandKitView, RunListItem, RunsListPayload } from "@/lib/types";
 
+const MIN_CREATION_CREDITS = 6;
+
 /* ── 视图类型：运行列表条目补充内容类型（供类型筛选与卡片 meta）── */
 export interface WorkbenchRun extends RunListItem {
   recipe?: Recipe | undefined;
@@ -234,6 +236,12 @@ export function Workbench({ initial, brandKits, stats }: Props) {
     setSubmitting(true);
     setError(null);
     setInsufficient(false);
+    if (balance !== null && balance < MIN_CREATION_CREDITS) {
+      setInsufficient(true);
+      setError(`当前可用余额 ${balance} 点，开始创作至少需要 ${MIN_CREATION_CREDITS} 点。`);
+      setSubmitting(false);
+      return;
+    }
     const productInfo = {
       ...(productName.trim() ? { name: productName.trim().slice(0, 200) } : {}),
       ...(productSellingPoints.trim()
@@ -409,8 +417,8 @@ export function Workbench({ initial, brandKits, stats }: Props) {
             <p className="px-4 pt-2.5 font-mono text-xs text-seal">
               ⚠ {error}{" "}
               {insufficient && (
-                <Link href="/pricing" className="underline underline-offset-4 hover:text-ink">
-                  去充值 →
+                <Link href="/pricing" className="ml-1 inline-flex rounded border border-seal/50 px-2 py-0.5 underline-offset-4 hover:text-ink">
+                  余额不足，去充值 →
                 </Link>
               )}
             </p>

@@ -24,6 +24,8 @@ function logError(msg: string, extra: Record<string, unknown>) {
 export const CREDIT_CENTS = 10;
 /** 新用户注册赠送点数 */
 export const STARTER_CREDITS = Math.max(0, Number.parseInt(process.env.STARTER_CREDITS ?? "10", 10) || 10);
+/** 开始创作的最低可用余额；这里只是创建准入门槛，不代表最终作品价格。 */
+export const MIN_CREATION_CREDITS = 6;
 
 export class InsufficientCreditsError extends Error {
   constructor(public readonly balance: number, public readonly needed: number) {
@@ -357,9 +359,13 @@ export class BillingService {
 export type { Order };
 
 export function insufficientCreditsResponse(error: InsufficientCreditsError): Response {
+  const message =
+    error.needed === MIN_CREATION_CREDITS
+      ? `点数不足：当前可用余额 ${error.balance} 点，开始创作至少需要 ${MIN_CREATION_CREDITS} 点。请前往「充值」购买点数或订阅套餐。`
+      : `点数不足：当前可用余额 ${error.balance} 点，本次操作需要 ${error.needed} 点。请前往「充值」购买点数或订阅套餐。`;
   return Response.json(
     {
-      error: `点数不足：当前可用余额 ${error.balance} 点，本次需要 ${error.needed} 点（每张图消耗 1 点）。请前往「充值」购买点数或订阅套餐。`,
+      error: message,
       code: "insufficient_credits",
       balance: error.balance,
       needed: error.needed,
