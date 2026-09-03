@@ -66,8 +66,8 @@ export function SideNav({ isAdmin, username }: { isAdmin: boolean; username: str
   }
   return (
     <nav className="sticky top-0 flex h-screen w-16 flex-col items-center gap-1.5 border-r border-line bg-paper-deep py-3.5">
-      <Link href="/" className="seal mb-4 grid h-9 w-9 place-items-center text-base">
-        印
+      <Link href="/" aria-label="图叙 · StoryFrame" title="图叙 · StoryFrame" className="mb-4 grid h-9 w-9 place-items-center">
+        <img src="/brand/logo/logo-mark.svg" alt="图叙" className="h-9 w-9" />
       </Link>
       {ITEMS.map((item) => {
         const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);

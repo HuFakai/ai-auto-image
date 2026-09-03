@@ -148,7 +148,7 @@ function LibraryCard({ run, mounted, delay }: { run: GalleryRun; mounted: boolea
             style={{ background: RECIPE_GRADIENTS[run.recipe ?? "knowledge_cards"] }}
           >
             <span className="absolute top-[16%] left-0 right-0 text-center font-display text-[44px] font-black text-white">
-              {run.topic.slice(0, 1) || "印"}
+              {run.topic.slice(0, 1) || "图"}
               <small className="mt-1.5 block text-[13px] font-normal tracking-[0.3em] opacity-75">
                 {run.status === "running" ? "显影中" : "待显影"}
               </small>

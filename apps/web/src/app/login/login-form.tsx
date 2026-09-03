@@ -40,9 +40,9 @@ export default function LoginForm({ registerEnabled }: { registerEnabled: boolea
   return (
     <div className="rise mx-auto w-full max-w-sm rounded-[14px] border border-line bg-paper-deep p-8 shadow-[0_18px_50px_rgba(0,0,0,0.55)]">
       <div className="mb-7 flex items-center gap-3">
-        <span className="seal h-10 w-10 text-lg leading-none">印</span>
+        <img src="/brand/logo/logo-mark.svg" alt="图叙" className="h-10 w-10 shrink-0" />
         <div>
-          <h1 className="font-display text-xl font-black tracking-wide">{mode === "login" ? "登录工坊" : "注册工坊"}</h1>
+          <h1 className="font-display text-xl font-black tracking-wide">{mode === "login" ? "登录图叙" : "注册图叙"}</h1>
           <p className="kicker mt-0.5">{mode === "login" ? "SIGN IN" : "CREATE ACCOUNT"}</p>
         </div>
       </div>

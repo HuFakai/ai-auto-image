@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">图叙 Logo 图形</title>
+  <desc id="desc">朱砂红圆角图片卡片，内含简化画面符号和翻页式叙事折角</desc>
+
+  <rect x="44" y="44" width="424" height="424" rx="96" fill="#F0442E" />
+
+  <!-- 图片内容：保留最终方案的极简画面符号 -->
+  <circle cx="358" cy="145" r="42" fill="#FFFFFF" />
+  <path
+    d="M78 328 177 188c11-16 34-16 45 0l61 87 31-38c13-16 37-13 47 6l39 85H99c-22 0-34-25-21-40Z"
+    fill="#FFFFFF"
+  />
+
+  <!-- 右下角折页：让图片卡片带有“继续叙述”的动作感 -->
+  <path d="M344 336h124L344 460V336Z" fill="#FFFFFF" />
+  <path d="M344 336v124l124-124" stroke="#F0442E" stroke-width="12" stroke-linejoin="round" />
+</svg>

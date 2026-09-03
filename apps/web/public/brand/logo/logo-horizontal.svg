@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="512" viewBox="0 0 1200 512" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">图叙 StoryFrame 横向 Logo</title>
+  <desc id="desc">图叙 StoryFrame 横向品牌 Logo</desc>
+
+  <rect x="44" y="44" width="424" height="424" rx="96" fill="#F0442E" />
+  <circle cx="358" cy="145" r="42" fill="#FFFFFF" />
+  <path
+    d="M78 328 177 188c11-16 34-16 45 0l61 87 31-38c13-16 37-13 47 6l39 85H99c-22 0-34-25-21-40Z"
+    fill="#FFFFFF"
+  />
+  <path d="M344 336h124L344 460V336Z" fill="#FFFFFF" />
+  <path d="M344 336v124l124-124" stroke="#F0442E" stroke-width="12" stroke-linejoin="round" />
+
+  <text
+    x="570"
+    y="270"
+    fill="#171513"
+    font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans CJK SC', 'Microsoft YaHei', 'Arial Unicode MS', sans-serif"
+    font-size="86"
+    font-weight="800"
+    letter-spacing="12"
+  >图叙</text>
+  <text
+    x="574"
+    y="338"
+    fill="#171513"
+    font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif"
+    font-size="38"
+    font-weight="500"
+    letter-spacing="1"
+  >StoryFrame</text>
+</svg>

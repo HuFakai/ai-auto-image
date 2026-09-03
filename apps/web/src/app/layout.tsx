@@ -4,8 +4,15 @@ import { getCurrentUser } from "@/server/auth";
 import { SideNav } from "./side-nav";
 
 export const metadata: Metadata = {
-  title: "AI 图文工坊",
-  description: "根据主题与文案,自动生成一套可发布的中文图文。",
+  title: "图叙 · StoryFrame",
+  description: "把主题、文章与资料变成可发布的视觉故事。",
+  icons: {
+    icon: [
+      { url: "/brand/logo/logo-mark.svg", type: "image/svg+xml" },
+      { url: "/brand/logo/logo-mark.png", type: "image/png" },
+    ],
+    apple: "/brand/logo/logo-mark.png",
+  },
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

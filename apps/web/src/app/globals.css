@@ -34,17 +34,6 @@ body {
   background: rgba(255, 36, 66, 0.28);
 }
 
-/* ── 印章 logo:小红书红圆角方块 ─────────────────────────── */
-.seal {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-seal);
-  color: #fff;
-  font-weight: 800;
-  border-radius: 8px;
-}
-
 /* ── 状态章:mono 小圆角章 ───────────────────────────────── */
 .stamp {
   display: inline-flex;
